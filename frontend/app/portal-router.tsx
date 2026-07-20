@@ -72,14 +72,14 @@ export function PortalRouter({ apiBaseUrl }: { apiBaseUrl: string }) {
       <div className="ambient-grid" aria-hidden="true" />
       <header className="brand-bar">
         <div className="brand"><span className="brand-mark">PM</span><span>PVE Master</span></div>
-        <div className="system-state"><span className="state-dot" /> Control plane</div>
+        <div className="system-state"><span className="state-dot" /> 서비스 로그인</div>
       </header>
       <section className="login-stage" aria-labelledby="login-title">
         <div className="context-copy">
-          <p className="eyebrow">Infrastructure workspace</p>
-          <h1 id="login-title">하나의 화면에서 클러스터를 운영합니다.</h1>
+          <p className="eyebrow">VM Workspace</p>
+          <h1 id="login-title">내 가상 머신을 관리하세요.</h1>
           <p className="supporting-copy">
-            역할에 따라 관리자 콘솔 또는 고객 VM 워크스페이스로 안전하게 연결됩니다.
+            할당된 가상 머신의 상태를 확인하고 필요한 작업을 실행할 수 있습니다.
           </p>
         </div>
         <LoginPanel apiBaseUrl={apiBaseUrl} onAuthenticated={routeSession} />

@@ -79,10 +79,10 @@ function LoginView({
       </header>
       <section className="login-stage" aria-labelledby="login-title">
         <div className="context-copy">
-          <p className="eyebrow">Secure workspace</p>
-          <h1 id="login-title">내 가상 머신을 제어합니다.</h1>
+          <p className="eyebrow">VM Workspace</p>
+          <h1 id="login-title">내 가상 머신을 관리하세요.</h1>
           <p className="supporting-copy">
-            조직에 할당된 VM 상태를 확인하고 안전한 전원 작업을 요청하세요.
+            할당된 가상 머신의 상태를 확인하고 필요한 작업을 실행할 수 있습니다.
           </p>
         </div>
         <LoginPanel apiBaseUrl={apiBaseUrl} onAuthenticated={onAuthenticated} />
