@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
-from sqlalchemy import delete, text
+from sqlalchemy import delete, select, text
 
 from app.core.config import Settings
 from app.main import create_app
@@ -281,6 +281,24 @@ async def test_import_membership_assignment_and_revocation_flow() -> None:
             assert len(history.json()["items"]) == 1
             assert history.json()["items"][0]["revoked_at"] is not None
             assert history.json()["items"][0]["revoke_reason"] == "contract-ended"
+
+            disabled = await client.delete(
+                f"/api/v1/admin/clusters/{cluster.id}",
+                headers=admin_headers,
+            )
+            after_removal = await client.get(
+                "/api/v1/admin/workloads",
+                headers=operator_headers,
+            )
+            assert disabled.status_code == 204
+            assert after_removal.json()["items"] == []
+
+            async with app.state.db_session_factory() as session:
+                projected = list(
+                    await session.scalars(select(Workload).where(Workload.cluster_id == cluster.id))
+                )
+                assert projected
+                assert all(item.is_present is False for item in projected)
     finally:
         await _clear(app)
         await app.state.db_engine.dispose()

@@ -18,6 +18,7 @@ import {
   getClusterInventory,
   getClusterResourceOverview,
   getClusterRemovalCheck,
+  getNodeMetrics,
   getMe,
   getOperationsStatus,
   importClusterWorkloads,
@@ -124,6 +125,7 @@ test("admin login, operations, cluster registration and inventory flow", async (
     if (url.endsWith(`/admin/clusters/${cluster.id}/removal-check`)) return response({ cluster_id: cluster.id, can_remove: false, blocks: [{ code: "ASSIGNED_WORKLOADS", count: 1 }] });
     if (url.endsWith("/admin/clusters")) return response({ items: [cluster] });
     if (url.endsWith(`/admin/clusters/${cluster.id}/test`)) return response({ reachable: true, tls_valid: true, authenticated: true, version: "9.0", release: "1", capabilities: {} });
+    if (url.endsWith(`/admin/clusters/${cluster.id}/nodes/pve-a/metrics?range=hour`)) return response({ cluster_id: cluster.id, node: "pve-a", range: "hour", observed_at: "2026-07-14T12:00:00Z", items: [{ time: 1720000000, cpu_usage: 0.25, server_load: 1.1, memory_used_bytes: 1024, memory_total_bytes: 2048, network_receive_bps: 4096, network_transmit_bps: 2048, cpu_pressure_some: null, io_pressure_some: null, io_pressure_full: null, memory_pressure_some: null, memory_pressure_full: null }] });
     if (url.endsWith(`/admin/clusters/${cluster.id}/nodes`)) return response({ items: [{ node: "pve-a", status: "online", maxcpu: 16, mem: 1024, maxmem: 2048 }] });
     if (url.endsWith(`/admin/clusters/${cluster.id}/guests`)) return response({ items: [{ vmid: 101, node: "pve-a", type: "qemu", name: "vm-101", status: "running", maxcpu: 4, maxmem: 8_589_934_592, maxdisk: 107_374_182_400 }] });
     if (url.endsWith(`/admin/clusters/${cluster.id}/storages`)) return response({ items: [{ storage: "local-lvm", node: "pve-a", type: "lvmthin", status: "available" }] });
@@ -165,6 +167,7 @@ test("admin login, operations, cluster registration and inventory flow", async (
   const operations = await getOperationsStatus("http://api.test", session.accessToken, fetcher);
   const initialClusters = await listClusters("http://api.test", session.accessToken, fetcher);
   const resourceOverview = await getClusterResourceOverview("http://api.test", session.accessToken, fetcher);
+  const nodeMetrics = await getNodeMetrics("http://api.test", session.accessToken, cluster.id, "pve-a", "hour", undefined, fetcher);
   const created = await createCluster("http://api.test", session.accessToken, {
     name: "staging-pve",
     api_base_url: "https://pve.example.test:8006",
@@ -222,6 +225,8 @@ test("admin login, operations, cluster registration and inventory flow", async (
   assert.equal(operations.worker.alive, true);
   assert.equal(initialClusters[0].id, cluster.id);
   assert.equal(resourceOverview[0].nodes[0].load_average[0], 1.1);
+  assert.equal(nodeMetrics.items[0].network_receive_bps, 4096);
+  assert.equal(nodeMetrics.items[0].cpu_pressure_some, null);
   assert.equal(probe.authenticated, true);
   assert.equal(inventory.nodes[0].node, "pve-a");
   assert.equal(inventory.guests[0].vmid, 101);
@@ -236,7 +241,7 @@ test("admin login, operations, cluster registration and inventory flow", async (
   assert.equal(updatedProduct.is_enabled, false);
   assert.equal(updatedTemplate.name, "ubuntu-2404-v2");
   assert.ok(requests.some((request) => request.url.endsWith("/admin/audit-logs?limit=100&offset=0")));
-  assert.equal(requests.length, 36);
+  assert.equal(requests.length, 37);
 });
 
 test("super administrator resets a user password without exposing it in a response", async () => {
@@ -481,13 +486,13 @@ test("searches a limited organization directory and preserves API failures", asy
   const result = await searchOrganizations(
     "http://api.test",
     "admin-access",
-    { q: "Integration & Seoul", limit: 10, offset: 0 },
+    { q: "Integration & Seoul", status: "all", sort: "name", limit: 10, offset: 0 },
     fetcher,
   );
 
   assert.equal(result.total, 24);
   assert.equal(result.items[0].id, organization.id);
-  assert.ok(requests[0].endsWith("/admin/organizations?q=Integration+%26+Seoul&limit=10&offset=0"));
+  assert.ok(requests[0].endsWith("/admin/organizations?q=Integration+%26+Seoul&status=all&sort=name&limit=10&offset=0"));
 
   const deniedFetcher: typeof fetch = async () => response({
     error: { code: "ROLE_FORBIDDEN", message: "Role is not allowed." },

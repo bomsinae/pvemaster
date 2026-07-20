@@ -230,12 +230,43 @@ async def test_authentication_rotation_and_role_matrix() -> None:
             assert [item["id"] for item in organization_id_search.json()["items"]] == [
                 organization.json()["id"]
             ]
+            organization_name_sort = await client.get(
+                "/api/v1/admin/organizations",
+                headers=super_headers,
+                params={"status": "all", "sort": "name", "limit": 25},
+            )
+            assert organization_name_sort.status_code == 200
+            assert [item["name"] for item in organization_name_sort.json()["items"]] == [
+                "Integration organization",
+                "Integration secondary",
+            ]
+            deleted_organization = await client.delete(
+                f"/api/v1/admin/organizations/{second_organization.json()['id']}",
+                headers=super_headers,
+                params={"version": second_organization.json()["version"]},
+            )
+            assert deleted_organization.status_code == 204
+            inactive_organizations = await client.get(
+                "/api/v1/admin/organizations",
+                headers=super_headers,
+                params={"status": "inactive", "limit": 25},
+            )
+            assert inactive_organizations.status_code == 200
+            assert second_organization.json()["id"] in {
+                item["id"] for item in inactive_organizations.json()["items"]
+            }
             invalid_organization_limit = await client.get(
                 "/api/v1/admin/organizations",
                 headers=super_headers,
                 params={"limit": 51},
             )
             assert invalid_organization_limit.status_code == 422
+            invalid_organization_status = await client.get(
+                "/api/v1/admin/organizations",
+                headers=super_headers,
+                params={"status": "archived"},
+            )
+            assert invalid_organization_status.status_code == 422
             membership = await client.post(
                 f"/api/v1/admin/organizations/{organization.json()['id']}/members",
                 headers=super_headers,

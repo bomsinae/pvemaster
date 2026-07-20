@@ -23,6 +23,8 @@ from app.schemas.cluster import (
     ClusterResponse,
     ClusterUpdate,
     CredentialSummary,
+    NodeMetricRange,
+    NodeMetricSeriesResponse,
     NodeResponse,
     StorageResponse,
 )
@@ -46,6 +48,21 @@ class FakeClusterService:
             created_at=now,
             updated_at=now,
             version=1,
+        )
+
+    async def node_metrics(
+        self,
+        cluster_id: UUID,
+        *,
+        node: str,
+        metric_range: NodeMetricRange,
+    ) -> NodeMetricSeriesResponse:
+        return NodeMetricSeriesResponse(
+            cluster_id=cluster_id,
+            node=node,
+            range=metric_range,
+            observed_at=datetime.now(UTC),
+            items=[],
         )
 
 
@@ -113,6 +130,31 @@ async def test_cluster_validation_error_does_not_expose_token_secret(app: FastAP
     assert oversized_secret not in response.text
 
 
+async def test_node_metrics_route_validates_range_and_returns_sparse_series(
+    app: FastAPI,
+) -> None:
+    async def override_service() -> ClusterService:
+        return cast(ClusterService, FakeClusterService())
+
+    cluster_id = uuid4()
+    app.dependency_overrides[get_cluster_service] = override_service
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(
+                f"/api/v1/admin/clusters/{cluster_id}/nodes/pve-a/metrics?range=six_hours"
+            )
+            invalid = await client.get(
+                f"/api/v1/admin/clusters/{cluster_id}/nodes/pve-a/metrics?range=month"
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["range"] == "six_hours"
+    assert response.json()["items"] == []
+    assert invalid.status_code == 422
+
+
 def test_required_cluster_routes_are_registered(app: FastAPI) -> None:
     paths = app.openapi()["paths"]
 
@@ -123,6 +165,7 @@ def test_required_cluster_routes_are_registered(app: FastAPI) -> None:
         "/api/v1/admin/clusters/{cluster_id}/removal-check",
         "/api/v1/admin/clusters/{cluster_id}/test",
         "/api/v1/admin/clusters/{cluster_id}/nodes",
+        "/api/v1/admin/clusters/{cluster_id}/nodes/{node}/metrics",
         "/api/v1/admin/clusters/{cluster_id}/guests",
         "/api/v1/admin/clusters/{cluster_id}/storages",
         "/api/v1/admin/clusters/{cluster_id}/workloads/import",
@@ -163,9 +206,7 @@ class PartialOverviewService(ClusterService):
             nodes=[],
         )
 
-    async def _record_connection_result(
-        self, cluster_id: UUID, error_code: str | None
-    ) -> None:
+    async def _record_connection_result(self, cluster_id: UUID, error_code: str | None) -> None:
         self.connection_results.append((cluster_id, error_code))
 
 
@@ -259,6 +300,36 @@ def test_node_resource_overview_uses_live_status_metrics() -> None:
     assert node.uptime_seconds == 600
 
 
+def test_node_metric_point_normalizes_rrd_fields_and_preserves_missing_psi() -> None:
+    point = ClusterService._node_metric_point(
+        {
+            "time": "1720000000",
+            "cpu": 0.25,
+            "loadavg": "1.5",
+            "memused": 40,
+            "memtotal": 100,
+            "netin": 1024,
+            "netout": 2048,
+            "pressurecpusome": 0.75,
+            "pressureiosome": float("nan"),
+        }
+    )
+
+    assert point is not None
+    assert point.cpu_usage == 0.25
+    assert point.server_load == 1.5
+    assert point.memory_used_bytes == 40
+    assert point.network_transmit_bps == 2048
+    assert point.cpu_pressure_some == 0.75
+    assert point.io_pressure_some is None
+    assert point.io_pressure_full is None
+    assert point.memory_pressure_some is None
+
+
+def test_node_metric_point_rejects_missing_timestamp() -> None:
+    assert ClusterService._node_metric_point({"cpu": 0.25}) is None
+
+
 def test_storage_response_normalizes_cluster_resource_capacity() -> None:
     storage = StorageResponse.model_validate(
         {
@@ -346,6 +417,53 @@ async def test_cluster_removal_is_blocked_when_an_assigned_workload_exists(
     assert error.value.status_code == 409
     assert error.value.details == {"blocks": [{"code": "ASSIGNED_WORKLOADS", "count": 1}]}
     assert cluster.is_active is True
+
+
+async def test_cluster_removal_marks_projected_workloads_not_present(
+    settings: Settings,
+) -> None:
+    cluster_id = uuid4()
+    credential_id = uuid4()
+    cluster = Cluster(
+        id=cluster_id,
+        name="retired-cluster",
+        api_base_url="https://retired-pve.example.test:8006",
+        is_active=True,
+        version=1,
+    )
+    credential = ClusterCredential(
+        id=credential_id,
+        cluster_id=cluster_id,
+        token_identifier="service@pve!retired",
+        secret_ciphertext=b"ciphertext",
+        secret_nonce=b"nonce",
+        key_version="v1",
+        is_active=True,
+    )
+    cluster.credentials.append(credential)
+    session = AsyncMock(spec=AsyncSession)
+    service = ClusterRemovalSafetyService(
+        cluster=cluster,
+        blocks=[],
+        session=cast(AsyncSession, session),
+        settings=settings,
+        cipher=CredentialCipher(token_urlsafe(32)),
+        principal=Principal(
+            user_id=uuid4(),
+            email="admin@example.test",
+            role=UserRole.SUPER_ADMIN,
+            session_epoch=0,
+        ),
+    )
+
+    await service.delete(cluster_id)
+
+    assert cluster.is_active is False
+    assert credential.is_active is False
+    statement = session.execute.await_args.args[0]
+    assert "UPDATE workloads" in str(statement)
+    assert "workloads.is_present IS true" in str(statement)
+    session.commit.assert_awaited_once()
 
 
 class ClusterUpdateAttackService(ClusterService):

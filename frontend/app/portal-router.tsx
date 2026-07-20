@@ -61,6 +61,7 @@ export function PortalRouter({ apiBaseUrl }: { apiBaseUrl: string }) {
       <CustomerPortal
         apiBaseUrl={apiBaseUrl}
         initialSession={session}
+        userEmail={user.email}
         onSessionEnded={clearSession}
       />
     );

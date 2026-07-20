@@ -19,6 +19,7 @@ import {
 const vm = {
   id: "8fd1d8d7-5a27-4de4-982f-a7aef685fe00",
   name: "고객 웹 VM",
+  organization_name: "젤란다",
   power_state: "STOPPED",
   cpu_cores: 4,
   memory_bytes: 8_589_934_592,
@@ -115,11 +116,12 @@ test("mock login to customer power operation flow", async () => {
 });
 
 test("customer VM inventory searches names and IP addresses and filters power state", () => {
-  const running = { ...vm, id: "running-vm", name: "web-primary", power_state: "RUNNING" };
+  const running = { ...vm, id: "running-vm", name: "web-primary", organization_name: "젤란다", power_state: "RUNNING" };
   const stopped = {
     ...vm,
     id: "stopped-vm",
     name: "database",
+    organization_name: "신규고객",
     power_state: "STOPPED",
     assigned_ip_addresses: ["198.51.100.18"],
   };
@@ -132,6 +134,18 @@ test("customer VM inventory searches names and IP addresses and filters power st
   );
   assert.deepEqual(
     filterCustomerVms([running, stopped], { query: "198.51.100", power: "STOPPED" }).map(
+      (item) => item.id,
+    ),
+    ["stopped-vm"],
+  );
+  assert.deepEqual(
+    filterCustomerVms([running, stopped], { query: "", power: "ALL", organization: "젤란다" }).map(
+      (item) => item.id,
+    ),
+    ["running-vm"],
+  );
+  assert.deepEqual(
+    filterCustomerVms([running, stopped], { query: "신규고객", power: "ALL" }).map(
       (item) => item.id,
     ),
     ["stopped-vm"],

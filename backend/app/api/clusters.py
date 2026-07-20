@@ -2,7 +2,7 @@ from typing import Annotated, cast
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -18,6 +18,8 @@ from app.schemas.cluster import (
     ConnectionTestResponse,
     GuestListResponse,
     NodeListResponse,
+    NodeMetricRange,
+    NodeMetricSeriesResponse,
     StorageListResponse,
 )
 from app.schemas.workload import WorkloadImportResponse
@@ -46,6 +48,11 @@ async def get_cluster_service(
 
 
 ServiceDependency = Annotated[ClusterService, Depends(get_cluster_service)]
+NodePath = Annotated[
+    str,
+    Path(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$"),
+]
+MetricRangeQuery = Annotated[NodeMetricRange, Query()]
 
 
 @router.post(
@@ -114,6 +121,19 @@ async def test_cluster(cluster_id: UUID, service: ServiceDependency) -> Connecti
 @router.get("/{cluster_id}/nodes", response_model=NodeListResponse)
 async def list_nodes(cluster_id: UUID, service: ServiceDependency) -> NodeListResponse:
     return NodeListResponse(items=await service.nodes(cluster_id))
+
+
+@router.get(
+    "/{cluster_id}/nodes/{node}/metrics",
+    response_model=NodeMetricSeriesResponse,
+)
+async def get_node_metrics(
+    cluster_id: UUID,
+    service: ServiceDependency,
+    node: NodePath,
+    range: MetricRangeQuery = "hour",
+) -> NodeMetricSeriesResponse:
+    return await service.node_metrics(cluster_id, node=node, metric_range=range)
 
 
 @router.get("/{cluster_id}/guests", response_model=GuestListResponse)

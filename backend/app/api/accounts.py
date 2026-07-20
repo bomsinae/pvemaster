@@ -1,4 +1,4 @@
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
@@ -104,11 +104,17 @@ async def list_organizations(
     session: SessionDependency,
     principal: PrincipalDependency,
     q: str | None = Query(default=None, min_length=1, max_length=160),
+    status_filter: Literal["active", "inactive", "all"] = Query(
+        default="active", alias="status"
+    ),
+    sort: Literal["newest", "oldest", "name"] = Query(default="newest"),
     limit: int | None = Query(default=None, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
 ) -> OrganizationListResponse:
     items, total = await _service(request, session, principal).list_organizations(
         q=q,
+        status=status_filter,
+        sort=sort,
         limit=limit,
         offset=offset,
     )

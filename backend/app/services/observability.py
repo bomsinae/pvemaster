@@ -303,12 +303,20 @@ class ObservabilityService:
             Workload.is_template.is_(False),
         )
         total = await self._session.scalar(
-            select(func.count()).select_from(Workload).where(*base_query)
+            select(func.count())
+            .select_from(Workload)
+            .join(Cluster, Cluster.id == Workload.cluster_id)
+            .where(Cluster.is_active.is_(True), *base_query)
         )
         assigned = await self._session.scalar(
             select(func.count())
             .select_from(Workload)
-            .where(*base_query, Workload.organization_id.is_not(None))
+            .join(Cluster, Cluster.id == Workload.cluster_id)
+            .where(
+                Cluster.is_active.is_(True),
+                *base_query,
+                Workload.organization_id.is_not(None),
+            )
         )
         total_count = int(total or 0)
         assigned_count = int(assigned or 0)

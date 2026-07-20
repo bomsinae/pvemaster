@@ -15,7 +15,7 @@ Worker는 Redis의 TTL heartbeat를 갱신한다. heartbeat가 없으면 `WORKER
   제외 범위와 `RESERVED`/`ASSIGNED`/`QUARANTINED`/`DISABLED` 주소를 중복 없이
   차감하며, sparse IPv6 풀도 주소를 열거하지 않고 계산한다.
 
-조직 미할당 VM/CT는 정상적인 관리 인벤토리일 수 있으므로 운영 경보가 아니라 상태 응답의 할당 현황(`assigned`, `unassigned`, `total`)으로 제공한다.
+조직 미할당 VM/CT는 정상적인 관리 인벤토리일 수 있으므로 운영 경보가 아니라 상태 응답의 할당 현황(`assigned`, `unassigned`, `total`)으로 제공한다. 이 집계에는 활성 클러스터에서 현재 관측되는 비템플릿 VM/CT만 포함한다.
 
 상태 응답은 경보 전달 자체를 대신하지 않는다. Prometheus/Alertmanager가 `/metrics`와 상태 API를 수집하고 PagerDuty, Slack 같은 운영 채널로 라우팅하도록 구성한다.
 

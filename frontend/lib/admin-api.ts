@@ -61,6 +61,14 @@ export type OrganizationPage = {
   offset: number;
 };
 
+export type OrganizationSearchFilters = {
+  q?: string;
+  status?: "active" | "inactive" | "all";
+  sort?: "newest" | "oldest" | "name";
+  limit?: number;
+  offset?: number;
+};
+
 export type OrganizationMember = {
   id: string;
   organization_id: string;
@@ -190,6 +198,31 @@ export type ClusterResourceOverview = {
     load_average: number[];
     uptime_seconds: number | null;
   }>;
+};
+
+export type NodeMetricRange = "hour" | "six_hours" | "day" | "week";
+
+export type NodeMetricPoint = {
+  time: number;
+  cpu_usage: number | null;
+  server_load: number | null;
+  memory_used_bytes: number | null;
+  memory_total_bytes: number | null;
+  network_receive_bps: number | null;
+  network_transmit_bps: number | null;
+  cpu_pressure_some: number | null;
+  io_pressure_some: number | null;
+  io_pressure_full: number | null;
+  memory_pressure_some: number | null;
+  memory_pressure_full: number | null;
+};
+
+export type NodeMetricSeries = {
+  cluster_id: string;
+  node: string;
+  range: NodeMetricRange;
+  observed_at: string;
+  items: NodeMetricPoint[];
 };
 
 export type OperationsStatus = {
@@ -370,6 +403,22 @@ export async function getClusterResourceOverview(
   return response.items;
 }
 
+export const getNodeMetrics = (
+  base: string,
+  token: string,
+  clusterId: string,
+  node: string,
+  range: NodeMetricRange,
+  signal?: AbortSignal,
+  fetcher?: Fetcher,
+) => api<NodeMetricSeries>(
+  base,
+  `/api/v1/admin/clusters/${encodeURIComponent(clusterId)}/nodes/${encodeURIComponent(node)}/metrics?range=${range}`,
+  token,
+  { signal },
+  fetcher,
+);
+
 export const createCluster = (
   base: string,
   token: string,
@@ -442,12 +491,14 @@ export async function listOrganizations(base: string, token: string, fetcher?: F
 export async function searchOrganizations(
   base: string,
   token: string,
-  filters: { q?: string; limit?: number; offset?: number } = {},
+  filters: OrganizationSearchFilters = {},
   fetcher?: Fetcher,
 ) {
   const query = new URLSearchParams();
   const normalizedQuery = filters.q?.trim();
   if (normalizedQuery) query.set("q", normalizedQuery);
+  if (filters.status) query.set("status", filters.status);
+  if (filters.sort) query.set("sort", filters.sort);
   if (filters.limit !== undefined) query.set("limit", String(filters.limit));
   if (filters.offset !== undefined) query.set("offset", String(filters.offset));
   const suffix = query.size ? `?${query.toString()}` : "";

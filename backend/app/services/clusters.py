@@ -1,13 +1,14 @@
 import asyncio
+import math
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
 from cryptography.exceptions import InvalidTag
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Executable
@@ -35,6 +36,9 @@ from app.schemas.cluster import (
     ConnectionTestResponse,
     CredentialSummary,
     GuestResponse,
+    NodeMetricPoint,
+    NodeMetricRange,
+    NodeMetricSeriesResponse,
     NodeResourceOverview,
     NodeResponse,
     StorageResponse,
@@ -133,9 +137,7 @@ class ClusterService:
 
     async def list_clusters(self) -> list[ClusterResponse]:
         result = await self._session.scalars(
-            select(Cluster)
-            .where(Cluster.is_active.is_(True))
-            .order_by(Cluster.created_at.desc())
+            select(Cluster).where(Cluster.is_active.is_(True)).order_by(Cluster.created_at.desc())
         )
         clusters = result.unique().all()
         return [
@@ -148,9 +150,7 @@ class ClusterService:
 
     async def resource_overview(self) -> list[ClusterResourceOverview]:
         result = await self._session.scalars(
-            select(Cluster)
-            .where(Cluster.is_active.is_(True))
-            .order_by(Cluster.name)
+            select(Cluster).where(Cluster.is_active.is_(True)).order_by(Cluster.name)
         )
         clusters = result.unique().all()
         observed_at = datetime.now(UTC)
@@ -298,14 +298,36 @@ class ClusterService:
     def _number(value: object) -> float | None:
         if isinstance(value, bool):
             return None
-        if isinstance(value, int | float):
-            return max(0.0, float(value))
-        if isinstance(value, str):
+        if isinstance(value, int | float | str):
             try:
-                return max(0.0, float(value))
-            except ValueError:
+                parsed = float(value)
+            except (TypeError, ValueError):
                 return None
+            return max(0.0, parsed) if math.isfinite(parsed) else None
         return None
+
+    @classmethod
+    def _node_metric_point(cls, item: dict[str, Any]) -> NodeMetricPoint | None:
+        timestamp = cls._integer(item.get("time"), fallback=None)
+        if timestamp is None or timestamp <= 0:
+            return None
+
+        memory_used = item.get("memused", item.get("mem"))
+        memory_total = item.get("memtotal", item.get("maxmem"))
+        return NodeMetricPoint(
+            time=timestamp,
+            cpu_usage=cls._number(item.get("cpu")),
+            server_load=cls._number(item.get("loadavg")),
+            memory_used_bytes=cls._integer(memory_used, fallback=None),
+            memory_total_bytes=cls._integer(memory_total, fallback=None),
+            network_receive_bps=cls._number(item.get("netin")),
+            network_transmit_bps=cls._number(item.get("netout")),
+            cpu_pressure_some=cls._number(item.get("pressurecpusome")),
+            io_pressure_some=cls._number(item.get("pressureiosome")),
+            io_pressure_full=cls._number(item.get("pressureiofull")),
+            memory_pressure_some=cls._number(item.get("pressurememorysome")),
+            memory_pressure_full=cls._number(item.get("pressurememoryfull")),
+        )
 
     @classmethod
     def _integer(cls, value: object, *, fallback: int | None) -> int | None:
@@ -488,6 +510,18 @@ class ClusterService:
         credential = self._active_credential(cluster)
         credential.is_active = False
         credential.retired_at = now
+        await self._session.execute(
+            update(Workload)
+            .where(
+                Workload.cluster_id == cluster_id,
+                Workload.is_present.is_(True),
+            )
+            .values(
+                is_present=False,
+                observed_at=now,
+                version=Workload.version + 1,
+            )
+        )
         add_audit_event(
             self._session,
             action="CLUSTER_DISABLED",
@@ -613,6 +647,37 @@ class ClusterService:
     async def nodes(self, cluster_id: UUID) -> list[NodeResponse]:
         raw = await self._call_resource(cluster_id, "get_nodes")
         return self._validate_items(NodeResponse, raw)
+
+    async def node_metrics(
+        self,
+        cluster_id: UUID,
+        *,
+        node: str,
+        metric_range: NodeMetricRange,
+    ) -> NodeMetricSeriesResponse:
+        timeframe, duration = {
+            "hour": ("hour", timedelta(hours=1)),
+            "six_hours": ("day", timedelta(hours=6)),
+            "day": ("day", timedelta(days=1)),
+            "week": ("week", timedelta(days=7)),
+        }[metric_range]
+        connection = await self._connection_snapshot(cluster_id)
+        async with self._client(connection) as client:
+            raw = await client.get_node_rrd_data(node=node, timeframe=timeframe)
+
+        cutoff = int((datetime.now(UTC) - duration).timestamp())
+        points = [point for item in raw if (point := self._node_metric_point(item))]
+        points = sorted(
+            (point for point in points if point.time >= cutoff),
+            key=lambda point: point.time,
+        )
+        return NodeMetricSeriesResponse(
+            cluster_id=cluster_id,
+            node=node,
+            range=metric_range,
+            observed_at=datetime.now(UTC),
+            items=points,
+        )
 
     async def guests(self, cluster_id: UUID) -> list[GuestResponse]:
         raw = await self._call_resource(cluster_id, "get_guests")

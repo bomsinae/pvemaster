@@ -8,6 +8,7 @@ export type CustomerPowerAction = "start" | "shutdown" | "stop" | "reboot";
 export type CustomerVm = {
   id: string;
   name: string;
+  organization_name: string;
   power_state: string;
   cpu_cores: number | null;
   memory_bytes: number | null;

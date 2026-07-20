@@ -30,6 +30,7 @@ class CustomerJobResponse(BaseModel):
 class CustomerVmSummary(BaseModel):
     id: UUID
     name: str
+    organization_name: str
     power_state: str
     cpu_cores: int | None
     memory_bytes: int | None

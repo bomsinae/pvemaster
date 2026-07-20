@@ -128,6 +128,9 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
         organization_b = Organization(
             id=uuid4(), name="Organization B", is_active=True, created_by_id=admin.id, version=1
         )
+        organization_c = Organization(
+            id=uuid4(), name="Organization C", is_active=True, created_by_id=admin.id, version=1
+        )
         cluster = Cluster(
             id=uuid4(),
             name="customer-portal-cluster",
@@ -163,6 +166,20 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
             is_template=False,
             is_present=True,
             organization_id=organization_b.id,
+            observed_at=datetime.now(UTC),
+            version=1,
+        )
+        vm_c = Workload(
+            id=uuid4(),
+            cluster_id=cluster.id,
+            vmid=203,
+            node="private-node-c",
+            kind="QEMU",
+            name="Customer C VM",
+            power_state="STOPPED",
+            is_template=False,
+            is_present=True,
+            organization_id=organization_c.id,
             observed_at=datetime.now(UTC),
             version=1,
         )
@@ -214,9 +231,11 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
             [
                 organization_a,
                 organization_b,
+                organization_c,
                 cluster,
                 vm_a,
                 vm_b,
+                vm_c,
                 ip_pool,
                 ip_address,
                 ip_allocation,
@@ -229,6 +248,11 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
                 OrganizationMember(
                     organization_id=organization_b.id,
                     user_id=customer_b.id,
+                    added_by_id=admin.id,
+                ),
+                OrganizationMember(
+                    organization_id=organization_c.id,
+                    user_id=customer_a.id,
                     added_by_id=admin.id,
                 ),
             ]
@@ -248,8 +272,16 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
 
             listing = await client.get("/api/v1/customer/vms", headers=headers_a)
             assert listing.status_code == 200
-            assert [item["id"] for item in listing.json()["items"]] == [str(vm_a.id)]
+            assert [item["id"] for item in listing.json()["items"]] == [
+                str(vm_a.id),
+                str(vm_c.id),
+            ]
+            assert [item["organization_name"] for item in listing.json()["items"]] == [
+                "Organization A",
+                "Organization C",
+            ]
             assert listing.json()["items"][0]["assigned_ip_addresses"] == ["192.0.2.24"]
+            assert "organization_id" not in listing.text
             assert "cluster_id" not in listing.text
             assert "node" not in listing.text
             assert "token" not in listing.text.lower()
@@ -259,6 +291,7 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
             missing = await client.get(f"/api/v1/customer/vms/{uuid4()}", headers=headers_a)
             assert own.status_code == 200
             assert own.json()["cpu_cores"] == 4
+            assert own.json()["organization_name"] == "Organization A"
             assert own.json()["memory_bytes"] == 8_589_934_592
             assert own.json()["disk_bytes"] == 107_374_182_400
             assert own.json()["assigned_ip_addresses"] == ["192.0.2.24"]

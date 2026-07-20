@@ -118,6 +118,19 @@ class ProxmoxClient:
         )
         return cast(dict[str, Any], data)
 
+    async def get_node_rrd_data(
+        self,
+        *,
+        node: str,
+        timeframe: str,
+    ) -> list[dict[str, Any]]:
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/rrddata",
+            params={"timeframe": timeframe, "cf": "AVERAGE"},
+            expected_type=list,
+        )
+        return self._require_object_list(data)
+
     async def get_guests(self) -> list[dict[str, Any]]:
         data = await self._request_data(
             "/api2/json/cluster/resources",

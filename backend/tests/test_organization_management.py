@@ -48,6 +48,38 @@ def test_organization_update_and_delete_routes_are_registered(app: FastAPI) -> N
     assert {"patch", "delete"}.issubset(methods)
 
 
+def test_organization_directory_filters_are_registered(app: FastAPI) -> None:
+    parameters = app.openapi()["paths"]["/api/v1/admin/organizations"]["get"]["parameters"]
+    parameter_names = {parameter["name"] for parameter in parameters}
+    assert {"q", "status", "sort", "limit", "offset"}.issubset(parameter_names)
+
+
+@pytest.mark.asyncio
+async def test_organization_directory_filters_inactive_and_sorts_oldest() -> None:
+    service, session = _service(UserRole.OPERATOR)
+    organization = _organization()
+    organization.is_active = False
+    session.scalar = AsyncMock(return_value=1)
+    result = Mock()
+    result.all.return_value = [organization]
+    session.scalars = AsyncMock(return_value=result)
+
+    items, total = await service.list_organizations(
+        status="inactive",
+        sort="oldest",
+        limit=25,
+        offset=25,
+    )
+
+    assert total == 1
+    assert [item.id for item in items] == [organization.id]
+    statement = session.scalars.await_args.args[0]
+    sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "organizations.is_active IS false" in sql
+    assert "ORDER BY organizations.created_at ASC" in sql
+    assert "LIMIT 25 OFFSET 25" in sql
+
+
 @pytest.mark.asyncio
 async def test_super_admin_updates_organization_with_version_check() -> None:
     service, session = _service()

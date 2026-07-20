@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import String, cast, func, or_, select, update
@@ -211,11 +212,17 @@ class AccountService:
         self,
         *,
         q: str | None = None,
+        status: Literal["active", "inactive", "all"] = "active",
+        sort: Literal["newest", "oldest", "name"] = "newest",
         limit: int | None = None,
         offset: int = 0,
     ) -> tuple[list[OrganizationResponse], int]:
         require_service_role(self._principal, UserRole.SUPER_ADMIN, UserRole.OPERATOR)
-        conditions: list[ColumnElement[bool]] = [Organization.is_active.is_(True)]
+        conditions: list[ColumnElement[bool]] = []
+        if status == "active":
+            conditions.append(Organization.is_active.is_(True))
+        elif status == "inactive":
+            conditions.append(Organization.is_active.is_(False))
         normalized_query = q.strip() if q else ""
         if normalized_query:
             escaped_query = (
@@ -233,10 +240,12 @@ class AccountService:
             select(func.count()).select_from(Organization).where(*conditions)
         )
         statement = select(Organization).where(*conditions)
-        if normalized_query:
+        if sort == "name":
             statement = statement.order_by(Organization.name.asc(), Organization.id.asc())
+        elif sort == "oldest":
+            statement = statement.order_by(Organization.created_at.asc(), Organization.id.asc())
         else:
-            statement = statement.order_by(Organization.created_at.desc())
+            statement = statement.order_by(Organization.created_at.desc(), Organization.id.asc())
         if offset:
             statement = statement.offset(offset)
         if limit is not None:

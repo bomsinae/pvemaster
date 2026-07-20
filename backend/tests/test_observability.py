@@ -28,8 +28,10 @@ class CapturingSession:
 class ScalarSequenceSession:
     def __init__(self, values: list[int]) -> None:
         self.values = values
+        self.statements: list[object] = []
 
-    async def scalar(self, _statement: object) -> int:
+    async def scalar(self, statement: object) -> int:
+        self.statements.append(statement)
         return self.values.pop(0)
 
 
@@ -168,8 +170,9 @@ async def test_operational_status_only_queries_active_clusters(settings: Setting
 async def test_unassigned_workloads_are_inventory_not_operational_alerts(
     settings: Settings,
 ) -> None:
+    inventory_session = ScalarSequenceSession([5, 2])
     inventory_service = InventoryAlertService(
-        session=cast(AsyncSession, ScalarSequenceSession([5, 2])),
+        session=cast(AsyncSession, inventory_session),
         redis=cast(Redis, object()),
         settings=settings,
     )
@@ -189,6 +192,11 @@ async def test_unassigned_workloads_are_inventory_not_operational_alerts(
     assert inventory.total == 5
     assert inventory.assigned == 2
     assert inventory.unassigned == 3
+    assert len(inventory_session.statements) == 2
+    assert all(
+        "JOIN clusters" in str(statement) and "clusters.is_active IS true" in str(statement)
+        for statement in inventory_session.statements
+    )
     assert not any(alert.code == "ORPHANED_VM_FOUND" for alert in alerts)
 
 

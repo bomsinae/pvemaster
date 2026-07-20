@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -145,6 +145,32 @@ class ClusterResourceOverview(BaseModel):
 
 class ClusterResourceOverviewListResponse(BaseModel):
     items: list[ClusterResourceOverview]
+
+
+NodeMetricRange = Literal["hour", "six_hours", "day", "week"]
+
+
+class NodeMetricPoint(BaseModel):
+    time: int = Field(gt=0)
+    cpu_usage: float | None = Field(default=None, ge=0)
+    server_load: float | None = Field(default=None, ge=0)
+    memory_used_bytes: int | None = Field(default=None, ge=0)
+    memory_total_bytes: int | None = Field(default=None, ge=0)
+    network_receive_bps: float | None = Field(default=None, ge=0)
+    network_transmit_bps: float | None = Field(default=None, ge=0)
+    cpu_pressure_some: float | None = Field(default=None, ge=0)
+    io_pressure_some: float | None = Field(default=None, ge=0)
+    io_pressure_full: float | None = Field(default=None, ge=0)
+    memory_pressure_some: float | None = Field(default=None, ge=0)
+    memory_pressure_full: float | None = Field(default=None, ge=0)
+
+
+class NodeMetricSeriesResponse(BaseModel):
+    cluster_id: UUID
+    node: str
+    range: NodeMetricRange
+    observed_at: datetime
+    items: list[NodeMetricPoint]
 
 
 class GuestResponse(BaseModel):

@@ -98,16 +98,19 @@ function LoginView({
 export function CustomerPortal({
   apiBaseUrl,
   initialSession = null,
+  userEmail = null,
   onSessionEnded,
 }: {
   apiBaseUrl: string;
   initialSession?: AuthSession | null;
+  userEmail?: string | null;
   onSessionEnded?: () => void;
 }) {
   const [session, setSession] = useState<AuthSession | null>(initialSession);
   const [vms, setVms] = useState<CustomerVm[]>([]);
   const [query, setQuery] = useState("");
   const [powerFilter, setPowerFilter] = useState<CustomerPowerFilter>("ALL");
+  const [organizationFilter, setOrganizationFilter] = useState("ALL");
   const [pendingAction, setPendingAction] = useState<CustomerPowerAction | null>(null);
   const [pendingVm, setPendingVm] = useState<CustomerVm | null>(null);
   const [forcedAcknowledged, setForcedAcknowledged] = useState(false);
@@ -195,6 +198,7 @@ export function CustomerPortal({
     } finally {
       setSession(null);
       setVms([]);
+      setOrganizationFilter("ALL");
       setPendingVm(null);
       setConsoleVm(null);
       setPasswordDialogOpen(false);
@@ -213,13 +217,19 @@ export function CustomerPortal({
     return <LoginView apiBaseUrl={apiBaseUrl} onAuthenticated={beginSession} />;
   }
 
-  const visibleVms = filterCustomerVms(vms, { query, power: powerFilter });
+  const organizationCounts = new Map<string, number>();
+  for (const vm of vms) {
+    organizationCounts.set(vm.organization_name, (organizationCounts.get(vm.organization_name) ?? 0) + 1);
+  }
+  const organizations = [...organizationCounts.keys()].sort((left, right) => left.localeCompare(right, "ko"));
+  const effectiveOrganizationFilter = organizationCounts.has(organizationFilter) ? organizationFilter : "ALL";
+  const visibleVms = filterCustomerVms(vms, { query, power: powerFilter, organization: effectiveOrganizationFilter });
 
   return (
     <main className="portal-shell">
       <header className="portal-header">
         <div className="brand"><span className="brand-mark" aria-hidden="true">PM</span><span>PVE Master</span></div>
-        <div className="portal-session"><span className="state-dot" aria-hidden="true" /> 고객 워크스페이스 <button onClick={() => setPasswordDialogOpen(true)}>비밀번호 변경</button><button onClick={endSession}>로그아웃</button></div>
+        <div className="portal-session"><span className="state-dot" aria-hidden="true" /><span className="portal-workspace-label">고객 워크스페이스</span>{userEmail && <span className="portal-account" title={userEmail}><small>로그인 계정</small><strong>{userEmail}</strong></span>}<button onClick={() => setPasswordDialogOpen(true)}>비밀번호 변경</button><button onClick={endSession}>로그아웃</button></div>
       </header>
 
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="오류 닫기">×</button></div>}
@@ -230,17 +240,22 @@ export function CustomerPortal({
             <div>
               <p className="eyebrow">Assigned resources</p>
               <h1 id="customer-inventory-title">가상 머신</h1>
-              <p>할당된 VM의 상태, IP 주소와 사양을 한 화면에서 확인합니다.</p>
+              <p>조직별로 할당된 VM의 상태, IP 주소와 사양을 한 화면에서 확인합니다.</p>
             </div>
             <span><strong>{vms.length}</strong> resources</span>
           </div>
+
+          {organizations.length > 0 && <nav className="customer-organization-filter" aria-label="조직별 가상 머신 필터">
+            <button className={effectiveOrganizationFilter === "ALL" ? "active" : ""} aria-pressed={effectiveOrganizationFilter === "ALL"} onClick={() => setOrganizationFilter("ALL")}><span>전체 조직</span><strong>{vms.length}</strong></button>
+            {organizations.map((organization) => <button key={organization} className={effectiveOrganizationFilter === organization ? "active" : ""} aria-pressed={effectiveOrganizationFilter === organization} onClick={() => setOrganizationFilter(organization)}><span>{organization}</span><strong>{organizationCounts.get(organization)}</strong></button>)}
+          </nav>}
 
           <div className="customer-inventory-tools">
             <input
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="이름 또는 IP 주소 검색"
+              placeholder="이름, 조직 또는 IP 주소 검색"
               aria-label="가상 머신 검색"
             />
             <select
@@ -258,7 +273,7 @@ export function CustomerPortal({
           <div className="customer-table-scroll" aria-label="가상 머신 목록">
             <div className="customer-vm-table">
               <div className="customer-vm-table-head" aria-hidden="true">
-                <span>가상 머신</span><span>상태</span><span>IP 주소</span><span>vCPU</span><span>메모리</span><span>디스크</span><span>마지막 확인</span><span>전원 제어</span>
+                <span>가상 머신</span><span>조직</span><span>상태</span><span>IP 주소</span><span>vCPU</span><span>메모리</span><span>디스크</span><span>마지막 확인</span><span>전원 제어</span>
               </div>
               {visibleVms.map((vm) => {
                 const running = vm.power_state.toUpperCase() === "RUNNING";
@@ -270,6 +285,7 @@ export function CustomerPortal({
                     className="customer-vm-row"
                   >
                     <span className="customer-vm-identity" data-label="가상 머신"><strong>{vm.name}</strong><small>{vm.id.slice(0, 8)}</small></span>
+                    <strong className="customer-organization-badge" data-label="조직"><span aria-hidden="true" />{vm.organization_name}</strong>
                     <span className="customer-vm-status" data-label="상태"><span className={`status-pip ${vm.power_state.toLowerCase()}`} aria-hidden="true" />{running ? "실행 중" : "중지됨"}</span>
                     <span className={vm.assigned_ip_addresses.length ? "customer-vm-ip" : "customer-vm-muted"} data-label="IP 주소">{vm.assigned_ip_addresses.length ? vm.assigned_ip_addresses.join(", ") : "미할당"}</span>
                     <strong data-label="vCPU">{vm.cpu_cores ?? "—"}</strong>

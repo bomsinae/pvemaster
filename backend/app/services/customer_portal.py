@@ -1,6 +1,6 @@
 import hmac
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from hashlib import sha256
 from uuid import UUID, uuid4
 
@@ -52,17 +52,27 @@ class CustomerPortalService:
         )
         owned = workloads.all()
         assigned_ips = await self._assigned_ip_addresses([item.id for item in owned])
+        organization_names = await self._organization_names(owned)
         return [
-            self._vm_summary(item, assigned_ip_addresses=assigned_ips.get(item.id, []))
+            self._vm_summary(
+                item,
+                organization_name=organization_names[item.organization_id],
+                assigned_ip_addresses=assigned_ips.get(item.id, []),
+            )
             for item in owned
+            if item.organization_id in organization_names
         ]
 
     async def get_vm(self, vm_id: UUID) -> CustomerVmDetailResponse:
         workload = await self._owned_vm(vm_id)
         jobs = await self._recent_jobs(workload.id)
         assigned_ips = await self._assigned_ip_addresses([workload.id])
+        organization_names = await self._organization_names([workload])
+        if workload.organization_id not in organization_names:
+            raise self._not_found()
         summary = self._vm_summary(
             workload,
+            organization_name=organization_names[workload.organization_id],
             assigned_ip_addresses=assigned_ips.get(workload.id, []),
         )
         return CustomerVmDetailResponse(**summary.model_dump(), recent_jobs=jobs)
@@ -280,15 +290,31 @@ class CustomerPortalService:
                 result.setdefault(workload_id, []).append(str(address))
         return result
 
+    async def _organization_names(self, workloads: Sequence[Workload]) -> dict[UUID, str]:
+        organization_ids = {
+            item.organization_id for item in workloads if item.organization_id is not None
+        }
+        if not organization_ids:
+            return {}
+        rows = await self._session.execute(
+            select(Organization.id, Organization.name).where(
+                Organization.id.in_(organization_ids),
+                Organization.is_active.is_(True),
+            )
+        )
+        return {organization_id: name for organization_id, name in rows.all()}
+
     @staticmethod
     def _vm_summary(
         workload: Workload,
         *,
+        organization_name: str,
         assigned_ip_addresses: list[str],
     ) -> CustomerVmSummary:
         return CustomerVmSummary(
             id=workload.id,
             name=workload.name or "Unnamed VM",
+            organization_name=organization_name,
             power_state=workload.power_state,
             cpu_cores=workload.cpu_cores,
             memory_bytes=workload.memory_bytes,

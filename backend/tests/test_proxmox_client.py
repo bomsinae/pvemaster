@@ -198,6 +198,24 @@ async def test_node_status_uses_encoded_node_path() -> None:
     assert status["cpu"] == 0.25
 
 
+async def test_node_rrd_data_uses_encoded_path_and_average_query() -> None:
+    captured_path = ""
+    captured_query: dict[str, list[str]] = {}
+
+    def success(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_path, captured_query
+        captured_path = request.url.raw_path.decode().split("?", maxsplit=1)[0]
+        captured_query = parse_qs(request.url.query.decode())
+        return httpx.Response(200, json={"data": [{"time": 1720000000, "cpu": 0.25}]})
+
+    async with make_client(success) as client:
+        data = await client.get_node_rrd_data(node="pve node", timeframe="day")
+
+    assert captured_path == "/api2/json/nodes/pve%20node/rrddata"
+    assert captured_query == {"timeframe": ["day"], "cf": ["AVERAGE"]}
+    assert data[0]["cpu"] == 0.25
+
+
 async def test_vm_power_action_and_upid_status_use_expected_endpoints() -> None:
     requests: list[tuple[str, str]] = []
     upid = "UPID:pve-a:00000001:00000002:00000003:qmstart:101:service@pve:"

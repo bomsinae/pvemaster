@@ -17,6 +17,7 @@ import {
   OperationsStatus,
   Organization,
   OrganizationPage,
+  OrganizationSearchFilters,
   OrganizationMember,
   OrganizationUserProvisionError,
   Product,
@@ -84,6 +85,7 @@ import {
 import { validateSshPublicKeys } from "@/lib/ssh-public-key";
 import { generateSshRsaKeyPair } from "@/lib/ssh-keypair";
 import { VmConsoleModal } from "./vm-console-modal";
+import { ClusterMetricsPanel } from "./cluster-metrics";
 
 type Section = "overview" | "clusters" | "vms" | "access" | "networks" | "provisioning" | "audit";
 
@@ -479,7 +481,7 @@ export function AdminDashboard({
   }, [apiBaseUrl, token]);
 
   const searchOrganizationOptions = useCallback(
-    (q: string) => searchOrganizations(apiBaseUrl, token, { q, limit: 10, offset: 0 }),
+    (filters: OrganizationSearchFilters) => searchOrganizations(apiBaseUrl, token, filters),
     [apiBaseUrl, token],
   );
 
@@ -973,7 +975,7 @@ export function AdminDashboard({
         {error && !form && <div className="admin-message error" role="alert"><span>{error}</span><button onClick={() => setError("")}>×</button></div>}
         {notice && <div className="admin-message notice"><span>{notice}</span><button onClick={() => setNotice("")}>×</button></div>}
 
-        {section === "overview" && <Overview status={status} clusters={clusters} resources={clusterResources} loading={loading} refreshing={overviewRefreshing} stale={overviewStale} lastUpdatedAt={overviewLastUpdatedAt} secondsUntilRefresh={overviewSecondsUntilRefresh} />}
+        {section === "overview" && <Overview apiBaseUrl={apiBaseUrl} token={token} status={status} clusters={clusters} resources={clusterResources} loading={loading} refreshing={overviewRefreshing} stale={overviewStale} lastUpdatedAt={overviewLastUpdatedAt} secondsUntilRefresh={overviewSecondsUntilRefresh} />}
         {section === "clusters" && (
           <ClustersView clusters={clusters} current={currentCluster} nodes={nodes} guests={guests} storages={storages}
             selectedId={selectedCluster} onSelect={setSelectedCluster} onTest={runClusterTest} onImport={runWorkloadImport} onCreate={() => setForm("cluster")} onDelete={openClusterRemoval} saving={saving} canDelete={isSuperAdmin} />
@@ -1023,7 +1025,9 @@ export function AdminDashboard({
   );
 }
 
-function Overview({ status, clusters, resources, loading, refreshing, stale, lastUpdatedAt, secondsUntilRefresh }: {
+function Overview({ apiBaseUrl, token, status, clusters, resources, loading, refreshing, stale, lastUpdatedAt, secondsUntilRefresh }: {
+  apiBaseUrl: string;
+  token: string;
   status: OperationsStatus | null;
   clusters: Cluster[];
   resources: ClusterResourceOverview[];
@@ -1047,7 +1051,7 @@ function Overview({ status, clusters, resources, loading, refreshing, stale, las
       {status?.alerts.length ? <div className="alert-list">{status.alerts.map((alert) => <div key={`${alert.code}-${alert.resource_id}`}><StatusMark ok={false} label={alert.severity} /><strong>{alert.code}</strong><p>{alert.message}</p></div>)}</div> : <div className="calm-state"><span>✓</span><div><strong>활성 경보가 없습니다.</strong><p>클러스터 연결, 작업 처리, 프로비저닝과 IP 풀 가용성이 정상 범위입니다.</p></div></div>}
     </section>
     <section className="admin-section cluster-fleet-section"><div className="admin-section-title"><div><p className="eyebrow">Resource fleet</p><h2>클러스터 자원 현황</h2></div><div className={`overview-refresh-status${stale ? " stale" : ""}`} aria-live="polite"><span className={refreshing ? "refreshing" : ""}><i />{refreshing ? "갱신 중" : stale ? "갱신 실패 · 이전 데이터" : secondsUntilRefresh === null ? "일시 중지" : `${secondsUntilRefresh}초 후 갱신`}</span><time>{lastUpdatedAt ? `최근 갱신 ${formatTime(lastUpdatedAt)}` : "첫 상태 확인 중"}</time></div></div>
-      {loading && !resources.length ? <ClusterResourceSkeleton /> : resources.length ? <div className="cluster-resource-grid">{resources.map((cluster) => <ClusterResourceCard key={cluster.cluster_id} cluster={cluster} />)}</div> : <p className="empty-state">등록된 클러스터가 없습니다.</p>}
+      {loading && !resources.length ? <ClusterResourceSkeleton /> : resources.length ? <div className="cluster-resource-grid">{resources.map((cluster) => <ClusterResourceCard key={cluster.cluster_id} cluster={cluster} apiBaseUrl={apiBaseUrl} token={token} />)}</div> : <p className="empty-state">등록된 클러스터가 없습니다.</p>}
     </section>
   </div>;
 }
@@ -1058,7 +1062,7 @@ function ClusterResourceSkeleton() {
   </div>;
 }
 
-function ClusterResourceCard({ cluster }: { cluster: ClusterResourceOverview }) {
+function ClusterResourceCard({ cluster, apiBaseUrl, token }: { cluster: ClusterResourceOverview; apiBaseUrl: string; token: string }) {
   if (!cluster.connected) {
     return <article className="cluster-resource-card failed">
       <header><div><p className="eyebrow">Cluster offline</p><h3>{cluster.name}</h3></div><StatusMark ok={false} label="조회 실패" /></header>
@@ -1095,6 +1099,7 @@ function ClusterResourceCard({ cluster }: { cluster: ClusterResourceOverview }) 
         return <div className="cluster-node-row" key={node.node}><span><StatusMark ok={(node.status ?? "").toLowerCase() === "online"} label={node.node} /></span><strong>{formatPercent(node.cpu)}</strong><strong>{formatPercent(ramRatio)}</strong><strong>{formatPercent(diskRatio)}</strong><code>{node.load_average.length ? node.load_average.map((value) => value.toFixed(2)).join(" / ") : "—"}</code><span>{formatUptime(node.uptime_seconds)}</span></div>;
       })}
     </div>
+    <ClusterMetricsPanel apiBaseUrl={apiBaseUrl} token={token} clusterId={cluster.cluster_id} nodes={cluster.nodes} />
   </article>;
 }
 
@@ -1110,7 +1115,10 @@ function ClustersView({ clusters, current, nodes, guests, storages, selectedId, 
 }) {
   return <div className="admin-content cluster-layout enter-admin">
     <aside className="resource-index"><div className="admin-section-title"><div><p className="eyebrow">Registered</p><h2>클러스터</h2></div><button className="accent-button" onClick={onCreate}>등록</button></div>
-      {clusters.map((cluster) => <button key={cluster.id} className={selectedId === cluster.id ? "resource-row active" : "resource-row"} onClick={() => onSelect(cluster.id)}><StatusMark ok={!cluster.last_connection_error_code && cluster.is_active} label="" /><span><strong>{cluster.name}</strong><small>{cluster.api_base_url}</small></span><em>›</em></button>)}
+      {clusters.map((cluster) => {
+        const selected = selectedId === cluster.id;
+        return <button key={cluster.id} className={selected ? "resource-row active" : "resource-row"} aria-pressed={selected} onClick={() => onSelect(cluster.id)}><StatusMark ok={!cluster.last_connection_error_code && cluster.is_active} label="" /><span><strong>{cluster.name}</strong><small>{cluster.api_base_url}</small></span><em>{selected && <span className="resource-selected-label">선택됨</span>}<b aria-hidden="true">›</b></em></button>;
+      })}
       {!clusters.length && <p className="empty-state">등록된 클러스터가 없습니다.</p>}
     </aside>
     <section className="resource-detail">{current ? <>
@@ -1160,7 +1168,7 @@ function VmOperationsView({ workloads, onSelect, onCreate, onEdit, onDelete, onA
             <span className="vm-status-cell" data-label="상태"><StatusMark ok={running} label={item.power_state} /></span>
             <strong data-label="vCPU">{item.cpu_cores ?? "—"}</strong><strong data-label="메모리">{formatBytes(item.memory_bytes)}</strong><strong data-label="디스크">{formatBytes(item.disk_bytes)}</strong>
             <span className="vm-cell-muted" data-label="IP 주소">{item.assigned_ip_addresses?.length ? item.assigned_ip_addresses.join(", ") : "—"}</span>
-            <span className="vm-cell-muted" data-label="조직">{item.organization_name ?? "미할당"}</span>
+            <span className="vm-ownership-cell" data-label="조직">{item.organization_id && item.organization_name ? <strong className="vm-ownership-badge assigned" aria-label={`${item.organization_name} 조직에 할당됨`} title={`${item.organization_name} 조직에 할당됨`}><i aria-hidden="true">✓</i><span>{item.organization_name}</span></strong> : <span className="vm-ownership-badge unassigned">미할당</span>}</span>
             {canManage ? <span className="vm-row-actions" data-label="사양 관리">{capabilities.canUpdateSpec && <button disabled={saving || Boolean(actionPending)} onClick={() => { onSelect(item.id); onEdit(); }}>사양</button>}{capabilities.canDelete && <button className="danger" disabled={saving || Boolean(actionPending) || running || item.organization_id !== null} onClick={() => { onSelect(item.id); onDelete(); }}>삭제</button>}</span> : <span data-label="사양 관리">—</span>}
             <span className="vm-row-actions vm-power-actions" data-label="전원 작업"><span className="vm-standard-actions"><button className="console-row-button" disabled={!running} onClick={() => onConsole(item)}>콘솔</button>{hasPowerAction("start") && <button disabled={saving || Boolean(actionPending) || running} onClick={() => onAction(item, "start")}>시작</button>}{hasPowerAction("shutdown") && <button disabled={saving || Boolean(actionPending) || !running} onClick={() => onAction(item, "shutdown")}>종료</button>}{hasPowerAction("reboot") && <button disabled={saving || Boolean(actionPending) || !running} onClick={() => onAction(item, "reboot")}>재부팅</button>}</span><span className="vm-forced-actions">{hasPowerAction("stop") && <button className="danger" disabled={saving || Boolean(actionPending) || !running} onClick={() => onAction(item, "stop")}>강제 중지</button>}{hasPowerAction("reset") && <button className="danger" disabled={saving || Boolean(actionPending) || !running} onClick={() => onAction(item, "reset")}>강제 재설정</button>}</span></span>
           </div>;
@@ -1186,7 +1194,7 @@ function OrganizationSearchSelect({
   value: Organization | null;
   initialOptions: Organization[];
   total: number;
-  onSearch: (q: string) => Promise<OrganizationPage>;
+  onSearch: (filters: OrganizationSearchFilters) => Promise<OrganizationPage>;
   onSelect: (organization: Organization) => void;
   onlyActive?: boolean;
 }) {
@@ -1207,7 +1215,7 @@ function OrganizationSearchSelect({
       setSearching(true);
       setSearchFailed(false);
       try {
-        const result = await onSearch(query);
+        const result = await onSearch({ q: query, status: onlyActive ? "active" : "all", sort: "name", limit: 10, offset: 0 });
         if (cancelled) return;
         setOptions(result.items);
         setResultTotal(result.total);
@@ -1222,7 +1230,7 @@ function OrganizationSearchSelect({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [onSearch, open, query]);
+  }, [onSearch, onlyActive, open, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -1301,7 +1309,7 @@ function AccessView({
   canWrite: boolean;
   saving: boolean;
   onSelectOrganization: (organization: Organization) => void;
-  onSearchOrganizations: (q: string) => Promise<OrganizationPage>;
+  onSearchOrganizations: (filters: OrganizationSearchFilters) => Promise<OrganizationPage>;
   onAddMember: (userId: string) => void;
   onRemoveMember: (userId: string) => void;
   onAssign: (workloadId: string, organizationId?: string) => void;
@@ -1319,7 +1327,14 @@ function AccessView({
   const [userQuery, setUserQuery] = useState("");
   const [onlyUnassignedUsers, setOnlyUnassignedUsers] = useState(false);
   const [activePane, setActivePane] = useState<"members" | "workloads">("members");
-  const [accessScope, setAccessScope] = useState<"organizations" | "users" | "available">("organizations");
+  const [accessScope, setAccessScope] = useState<"organizations" | "users" | "assignments">("organizations");
+  const [organizationView, setOrganizationView] = useState<"list" | "detail">("list");
+  const [directoryQuery, setDirectoryQuery] = useState("");
+  const [directoryStatus, setDirectoryStatus] = useState<"active" | "inactive" | "all">("active");
+  const [directorySort, setDirectorySort] = useState<"newest" | "oldest" | "name">("newest");
+  const [directoryPage, setDirectoryPage] = useState<OrganizationPage>({ items: organizations, total: organizationTotal, limit: 25, offset: 0 });
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [directoryError, setDirectoryError] = useState("");
   const [assignmentTarget, setAssignmentTarget] = useState<Organization | null>(selectedOrganization);
   const current = selectedOrganization;
   const memberIds = new Set(members.map((member) => member.user_id));
@@ -1349,26 +1364,80 @@ function AccessView({
   );
   const unassignedUserCount = users.filter((user) => organizationNames(user).length === 0).length;
 
+  useEffect(() => {
+    if (accessScope !== "organizations" || organizationView !== "list") return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setDirectoryLoading(true);
+      setDirectoryError("");
+      try {
+        const result = await onSearchOrganizations({
+          q: directoryQuery,
+          status: directoryStatus,
+          sort: directorySort,
+          limit: 25,
+          offset: directoryPage.offset,
+        });
+        if (!cancelled) setDirectoryPage(result);
+      } catch {
+        if (!cancelled) setDirectoryError("조직 목록을 불러오지 못했습니다.");
+      } finally {
+        if (!cancelled) setDirectoryLoading(false);
+      }
+    }, directoryQuery ? 220 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [accessScope, directoryPage.offset, directoryQuery, directorySort, directoryStatus, onSearchOrganizations, organizationTotal, organizationView, organizations]);
+
+  function openOrganization(organization: Organization) {
+    onSelectOrganization(organization);
+    setAssignmentTarget(organization);
+    setActivePane("members");
+    setOrganizationView("detail");
+  }
+
+  const directoryLimit = directoryPage.limit ?? 25;
+  const directoryStart = directoryPage.total ? directoryPage.offset + 1 : 0;
+  const directoryEnd = Math.min(directoryPage.offset + directoryPage.items.length, directoryPage.total);
+
   return <div className="admin-content organization-workspace enter-admin">
     <nav className="access-scope-tabs" aria-label="사용자와 조직 관리 영역">
-      <button className={accessScope === "organizations" ? "active" : ""} onClick={() => setAccessScope("organizations")}>조직 관리 <span>{organizationTotal}</span></button>
-      <button className={accessScope === "users" ? "active" : ""} onClick={() => setAccessScope("users")}>전체 사용자 <span>{users.length}</span></button>
-      <button className={accessScope === "available" ? "active" : ""} onClick={() => setAccessScope("available")}>미할당 리소스 <span>{available.length}</span></button>
+      <button className={accessScope === "organizations" ? "active" : ""} onClick={() => { setAccessScope("organizations"); setOrganizationView("list"); }}>조직 <span>{organizationTotal}</span></button>
+      <button className={accessScope === "users" ? "active" : ""} onClick={() => setAccessScope("users")}>사용자 <span>{users.length}</span></button>
+      <button className={accessScope === "assignments" ? "active" : ""} onClick={() => setAccessScope("assignments")}>리소스 할당 <span>{available.length}</span></button>
     </nav>
 
-    {accessScope === "organizations" && <section className="organization-switcher">
-      <div><p className="eyebrow">Tenancy</p><h2>조직 선택</h2><p>전체 {organizationTotal}개 조직에서 이름이나 ID로 빠르게 전환합니다.</p></div>
-      <div className="organization-switcher-actions"><OrganizationSearchSelect label="관리할 조직" value={current} initialOptions={organizations} total={organizationTotal} onSearch={onSearchOrganizations} onSelect={(organization) => { onSelectOrganization(organization); setAssignmentTarget(organization); setActivePane("members"); }} />{canWrite && <button className="accent-button" onClick={onOrganization}>새 조직</button>}</div>
+    {accessScope === "organizations" && organizationView === "list" && <section className="organization-directory-page">
+      <div className="admin-section-title organization-directory-title"><div><p className="eyebrow">Organization directory</p><h2>조직 목록</h2><p>조직을 검색하거나 상태별로 확인하고, 행을 선택해 상세 관리로 이동합니다.</p></div>{canWrite && <button className="accent-button" onClick={onOrganization}>새 조직</button>}</div>
+      <div className="organization-directory-controls">
+        <label className="organization-directory-search"><span className="sr-only">조직 검색</span><input type="search" value={directoryQuery} onChange={(event) => { setDirectoryQuery(event.target.value); setDirectoryPage((page) => ({ ...page, offset: 0 })); }} placeholder="조직 이름 또는 ID 검색" /></label>
+        <label><span className="sr-only">조직 상태</span><select value={directoryStatus} onChange={(event) => { setDirectoryStatus(event.target.value as "active" | "inactive" | "all"); setDirectoryPage((page) => ({ ...page, offset: 0 })); }}><option value="active">활성 조직</option><option value="inactive">비활성 조직</option><option value="all">전체 상태</option></select></label>
+        <label><span className="sr-only">조직 정렬</span><select value={directorySort} onChange={(event) => { setDirectorySort(event.target.value as "newest" | "oldest" | "name"); setDirectoryPage((page) => ({ ...page, offset: 0 })); }}><option value="newest">최근 생성순</option><option value="oldest">오래된 순</option><option value="name">이름순</option></select></label>
+      </div>
+      <div className={`organization-directory-table ${directoryLoading ? "loading" : ""}`} aria-busy={directoryLoading}>
+        <div className="organization-directory-head"><span>조직</span><span>상태</span><span>생성일</span><span>최근 변경</span><span aria-hidden="true"></span></div>
+        {directoryPage.items.map((organization) => <button type="button" className={organization.id === current?.id ? "selected" : ""} key={organization.id} onClick={() => openOrganization(organization)}><span><strong>{organization.name}</strong><small>{organization.id.slice(0, 8)}</small></span><StatusMark ok={organization.is_active} label={organization.is_active ? "활성" : "비활성"} /><time>{formatTime(organization.created_at)}</time><time>{formatTime(organization.updated_at)}</time><b aria-hidden="true">›</b></button>)}
+      </div>
+      {directoryError && <p className="empty-state" role="alert">{directoryError}</p>}
+      {!directoryLoading && !directoryError && !directoryPage.items.length && <p className="empty-state">조건에 맞는 조직이 없습니다.</p>}
+      <div className="organization-directory-pagination"><span>{directoryStart}–{directoryEnd} / {directoryPage.total}</span><div><button disabled={directoryLoading || directoryPage.offset === 0} onClick={() => setDirectoryPage((page) => ({ ...page, offset: Math.max(0, page.offset - directoryLimit) }))}>이전</button><button disabled={directoryLoading || directoryEnd >= directoryPage.total} onClick={() => setDirectoryPage((page) => ({ ...page, offset: page.offset + directoryLimit }))}>다음</button></div></div>
+    </section>}
+
+    {accessScope === "organizations" && organizationView === "detail" && <section className="organization-switcher organization-detail-toolbar">
+      <button className="organization-back-button" onClick={() => setOrganizationView("list")}><span aria-hidden="true">←</span> 조직 목록</button>
+      <div className="organization-switcher-actions"><OrganizationSearchSelect label="다른 조직 빠른 전환" value={current} initialOptions={organizations} total={organizationTotal} onSearch={onSearchOrganizations} onSelect={openOrganization} /></div>
     </section>}
 
     <section className="organization-detail access-global-detail">
-      {accessScope === "organizations" && current && <>
+      {accessScope === "organizations" && organizationView === "detail" && current && <>
         <div className="resource-title"><div><p className="eyebrow">Organization workspace</p><h2>{current.name}</h2><p>구성원 접근과 VM/CT 소유권을 한 곳에서 관리합니다.</p></div><div className="organization-title-actions"><StatusMark ok={current.is_active} label={current.is_active ? "활성" : "비활성"} />{canWrite && <><button disabled={saving} onClick={() => onEditOrganization(current)}>수정</button><button className="danger" disabled={saving} onClick={() => onDeleteOrganization(current)}>삭제</button></>}</div></div>
         <div className="organization-summary organization-summary-compact"><div><strong>{members.length}</strong><span>구성원</span></div><div><strong>{assigned.length}</strong><span>할당 리소스</span></div></div>
       </>}
-      {accessScope === "organizations" && <div className="organization-tabs" role="tablist" aria-label="조직 상세 관리 영역"><button className={activePane === "members" ? "active" : ""} disabled={!current} onClick={() => setActivePane("members")}>구성원 <span>{members.length}</span></button><button className={activePane === "workloads" ? "active" : ""} disabled={!current} onClick={() => setActivePane("workloads")}>할당 VM/CT <span>{assigned.length}</span></button></div>}
+      {accessScope === "organizations" && organizationView === "detail" && <div className="organization-tabs" role="tablist" aria-label="조직 상세 관리 영역"><button className={activePane === "members" ? "active" : ""} disabled={!current} onClick={() => setActivePane("members")}>구성원 <span>{members.length}</span></button><button className={activePane === "workloads" ? "active" : ""} disabled={!current} onClick={() => setActivePane("workloads")}>할당 VM/CT <span>{assigned.length}</span></button></div>}
 
-      {accessScope === "organizations" && activePane === "members" && current && <section className="organization-block organization-tab-panel">
+      {accessScope === "organizations" && organizationView === "detail" && activePane === "members" && current && <section className="organization-block organization-tab-panel">
         <div className="admin-section-title"><div><p className="eyebrow">Membership</p><h2>구성원</h2><p>기존 고객을 연결하거나 새 고객 계정을 바로 만들어 추가합니다.</p></div>{canWrite && <div className="membership-actions"><div className="inline-control"><select aria-label="추가할 기존 고객" value={memberCandidate} onChange={(event) => setMemberCandidate(event.target.value)}><option value="">기존 고객 선택</option>{availableCustomers.map((item) => <option key={item.id} value={item.id}>{item.display_name} · {item.email}</option>)}</select><button disabled={!memberCandidate || saving} onClick={() => { onAddMember(memberCandidate); setMemberCandidate(""); }}>추가</button></div><button className="accent-button" disabled={saving} onClick={onCreateMember}>새 사용자 추가</button></div>}</div>
         <label className="list-search"><span className="sr-only">구성원 검색</span><input type="search" value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} placeholder="이름, 이메일 또는 역할 검색" /></label>
         <div className="management-list management-list-scroll">{filteredMembers.map((member) => <div key={member.id}><span><strong>{member.display_name}</strong><small>{member.email} · {member.role}</small></span><StatusMark ok={member.is_active} label={member.is_active ? "활성" : "중지"} />{canWrite && <button className="text-danger" disabled={saving} onClick={() => { if (window.confirm(`${member.display_name} 사용자를 조직에서 제거할까요?`)) onRemoveMember(member.user_id); }}>제거</button>}</div>)}</div>
@@ -1376,7 +1445,7 @@ function AccessView({
         {Boolean(members.length && !filteredMembers.length) && <p className="empty-state">검색 결과가 없습니다.</p>}
       </section>}
 
-      {accessScope === "organizations" && activePane === "workloads" && current && <section className="organization-block organization-tab-panel">
+      {accessScope === "organizations" && organizationView === "detail" && activePane === "workloads" && current && <section className="organization-block organization-tab-panel">
         <div className="admin-section-title"><div><p className="eyebrow">Owned inventory</p><h2>할당된 VM과 CT</h2></div></div>
         <label className="list-search"><span className="sr-only">할당된 VM 또는 CT 검색</span><input type="search" value={workloadQuery} onChange={(event) => setWorkloadQuery(event.target.value)} placeholder="이름, VMID, 노드 또는 IP 검색" /></label>
         <div className="management-list management-list-scroll workload-lines">{filteredAssigned.map((item) => <div key={item.id}><code>{item.kind} · {item.vmid}</code><span><strong>{item.name ?? `VMID ${item.vmid}`}</strong><small>{item.cluster_name} / {item.node} · {item.cpu_cores ?? "—"} vCPU · {formatBytes(item.memory_bytes)} RAM · {formatBytes(item.disk_bytes)} Disk · IP {item.assigned_ip_addresses?.length ? item.assigned_ip_addresses.join(", ") : "미할당"}</small></span><StatusMark ok={item.is_present} label={item.power_state} /><button className="text-danger" disabled={saving} onClick={() => { if (window.confirm(`${item.name ?? item.vmid} 할당을 회수할까요?`)) onUnassign(item.id); }}>할당 해제</button></div>)}</div>
@@ -1384,11 +1453,11 @@ function AccessView({
         {Boolean(assigned.length && !filteredAssigned.length) && <p className="empty-state">검색 결과가 없습니다.</p>}
       </section>}
 
-      {accessScope === "available" && <section className="organization-block organization-tab-panel available-workloads">
+      {accessScope === "assignments" && <section className="organization-block organization-tab-panel available-workloads">
         <div className="admin-section-title"><div><p className="eyebrow">Available inventory</p><h2>미할당 리소스</h2><p>할당할 조직을 검색한 뒤 VM/CT 소유권을 연결합니다.</p></div></div>
         <div className="assignment-target-control"><OrganizationSearchSelect label="할당 대상 조직" value={assignmentTarget} initialOptions={organizations} total={organizationTotal} onSearch={onSearchOrganizations} onSelect={setAssignmentTarget} onlyActive /></div>
         <label className="list-search"><span className="sr-only">미할당 VM 또는 CT 검색</span><input type="search" value={workloadQuery} onChange={(event) => setWorkloadQuery(event.target.value)} placeholder="이름, VMID, 노드 또는 IP 검색" /></label>
-        <div className="management-list management-list-scroll workload-lines">{filteredAvailable.map((item) => <div key={item.id}><code>{item.kind} · {item.vmid}</code><span><strong>{item.name ?? `VMID ${item.vmid}`}</strong><small>{item.cluster_name} / {item.node} · {item.cpu_cores ?? "—"} vCPU · {formatBytes(item.memory_bytes)} RAM · {formatBytes(item.disk_bytes)} Disk · IP {item.assigned_ip_addresses?.length ? item.assigned_ip_addresses.join(", ") : "미할당"}</small></span><StatusMark ok={item.is_present} label={item.power_state} />{canWrite && <button className="accent-button" disabled={saving || !assignmentTarget} onClick={() => assignmentTarget && onAssign(item.id, assignmentTarget.id)}>조직에 할당</button>}</div>)}</div>
+        <div className="management-list management-list-scroll workload-lines">{filteredAvailable.map((item) => <div key={item.id}><code>{item.kind} · {item.vmid}</code><span><strong>{item.name ?? `VMID ${item.vmid}`}</strong><small>{item.cluster_name} / {item.node} · {item.cpu_cores ?? "—"} vCPU · {formatBytes(item.memory_bytes)} RAM · {formatBytes(item.disk_bytes)} Disk · IP {item.assigned_ip_addresses?.length ? item.assigned_ip_addresses.join(", ") : "미할당"}</small></span><StatusMark ok={item.is_present} label={item.power_state} /><button className="accent-button" disabled={saving || !assignmentTarget} onClick={() => assignmentTarget && onAssign(item.id, assignmentTarget.id)}>조직에 할당</button></div>)}</div>
         {!available.length && <p className="empty-state">미할당 리소스가 없습니다. 클러스터에서 VM/CT 가져오기를 실행하세요.</p>}
         {Boolean(available.length && !filteredAvailable.length) && <p className="empty-state">검색 결과가 없습니다.</p>}
       </section>}
@@ -1399,7 +1468,7 @@ function AccessView({
         <div className="admin-table users-table table-scroll"><div className="table-head"><span>사용자</span><span>역할</span><span>조직</span><span>상태</span><span>최근 로그인</span><span>계정 관리</span></div>{filteredUsers.map((item) => <div className="table-row" key={item.id}><span><strong>{item.display_name}</strong><small>{item.email}</small></span><code>{item.role}</code><span className={organizationNames(item).length ? "user-organizations" : "user-unassigned"}>{organizationNames(item).length ? organizationNames(item).join(", ") : "미할당"}</span><StatusMark ok={item.is_active} label={item.is_active ? "활성" : "비활성"} /><span>{formatTime(item.last_login_at)}</span><span className="user-row-actions">{canWrite && <button type="button" disabled={saving} onClick={() => onResetPassword(item)}>비밀번호 초기화</button>}</span></div>)}</div>
         {users.length > 0 && !filteredUsers.length && <p className="empty-state">검색 조건에 맞는 사용자가 없습니다.</p>}
       </section>}
-      {accessScope === "organizations" && !current && <p className="empty-state">관리할 조직을 검색해 선택하세요.</p>}
+      {accessScope === "organizations" && organizationView === "detail" && !current && <p className="empty-state">조직 목록에서 관리할 조직을 선택하세요.</p>}
     </section>
   </div>;
 }

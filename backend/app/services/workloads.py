@@ -38,6 +38,10 @@ class WorkloadService:
             select(Workload, Cluster.name, Organization.name)
             .join(Cluster, Cluster.id == Workload.cluster_id)
             .outerjoin(Organization, Organization.id == Workload.organization_id)
+            .where(
+                Cluster.is_active.is_(True),
+                Workload.is_present.is_(True),
+            )
             .order_by(Cluster.name.asc(), Workload.vmid.asc())
         )
         if organization_id is not None:
@@ -62,7 +66,11 @@ class WorkloadService:
                 select(Workload, Cluster.name, Organization.name)
                 .join(Cluster, Cluster.id == Workload.cluster_id)
                 .outerjoin(Organization, Organization.id == Workload.organization_id)
-                .where(Workload.id == workload_id)
+                .where(
+                    Workload.id == workload_id,
+                    Workload.is_present.is_(True),
+                    Cluster.is_active.is_(True),
+                )
             )
         ).one_or_none()
         if row is None:
@@ -207,7 +215,14 @@ class WorkloadService:
 
     async def _locked_workload(self, workload_id: UUID) -> Workload:
         workload = await self._session.scalar(
-            select(Workload).where(Workload.id == workload_id).with_for_update()
+            select(Workload)
+            .join(Cluster, Cluster.id == Workload.cluster_id)
+            .where(
+                Workload.id == workload_id,
+                Workload.is_present.is_(True),
+                Cluster.is_active.is_(True),
+            )
+            .with_for_update()
         )
         if workload is None:
             raise self._not_found()

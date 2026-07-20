@@ -188,6 +188,7 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 | DELETE | `/admin/clusters/{cluster_id}` | 동기 | 안전 검사 후 disable/tombstone |
 | POST | `/admin/clusters/{cluster_id}/test` | 동기/짧은 timeout | TLS, 인증, 노드/게스트/스토리지 최소 권한 probe (`test-connection` 호환 alias 제공) |
 | GET | `/admin/clusters/{cluster_id}/nodes` | 동기 | 해당 PVE 클러스터의 실시간 노드 목록 |
+| GET | `/admin/clusters/{cluster_id}/nodes/{node}/metrics?range=hour\|six_hours\|day\|week` | 동기/짧은 timeout | Proxmox RRD 기반 CPU, load, 메모리, 네트워크, CPU·IO·메모리 PSI 시계열. 지원하지 않는 PSI 값은 `null` |
 | GET | `/admin/clusters/{cluster_id}/guests` | 동기 | 해당 PVE 클러스터의 실시간 QEMU/LXC 목록 |
 | GET | `/admin/clusters/{cluster_id}/storages` | 동기 | 해당 PVE 클러스터의 실시간 스토리지 목록 |
 | POST | `/admin/clusters/{cluster_id}/sync` | 비동기 | 전체 인벤토리 동기화 operation 생성 |
@@ -221,8 +222,8 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 | GET | `/admin/nodes/{node_id}` | ADMIN | 없음 |
 | GET | `/admin/workloads` | ADMIN | `cluster_id`, `node_id`, `kind`, `power_state`, `customer_user_id`, `is_template`, `is_present`, `q` |
 | GET | `/admin/workloads/{workload_id}` | ADMIN | 없음 |
-| GET | `/customer/vms` | CUSTOMER | 현재 사용자의 활성 조직에 할당된 QEMU VM으로 서버 강제 제한 |
-| GET | `/customer/vms/{vm_id}` | CUSTOMER | 현재 사용자의 활성 조직 멤버십 필요 |
+| GET | `/customer/vms` | CUSTOMER | 현재 사용자의 활성 조직에 할당된 QEMU VM으로 서버 강제 제한. 각 항목에 안전한 `organization_name`을 포함하고 내부 조직 ID는 노출하지 않음 |
+| GET | `/customer/vms/{vm_id}` | CUSTOMER | 현재 사용자의 활성 조직 멤버십 필요. 안전한 `organization_name` 포함 |
 
 정렬 allowlist는 `name`, `vmid`, `observed_at`, `power_state`다. admin 검색에서 VMID는 반드시 `cluster_id`와 함께 식별하거나 결과를 목록으로 취급한다.
 
@@ -267,7 +268,7 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 | Method | Path | 설명 |
 |---|---|---|
 | POST | `/admin/clusters/{cluster_id}/workloads/import` | 실시간 VM/CT를 로컬 workload로 멱등 upsert |
-| GET | `/admin/organizations` | 조직 목록. 선택기 검색은 `q`, `limit`, `offset`을 사용하며 필터가 없으면 기존 전체 조회와 호환 |
+| GET | `/admin/organizations` | 조직 목록. `q`, `status=active|inactive|all`, `sort=newest|oldest|name`, `limit`, `offset`을 지원하며 기본값은 활성 조직·최근 생성순이라 기존 조회와 호환 |
 | PATCH | `/admin/organizations/{organization_id}` | 조직 이름 수정; version 충돌 검사 |
 | DELETE | `/admin/organizations/{organization_id}` | 구성원·할당·진행 중 프로비저닝이 없을 때 비활성화 |
 | GET | `/admin/organizations/{organization_id}/members` | 조직 구성원 조회 |
