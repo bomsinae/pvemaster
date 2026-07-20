@@ -75,6 +75,12 @@ import { endBrowserSession } from "@/lib/browser-session";
 import { AuthSession, CustomerApiError } from "@/lib/customer-api";
 import { openConsoleWindow } from "@/lib/console-window";
 import {
+  AdminSection,
+  adminSections,
+  hrefForSection,
+  sectionFromSearch,
+} from "@/lib/admin-navigation";
+import {
   filterAdminWorkloads,
   getAdminWorkloadCapabilities,
   supportsAdminPowerAction,
@@ -87,7 +93,7 @@ import { generateSshRsaKeyPair } from "@/lib/ssh-keypair";
 import { VmConsoleModal } from "./vm-console-modal";
 import { ClusterMetricsPanel } from "./cluster-metrics";
 
-type Section = "overview" | "clusters" | "vms" | "access" | "networks" | "provisioning" | "audit";
+type Section = AdminSection;
 
 const DEFAULT_AUDIT_PAGE_SIZE = 25;
 const AUDIT_PAGE_SIZES = [25, 50, 100] as const;
@@ -227,12 +233,46 @@ export function AdminDashboard({
   const isSuperAdmin = user.role === "SUPER_ADMIN";
   const navigation = useMemo<Section[]>(
     () => isSuperAdmin
-      ? ["overview", "clusters", "vms", "access", "networks", "provisioning", "audit"]
+      ? [...adminSections]
       : ["overview", "clusters", "vms", "access"],
     [isSuperAdmin],
   );
 
   const token = session.accessToken;
+
+  function navigateToSection(next: Section) {
+    setForm(null);
+    setNotice("");
+    if (next === section) return;
+    window.history.pushState(
+      { ...window.history.state, pveMasterSection: next },
+      "",
+      hrefForSection(window.location.href, next),
+    );
+    setSection(next);
+  }
+
+  useEffect(() => {
+    const restoreSection = () => {
+      const next = sectionFromSearch(window.location.search, navigation);
+      setForm(null);
+      setNotice("");
+      setSection(next);
+    };
+
+    const initial = sectionFromSearch(window.location.search, navigation);
+    window.history.replaceState(
+      { ...window.history.state, pveMasterSection: initial },
+      "",
+      hrefForSection(window.location.href, initial),
+    );
+    const initialRestore = window.setTimeout(restoreSection, 0);
+    window.addEventListener("popstate", restoreSection);
+    return () => {
+      window.clearTimeout(initialRestore);
+      window.removeEventListener("popstate", restoreSection);
+    };
+  }, [navigation]);
 
   function openConsole(workload: Workload) {
     if (!openConsoleWindow(workload.id)) {
@@ -954,7 +994,7 @@ export function AdminDashboard({
         <div className="admin-brand"><span className="brand-mark">PM</span><div><strong>PVE Master</strong><small>Control plane</small></div></div>
         <nav aria-label="관리자 메뉴">
           {navigation.map((item) => (
-            <button key={item} className={section === item ? "active" : ""} onClick={() => { setSection(item); setForm(null); setNotice(""); }}>
+            <button key={item} className={section === item ? "active" : ""} onClick={() => navigateToSection(item)}>
               <span>{sectionLabels[item]}</span>
             </button>
           ))}

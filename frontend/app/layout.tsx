@@ -6,6 +6,10 @@ import { ThemeToggle } from "./theme-toggle";
 export const metadata: Metadata = {
   title: "PVE Master",
   description: "Proxmox infrastructure control plane",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    shortcut: "/icon.svg",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
