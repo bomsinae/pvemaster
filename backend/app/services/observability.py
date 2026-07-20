@@ -1,0 +1,493 @@
+import ipaddress
+from collections import defaultdict
+from collections.abc import Awaitable
+from datetime import UTC, datetime, timedelta
+from typing import cast
+from uuid import UUID
+
+from redis.asyncio import Redis
+from sqlalchemy import Select, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+
+from app.core.config import Settings
+from app.models.auth import AuditLog, User, UserRole
+from app.models.cluster import Cluster
+from app.models.ipam import IpAddress, IpAddressState, IpPool, IpPoolExclusion
+from app.models.operation import Operation, Workload
+from app.models.provisioning import ProvisioningRequest, ProvisioningStatus
+from app.schemas.observability import (
+    AuditLogListResponse,
+    AuditLogResponse,
+    ClusterConnectionStatus,
+    OperationalAlert,
+    OperationsStatusResponse,
+    QueueStatus,
+    WorkerStatus,
+    WorkloadInventoryStatus,
+)
+from app.security.access import Principal, require_service_role
+from app.services.audit import add_audit_event
+
+
+class ObservabilityService:
+    def __init__(
+        self,
+        *,
+        session: AsyncSession,
+        redis: Redis,
+        settings: Settings,
+        principal: Principal | None = None,
+    ) -> None:
+        self._session = session
+        self._redis = redis
+        self._settings = settings
+        self._principal = principal
+
+    async def audit_logs(
+        self,
+        *,
+        action: str | None,
+        actor_user_id: UUID | None,
+        organization_id: UUID | None,
+        result: str | None,
+        limit: int,
+        offset: int,
+    ) -> AuditLogListResponse:
+        self._require(UserRole.SUPER_ADMIN)
+        filters = []
+        if action:
+            filters.append(AuditLog.action == action)
+        if actor_user_id:
+            filters.append(AuditLog.actor_user_id == actor_user_id)
+        if organization_id:
+            filters.append(AuditLog.organization_id == organization_id)
+        if result:
+            filters.append(AuditLog.result == result)
+        total = await self._session.scalar(
+            select(func.count()).select_from(AuditLog).where(*filters)
+        )
+        rows = await self._session.execute(
+            self._audit_statement()
+            .where(*filters)
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        response = AuditLogListResponse(
+            items=[self._audit_response(*row) for row in rows.all()],
+            total=total or 0,
+            limit=limit,
+            offset=offset,
+        )
+        assert self._principal is not None
+        add_audit_event(
+            self._session,
+            action="AUDIT_LOG_SEARCH",
+            outcome="SUCCEEDED",
+            request_id=None,
+            actor_user_id=self._principal.user_id,
+            actor_role=self._principal.role,
+            target_type="audit_log",
+            after={
+                "filters": {
+                    "action": action,
+                    "actor_user_id": str(actor_user_id) if actor_user_id else None,
+                    "organization_id": str(organization_id) if organization_id else None,
+                    "result": result,
+                },
+                "returned": len(response.items),
+            },
+        )
+        await self._session.commit()
+        return response
+
+    async def audit_log(self, audit_id: UUID) -> AuditLogResponse:
+        self._require(UserRole.SUPER_ADMIN)
+        row = (
+            await self._session.execute(self._audit_statement().where(AuditLog.id == audit_id))
+        ).one_or_none()
+        if row is None:
+            from app.core.errors import AppError
+
+            raise AppError(404, "AUDIT_LOG_NOT_FOUND", "The audit log was not found.")
+        item = row[0]
+        response = self._audit_response(*row)
+        assert self._principal is not None
+        add_audit_event(
+            self._session,
+            action="AUDIT_LOG_VIEW",
+            outcome="SUCCEEDED",
+            request_id=None,
+            actor_user_id=self._principal.user_id,
+            actor_role=self._principal.role,
+            target_type="audit_log",
+            target_id=item.id,
+        )
+        await self._session.commit()
+        return response
+
+    @staticmethod
+    def _audit_statement() -> Select[
+        tuple[
+            AuditLog,
+            str,
+            str,
+            str | None,
+            int,
+            str,
+            str,
+            str,
+        ]
+    ]:
+        actor = aliased(User)
+        return (
+            select(
+                AuditLog,
+                actor.display_name,
+                actor.email,
+                Workload.name,
+                Workload.vmid,
+                Workload.kind,
+                Workload.node,
+                Cluster.name,
+            )
+            .outerjoin(actor, AuditLog.actor_user_id == actor.id)
+            .outerjoin(Workload, AuditLog.workload_id == Workload.id)
+            .outerjoin(Cluster, Workload.cluster_id == Cluster.id)
+        )
+
+    @staticmethod
+    def _audit_response(
+        item: AuditLog,
+        actor_display_name: str | None,
+        actor_email: str | None,
+        workload_name: str | None,
+        workload_vmid: int | None,
+        workload_kind: str | None,
+        workload_node: str | None,
+        workload_cluster_name: str | None,
+    ) -> AuditLogResponse:
+        return AuditLogResponse.model_validate(item).model_copy(
+            update={
+                "actor_display_name": actor_display_name,
+                "actor_email": actor_email,
+                "workload_name": workload_name,
+                "workload_vmid": workload_vmid,
+                "workload_kind": workload_kind,
+                "workload_node": workload_node,
+                "workload_cluster_name": workload_cluster_name,
+            }
+        )
+
+    async def status(self) -> OperationsStatusResponse:
+        self._require(UserRole.SUPER_ADMIN, UserRole.OPERATOR)
+        worker = await self._worker_status()
+        queue = await self._queue_status()
+        workloads = await self._workload_inventory()
+        clusters = await self._cluster_statuses()
+        alerts = await self._alerts(worker, queue, clusters)
+        return OperationsStatusResponse(
+            status="degraded" if alerts else "ok",
+            worker=worker,
+            queue=queue,
+            workloads=workloads,
+            clusters=clusters,
+            alerts=alerts,
+        )
+
+    async def prometheus_metrics(self) -> str:
+        worker = await self._worker_status()
+        queue = await self._queue_status()
+        clusters = await self._cluster_statuses()
+        lines = [
+            "# HELP pvemaster_worker_up Whether at least one Celery worker heartbeat is current.",
+            "# TYPE pvemaster_worker_up gauge",
+            f"pvemaster_worker_up {int(worker.alive)}",
+            "# HELP pvemaster_job_queue_length Number of jobs waiting in a Celery queue.",
+            "# TYPE pvemaster_job_queue_length gauge",
+        ]
+        for name, length in sorted(queue.queues.items()):
+            lines.append(f'pvemaster_job_queue_length{{queue="{name}"}} {length}')
+        lines.extend(
+            [
+                "# HELP pvemaster_cluster_connection_up Last known Proxmox connection state.",
+                "# TYPE pvemaster_cluster_connection_up gauge",
+            ]
+        )
+        for cluster in clusters:
+            name = cluster.name.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+            labels = f'cluster_id="{cluster.cluster_id}",name="{name}"'
+            lines.append(f"pvemaster_cluster_connection_up{{{labels}}} {int(cluster.connected)}")
+        operation_counts = await self._session.execute(
+            select(Operation.status, func.count()).group_by(Operation.status)
+        )
+        lines.extend(
+            [
+                "# HELP pvemaster_operations Number of operation records by status.",
+                "# TYPE pvemaster_operations gauge",
+            ]
+        )
+        for status, count in operation_counts:
+            lines.append(f'pvemaster_operations{{status="{status}"}} {count}')
+        pool_counts = await self._ip_pool_counts()
+        lines.extend(
+            [
+                "# HELP pvemaster_ip_pool_available Number of available addresses in an IP pool.",
+                "# TYPE pvemaster_ip_pool_available gauge",
+            ]
+        )
+        for pool_id, _name, available in pool_counts:
+            lines.append(f'pvemaster_ip_pool_available{{pool_id="{pool_id}"}} {available}')
+        return "\n".join(lines) + "\n"
+
+    async def _worker_status(self) -> WorkerStatus:
+        workers: list[str] = []
+        try:
+            async for raw_key in self._redis.scan_iter(match="pvemaster:worker:heartbeat:*"):
+                key = raw_key.decode() if isinstance(raw_key, bytes) else str(raw_key)
+                workers.append(key.rsplit(":", 1)[-1])
+        except Exception:
+            return WorkerStatus(
+                available=False,
+                alive=False,
+                workers=[],
+                stale_after_seconds=self._settings.worker_heartbeat_ttl_seconds,
+            )
+        return WorkerStatus(
+            alive=bool(workers),
+            workers=sorted(workers),
+            stale_after_seconds=self._settings.worker_heartbeat_ttl_seconds,
+        )
+
+    async def _queue_status(self) -> QueueStatus:
+        try:
+            queues = {
+                "operations": int(await cast(Awaitable[int], self._redis.llen("operations"))),
+                "celery": int(await cast(Awaitable[int], self._redis.llen("celery"))),
+            }
+        except Exception:
+            return QueueStatus(
+                available=False,
+                total=0,
+                queues={},
+                backlog_threshold=self._settings.queue_backlog_alert_threshold,
+            )
+        return QueueStatus(
+            total=sum(queues.values()),
+            queues=queues,
+            backlog_threshold=self._settings.queue_backlog_alert_threshold,
+        )
+
+    async def _cluster_statuses(self) -> list[ClusterConnectionStatus]:
+        rows = await self._session.scalars(
+            select(Cluster).where(Cluster.is_active.is_(True)).order_by(Cluster.name)
+        )
+        return [
+            ClusterConnectionStatus(
+                cluster_id=item.id,
+                name=item.name,
+                enabled=item.is_active,
+                connected=item.is_active
+                and item.last_connection_error_code is None
+                and item.last_connected_at is not None,
+                last_connected_at=item.last_connected_at,
+                error_code=item.last_connection_error_code,
+            )
+            for item in rows.all()
+        ]
+
+    async def _workload_inventory(self) -> WorkloadInventoryStatus:
+        base_query = (
+            Workload.is_present.is_(True),
+            Workload.is_template.is_(False),
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(Workload).where(*base_query)
+        )
+        assigned = await self._session.scalar(
+            select(func.count())
+            .select_from(Workload)
+            .where(*base_query, Workload.organization_id.is_not(None))
+        )
+        total_count = int(total or 0)
+        assigned_count = int(assigned or 0)
+        return WorkloadInventoryStatus(
+            total=total_count,
+            assigned=assigned_count,
+            unassigned=max(0, total_count - assigned_count),
+        )
+
+    async def _alerts(
+        self,
+        worker: WorkerStatus,
+        queue: QueueStatus,
+        clusters: list[ClusterConnectionStatus],
+    ) -> list[OperationalAlert]:
+        alerts: list[OperationalAlert] = []
+        if not worker.available or not queue.available:
+            alerts.append(
+                OperationalAlert(
+                    code="REDIS_UNAVAILABLE",
+                    severity="critical",
+                    resource_type="redis",
+                    message="Worker and queue state could not be read from Redis.",
+                )
+            )
+        if not worker.alive:
+            alerts.append(
+                OperationalAlert(
+                    code="WORKER_DOWN",
+                    severity="critical",
+                    resource_type="worker",
+                    message="No current worker heartbeat was found.",
+                )
+            )
+        if queue.total >= queue.backlog_threshold:
+            alerts.append(
+                OperationalAlert(
+                    code="JOB_QUEUE_BACKLOG",
+                    severity="warning",
+                    resource_type="queue",
+                    message="The job queue backlog threshold was reached.",
+                    value=queue.total,
+                    threshold=queue.backlog_threshold,
+                )
+            )
+        for cluster in clusters:
+            if cluster.enabled and not cluster.connected:
+                alerts.append(
+                    OperationalAlert(
+                        code="CLUSTER_CONNECTION_FAILED",
+                        severity="critical",
+                        resource_type="cluster",
+                        resource_id=str(cluster.cluster_id),
+                        message="The Proxmox cluster is not connected.",
+                    )
+                )
+        cutoff = datetime.now(UTC) - timedelta(
+            minutes=self._settings.provisioning_failure_window_minutes
+        )
+        failures = await self._session.scalar(
+            select(func.count())
+            .select_from(ProvisioningRequest)
+            .where(
+                ProvisioningRequest.status.in_(
+                    [ProvisioningStatus.FAILED.value, ProvisioningStatus.MANUAL_REVIEW.value]
+                ),
+                ProvisioningRequest.finished_at >= cutoff,
+            )
+        )
+        if (failures or 0) >= self._settings.provisioning_failure_alert_count:
+            alerts.append(
+                OperationalAlert(
+                    code="PROVISIONING_REPEATED_FAILURE",
+                    severity="critical",
+                    resource_type="provisioning",
+                    message="Provisioning failures exceeded the configured window threshold.",
+                    value=failures or 0,
+                    threshold=self._settings.provisioning_failure_alert_count,
+                )
+            )
+        for pool_id, name, available in await self._ip_pool_counts():
+            if available <= self._settings.ip_pool_low_available_threshold:
+                alerts.append(
+                    OperationalAlert(
+                        code="IP_POOL_LOW",
+                        severity="warning",
+                        resource_type="ip_pool",
+                        resource_id=str(pool_id),
+                        message=f"IP pool {name} has low availability.",
+                        value=available,
+                        threshold=self._settings.ip_pool_low_available_threshold,
+                    )
+                )
+        return alerts
+
+    async def _ip_pool_counts(self) -> list[tuple[UUID, str, int]]:
+        pools = list(
+            await self._session.scalars(
+                select(IpPool).where(IpPool.is_active.is_(True)).order_by(IpPool.name)
+            )
+        )
+        if not pools:
+            return []
+
+        pool_ids = [pool.id for pool in pools]
+        exclusion_rows = await self._session.execute(
+            select(
+                IpPoolExclusion.pool_id,
+                IpPoolExclusion.start_address,
+                IpPoolExclusion.end_address,
+            ).where(IpPoolExclusion.pool_id.in_(pool_ids))
+        )
+        exclusions: defaultdict[UUID, list[tuple[str, str]]] = defaultdict(list)
+        for pool_id, start, end in exclusion_rows:
+            exclusions[pool_id].append((str(start), str(end)))
+
+        unavailable_rows = await self._session.execute(
+            select(IpAddress.pool_id, IpAddress.address).where(
+                IpAddress.pool_id.in_(pool_ids),
+                IpAddress.state != IpAddressState.AVAILABLE.value,
+            )
+        )
+        unavailable: defaultdict[UUID, list[str]] = defaultdict(list)
+        for pool_id, address in unavailable_rows:
+            unavailable[pool_id].append(str(address))
+
+        return [
+            (
+                pool.id,
+                pool.name,
+                self._available_address_count(
+                    cidr=str(pool.cidr),
+                    gateway=str(pool.gateway) if pool.gateway is not None else None,
+                    exclusions=exclusions[pool.id],
+                    unavailable=unavailable[pool.id],
+                ),
+            )
+            for pool in pools
+        ]
+
+    @staticmethod
+    def _available_address_count(
+        *,
+        cidr: str,
+        gateway: str | None,
+        exclusions: list[tuple[str, str]],
+        unavailable: list[str],
+    ) -> int:
+        network = ipaddress.ip_network(cidr, strict=True)
+        first = int(network.network_address)
+        last = int(network.broadcast_address)
+        blocked: list[tuple[int, int]] = [(first, first)]
+        if isinstance(network, ipaddress.IPv4Network):
+            blocked.append((last, last))
+        if gateway is not None:
+            value = int(ipaddress.ip_address(gateway))
+            blocked.append((value, value))
+        blocked.extend(
+            (int(ipaddress.ip_address(start)), int(ipaddress.ip_address(end)))
+            for start, end in exclusions
+        )
+        blocked.extend(
+            (value, value)
+            for value in (int(ipaddress.ip_address(address)) for address in unavailable)
+        )
+
+        merged: list[tuple[int, int]] = []
+        for low, high in sorted(blocked):
+            low, high = max(first, low), min(last, high)
+            if low > high:
+                continue
+            if merged and low <= merged[-1][1] + 1:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], high))
+            else:
+                merged.append((low, high))
+        blocked_count = sum(high - low + 1 for low, high in merged)
+        return max(0, network.num_addresses - blocked_count)
+
+    def _require(self, *roles: UserRole) -> None:
+        if self._principal is None:
+            raise RuntimeError("an authenticated principal is required")
+        require_service_role(self._principal, *roles)
