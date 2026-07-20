@@ -1,6 +1,6 @@
 # PVE Master
 
-PVE Master는 여러 Proxmox VE 클러스터를 관리하기 위한 제어 플레인입니다. 현재 기반 단계에는 FastAPI API, Celery worker, Next.js App Router, PostgreSQL, Redis와 품질 도구가 포함됩니다.
+PVE Master는 여러 Proxmox VE 클러스터의 상태와 VM/CT 수명주기, 조직별 소유권을 한곳에서 관리하는 운영 플랫폼입니다. 관리자는 클러스터와 인벤토리, 사용자·조직, IP 풀과 프로비저닝을 관리하고 고객은 자신이 속한 조직에 할당된 VM만 확인하고 제어할 수 있습니다.
 
 ## 요구 사항
 
@@ -25,7 +25,7 @@ PVE Master는 여러 Proxmox VE 클러스터를 관리하기 위한 제어 플�
    docker compose ps
    ```
 
-3. Alembic migration을 적용합니다. 현재 baseline은 빈 스키마이며 이후 모든 DB 변경은 revision으로 추가합니다.
+3. Alembic migration을 최신 revision까지 적용합니다. 모든 DB 변경은 Alembic revision으로 관리됩니다.
 
    ```bash
    docker compose exec backend alembic upgrade head
@@ -57,25 +57,46 @@ PVE Master는 여러 Proxmox VE 클러스터를 관리하기 위한 제어 플�
 최초 관리자를 만든 뒤 <http://localhost:3000>에서 로그인하면 다음 운영 화면을 사용할 수 있습니다.
 
 - VM/CT 할당 현황, 클러스터 연결과 활성 경보 개요
-- Proxmox 클러스터 등록, 연결 시험, 실시간 노드/VM/CT/스토리지 조회
-- 사용자와 조직 조회 및 `SUPER_ADMIN`의 생성 작업
-- IP 풀 조회와 생성
-- 상품, 템플릿, 프로비저닝 요청 상태 조회 및 상품 생성
+- 등록된 모든 클러스터의 CPU·RAM·디스크·load average와 노드별 RRD 그래프 조회
+- Proxmox 클러스터 등록·해제, 연결 시험과 실시간 노드/VM/CT/스토리지 조회
+- 기존 VM/CT 가져오기, 사양 변경·삭제, 전원 작업과 QEMU/LXC 콘솔
+- 검색·필터·페이지네이션을 지원하는 조직 목록과 구성원·VM/CT 소유권 관리
+- 전체 사용자 조회, 고객 계정 생성과 비밀번호 초기화
+- IP 풀 생성·수정·안전 삭제와 주소 사용 현황 조회
+- 상품·템플릿·프로비저닝 노드 관리와 프로비저닝 요청 상태 조회
 - `SUPER_ADMIN` 전용 감사 로그 조회
 
 프론트엔드 메뉴는 역할에 맞게 표시하지만 최종 권한은 모든 관리자 API의 서비스 계층에서 다시
-검사합니다. 현재 클러스터 화면은 Proxmox 실시간 조회이며, 주기적 인벤토리 동기화와 로컬
-`workloads` 투영은 후속 단계입니다.
+검사합니다. 클러스터 자원 화면은 Proxmox 실시간 API와 노드 RRD를 사용합니다. 관리자가 명시적으로
+VM/CT 가져오기를 실행하면 로컬 `workloads` 투영을 `(cluster_id, vmid)` 기준으로 멱등 갱신하며,
+등록 해제된 클러스터의 투영은 이력을 보존한 채 운영 목록에서 제외합니다. 주기적 인벤토리 동기화는
+아직 후속 작업입니다.
 
 화면별 역할과 현재 구현 경계는 [`docs/admin-dashboard.md`](docs/admin-dashboard.md)를 참고합니다.
 
-5. 종료합니다.
+## 고객 포털
 
-   ```bash
-   docker compose down
-   ```
+`CUSTOMER`로 로그인하면 현재 사용자가 속한 활성 조직의 QEMU VM만 조회할 수 있습니다.
 
-   로컬 DB 데이터까지 제거하려는 경우에만 `docker compose down --volumes`를 사용합니다.
+- 조직별 VM 개수와 소속 조직 필터
+- VM 상태, 할당 IP, vCPU, 메모리, 디스크와 마지막 관측 시각
+- 시작, 정상 종료, 재부팅과 명시적 확인이 필요한 강제 중지
+- 실행 중 QEMU VM의 noVNC 콘솔
+- 현재 로그인 이메일 표시와 본인 비밀번호 변경
+
+조직 이름은 고객 화면에 표시하지만 내부 조직 ID, 클러스터 ID, 노드 이름과 PVE 인증 정보는 고객
+API에 노출하지 않습니다. 모든 목록·상세·전원·콘솔 요청은 서버에서 활성 사용자, 활성 조직과 현재
+조직 멤버십을 다시 확인합니다.
+
+## 종료
+
+개발 스택을 종료합니다.
+
+```bash
+docker compose down
+```
+
+로컬 DB 데이터까지 제거하려는 경우에만 `docker compose down --volumes`를 사용합니다.
 
 ## Backend 로컬 개발
 
@@ -115,6 +136,7 @@ npm run dev
 ```bash
 npm run lint
 npm run typecheck
+npm run test:e2e
 npm run build
 ```
 
@@ -126,6 +148,7 @@ npm run build
 - `backend/alembic`: 데이터베이스 migration
 - `backend/tests`: API와 설정 테스트
 - `frontend/app`: Next.js App Router UI
+- `frontend/tests`: 관리자·고객 포털의 mock E2E 테스트
 - `compose.yaml`: 개발 서비스와 health check
 
 ## 보안 기본값
