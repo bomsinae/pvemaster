@@ -2,6 +2,8 @@
 
 PVE Master는 여러 Proxmox VE 클러스터의 상태와 VM/CT 수명주기, 조직별 소유권을 한곳에서 관리하는 운영 플랫폼입니다. 관리자는 클러스터와 인벤토리, 사용자·조직, IP 풀과 프로비저닝을 관리하고 고객은 자신이 속한 조직에 할당된 VM만 확인하고 제어할 수 있습니다.
 
+![PVE Master 운영 개요에서 확인하는 클러스터 자원 및 노드별 성능 지표](docs/images/operations-overview.png)
+
 ## 요구 사항
 
 - Docker Engine과 Docker Compose v2
