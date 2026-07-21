@@ -12,7 +12,12 @@ celery_app = Celery(
     "pvemaster",
     broker=settings.redis_url.get_secret_value(),
     backend=settings.redis_url.get_secret_value(),
-    include=["app.tasks.power", "app.tasks.provisioning", "app.tasks.maintenance"],
+    include=[
+        "app.tasks.backup",
+        "app.tasks.power",
+        "app.tasks.provisioning",
+        "app.tasks.maintenance",
+    ],
 )
 celery_app.conf.update(
     accept_content=["json"],
@@ -24,6 +29,7 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
     task_routes={
+        "app.tasks.backup.*": {"queue": "operations"},
         "app.tasks.power.*": {"queue": "operations"},
         "app.tasks.provisioning.*": {"queue": "operations"},
         "app.tasks.maintenance.*": {"queue": "maintenance"},
@@ -56,6 +62,7 @@ def record_worker_heartbeat(sender: object, **_: object) -> None:
 def recover_incomplete_power_operations(**_: object) -> None:
     from asyncio import run
 
+    from app.tasks.backup import recover_backup_operations
     from app.tasks.power import recover_power_operations
     from app.tasks.provisioning import recover_provisioning_requests
 
@@ -65,4 +72,5 @@ def recover_incomplete_power_operations(**_: object) -> None:
         pass
 
     run(recover_power_operations())
+    run(recover_backup_operations())
     run(recover_provisioning_requests())

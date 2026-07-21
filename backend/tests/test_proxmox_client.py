@@ -289,6 +289,162 @@ async def test_lxc_power_actions_use_container_endpoints_and_reject_reset() -> N
     ]
 
 
+async def test_pbs_storage_discovery_backup_submission_and_content_listing() -> None:
+    requests: list[tuple[str, str, dict[str, list[str]]]] = []
+    upid = "UPID:pve-a:00000001:00000002:00000003:vzdump:101:service@pve:"
+
+    def success(request: httpx.Request) -> httpx.Response:
+        form_or_query = (
+            parse_qs(request.content.decode())
+            if request.method == "POST"
+            else parse_qs(request.url.query.decode())
+        )
+        requests.append((request.method, request.url.path, form_or_query))
+        if request.url.path == "/api2/json/storage":
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "storage": "pbs-main",
+                            "type": "pbs",
+                            "content": "backup",
+                            "datastore": "main",
+                            "namespace": "pvemaster/pve-a",
+                        }
+                    ]
+                },
+            )
+        if request.method == "POST":
+            return httpx.Response(200, json={"data": upid})
+        if request.url.path.endswith("/log"):
+            return httpx.Response(200, json={"data": [{"n": 1, "t": "transferred 1 GiB"}]})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "content": "backup",
+                        "volid": "pbs-main:backup/vm/101/1720000000",
+                        "vmid": 101,
+                        "ctime": 1720000000,
+                        "size": 1024,
+                    }
+                ]
+            },
+        )
+
+    async with make_client(success) as client:
+        configurations = await client.get_storage_configurations()
+        submitted = await client.submit_guest_backup(
+            node="pve-a",
+            vmid=101,
+            storage="pbs-main",
+            mode="snapshot",
+            compression="zstd",
+        )
+        content = await client.get_backup_content(node="pve-a", storage="pbs-main", vmid=101)
+        task_log = await client.get_task_log(node="pve-a", upid=upid)
+
+    assert configurations[0]["type"] == "pbs"
+    assert submitted == upid
+    assert content[0]["size"] == 1024
+    assert task_log[0]["t"] == "transferred 1 GiB"
+    assert requests == [
+        ("GET", "/api2/json/storage", {}),
+        (
+            "POST",
+            "/api2/json/nodes/pve-a/vzdump",
+            {
+                "vmid": ["101"],
+                "storage": ["pbs-main"],
+                "mode": ["snapshot"],
+                "compress": ["zstd"],
+            },
+        ),
+        (
+            "GET",
+            "/api2/json/nodes/pve-a/storage/pbs-main/content",
+            {"content": ["backup"], "vmid": ["101"]},
+        ),
+        (
+            "GET",
+            f"/api2/json/nodes/pve-a/tasks/{upid}/log",
+            {"start": ["0"], "limit": ["500"]},
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("mode", "compression"),
+    [("stop", "zstd"), ("snapshot", "gzip")],
+)
+async def test_backup_submission_rejects_non_allowlisted_options(
+    mode: str, compression: str
+) -> None:
+    async with make_client(lambda _: httpx.Response(500)) as client:
+        with pytest.raises(ValueError, match="unsupported backup option"):
+            await client.submit_guest_backup(
+                node="pve-a",
+                vmid=101,
+                storage="pbs-main",
+                mode=mode,
+                compression=compression,
+            )
+
+
+@pytest.mark.parametrize(
+    ("kind", "path", "expected"),
+    [
+        (
+            "QEMU",
+            "/api2/json/nodes/pve-a/qemu",
+            {
+                "vmid": ["220"],
+                "start": ["0"],
+                "archive": ["pbs-main:backup/vm/101/1720000000"],
+                "name": ["service-restored"],
+                "unique": ["1"],
+            },
+        ),
+        (
+            "LXC",
+            "/api2/json/nodes/pve-a/lxc",
+            {
+                "vmid": ["220"],
+                "start": ["0"],
+                "ostemplate": ["pbs-main:backup/ct/101/1720000000"],
+                "hostname": ["service-restored"],
+                "restore": ["1"],
+            },
+        ),
+    ],
+)
+async def test_guest_restore_uses_new_guest_without_force(
+    kind: str, path: str, expected: dict[str, list[str]]
+) -> None:
+    requests: list[tuple[str, dict[str, list[str]]]] = []
+    upid = "UPID:pve-a:00000001:00000002:00000003:qmrestore:220:service@pve:"
+
+    def success(request: httpx.Request) -> httpx.Response:
+        requests.append((request.url.path, parse_qs(request.content.decode())))
+        return httpx.Response(200, json={"data": upid})
+
+    archive = f"pbs-main:backup/{'vm' if kind == 'QEMU' else 'ct'}/101/1720000000"
+    async with make_client(success) as client:
+        result = await client.submit_guest_restore(
+            kind=kind,
+            node="pve-a",
+            archive=archive,
+            vmid=220,
+            name="service-restored",
+        )
+
+    assert result == upid
+    assert requests == [(path, expected)]
+    assert "force" not in requests[0][1]
+
+
 async def test_provisioning_calls_use_full_clone_and_allowlisted_form_fields() -> None:
     requests: list[tuple[str, str, dict[str, list[str]]]] = []
 

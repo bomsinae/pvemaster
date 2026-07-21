@@ -69,6 +69,21 @@ async def update_user(
     return await _service(request, session, principal).update_user(user_id, payload)
 
 
+@router.delete(
+    "/users/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_user(
+    user_id: UUID,
+    request: Request,
+    session: SessionDependency,
+    principal: PrincipalDependency,
+    version: int = Query(ge=1),
+) -> Response:
+    await _service(request, session, principal).delete_user(user_id, version=version)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post(
     "/users/{user_id}/reset-password",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -104,9 +119,7 @@ async def list_organizations(
     session: SessionDependency,
     principal: PrincipalDependency,
     q: str | None = Query(default=None, min_length=1, max_length=160),
-    status_filter: Literal["active", "inactive", "all"] = Query(
-        default="active", alias="status"
-    ),
+    status_filter: Literal["active", "inactive", "all"] = Query(default="active", alias="status"),
     sort: Literal["newest", "oldest", "name"] = Query(default="newest"),
     limit: int | None = Query(default=None, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
@@ -134,9 +147,7 @@ async def update_organization(
     session: SessionDependency,
     principal: PrincipalDependency,
 ) -> OrganizationResponse:
-    return await _service(request, session, principal).update_organization(
-        organization_id, payload
-    )
+    return await _service(request, session, principal).update_organization(organization_id, payload)
 
 
 @router.delete(

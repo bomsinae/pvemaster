@@ -113,6 +113,85 @@ export type WorkloadAssignment = {
   revoke_reason: string | null;
 };
 
+export type BackupStorageCandidate = {
+  cluster_id: string;
+  cluster_name: string;
+  storage_id: string;
+  datastore: string | null;
+  namespace: string | null;
+  available: boolean;
+  enabled_in_pve: boolean;
+  registered_target_id: string | null;
+};
+
+export type BackupTarget = {
+  id: string;
+  cluster_id: string;
+  cluster_name: string;
+  storage_id: string;
+  datastore: string | null;
+  namespace: string | null;
+  is_enabled: boolean;
+  available: boolean;
+  last_checked_at: string | null;
+  created_at: string;
+  updated_at: string;
+  version: number;
+};
+
+export type BackupRun = {
+  id: string;
+  operation_id: string;
+  backup_target_id: string;
+  cluster_id: string;
+  cluster_name: string;
+  storage_id: string;
+  workload_id: string;
+  workload_name: string | null;
+  vmid: number;
+  kind: "QEMU" | "LXC";
+  source_node: string;
+  organization_id: string | null;
+  organization_name: string | null;
+  mode: string;
+  compression: string;
+  status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "TIMEOUT";
+  snapshot_volume_id: string | null;
+  snapshot_time: string | null;
+  size_bytes: number | null;
+  transferred_bytes: number | null;
+  error_code: string | null;
+  error_summary: string | null;
+  retryable: boolean | null;
+  pve_exit_status: string | null;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type RestoreRun = {
+  id: string;
+  operation_id: string;
+  backup_run_id: string;
+  cluster_id: string;
+  cluster_name: string;
+  source_workload_id: string;
+  source_workload_name: string | null;
+  kind: "QEMU" | "LXC";
+  snapshot_volume_id: string;
+  target_node: string;
+  target_vmid: number;
+  target_name: string;
+  status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "TIMEOUT";
+  error_code: string | null;
+  error_summary: string | null;
+  retryable: boolean | null;
+  pve_exit_status: string | null;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
 export type Cluster = {
   id: string;
   name: string;
@@ -186,6 +265,9 @@ export type ClusterResourceOverview = {
   storage_count: number;
   storage_used_bytes: number;
   storage_total_bytes: number;
+  vm_storage_count: number;
+  vm_storage_used_bytes: number;
+  vm_storage_total_bytes: number;
   nodes: Array<{
     node: string;
     status: string | null;
@@ -230,6 +312,10 @@ export type OperationsStatus = {
   worker: { available: boolean; alive: boolean; workers: string[]; stale_after_seconds: number };
   queue: { available: boolean; total: number; queues: Record<string, number>; backlog_threshold: number };
   workloads: { total: number; assigned: number; unassigned: number };
+  directory: {
+    organizations: { total: number; active: number };
+    users: { total: number; active: number };
+  };
   clusters: Array<{
     cluster_id: string;
     name: string;
@@ -320,8 +406,8 @@ export type AdminWorkloadJob = {
   job_id: string;
   vm_id: string;
   workload_id: string;
-  action: "start" | "shutdown" | "stop" | "reboot" | "reset" | "update_spec" | "delete";
-  action_mode: "STANDARD" | "GRACEFUL" | "FORCED" | "CONFIGURATION" | "DESTRUCTIVE";
+  action: "start" | "shutdown" | "stop" | "reboot" | "reset" | "update_spec" | "delete" | "backup";
+  action_mode: "STANDARD" | "GRACEFUL" | "FORCED" | "CONFIGURATION" | "DESTRUCTIVE" | "BACKUP";
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "TIMEOUT";
   error_code: string | null;
   error_summary: string | null;
@@ -484,6 +570,35 @@ export const resetUserPassword = (
   fetcher,
 );
 
+export const updateUserStatus = (
+  base: string,
+  token: string,
+  userId: string,
+  isActive: boolean,
+  version: number,
+  fetcher?: Fetcher,
+) => api<CurrentUser>(
+  base,
+  `/api/v1/admin/users/${encodeURIComponent(userId)}`,
+  token,
+  { method: "PATCH", body: JSON.stringify({ is_active: isActive, version }) },
+  fetcher,
+);
+
+export const deleteUser = (
+  base: string,
+  token: string,
+  userId: string,
+  version: number,
+  fetcher?: Fetcher,
+) => api<void>(
+  base,
+  `/api/v1/admin/users/${encodeURIComponent(userId)}?version=${version}`,
+  token,
+  { method: "DELETE" },
+  fetcher,
+);
+
 export async function listOrganizations(base: string, token: string, fetcher?: Fetcher) {
   return (await api<{ items: Organization[] }>(base, "/api/v1/admin/organizations", token, {}, fetcher)).items;
 }
@@ -516,6 +631,9 @@ export const createOrganization = (base: string, token: string, name: string, fe
 
 export const updateOrganization = (base: string, token: string, organizationId: string, name: string, version: number, fetcher?: Fetcher) =>
   api<Organization>(base, `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}`, token, { method: "PATCH", body: JSON.stringify({ name, version }) }, fetcher);
+
+export const activateOrganization = (base: string, token: string, organizationId: string, version: number, fetcher?: Fetcher) =>
+  api<Organization>(base, `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}`, token, { method: "PATCH", body: JSON.stringify({ is_active: true, version }) }, fetcher);
 
 export const deleteOrganization = (base: string, token: string, organizationId: string, version: number, fetcher?: Fetcher) =>
   api<void>(base, `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}?version=${version}`, token, { method: "DELETE" }, fetcher);
@@ -635,6 +753,133 @@ export const unassignWorkload = (
   `/api/v1/admin/workloads/${encodeURIComponent(workloadId)}/assignment`,
   token,
   { method: "DELETE" },
+  fetcher,
+);
+
+export async function discoverBackupStorages(
+  base: string,
+  token: string,
+  clusterId: string,
+  fetcher?: Fetcher,
+) {
+  return (await api<{ items: BackupStorageCandidate[] }>(
+    base,
+    `/api/v1/admin/clusters/${encodeURIComponent(clusterId)}/backup-storages`,
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export async function listBackupTargets(base: string, token: string, fetcher?: Fetcher) {
+  return (await api<{ items: BackupTarget[] }>(
+    base,
+    "/api/v1/admin/backup-targets",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const createBackupTarget = (
+  base: string,
+  token: string,
+  clusterId: string,
+  storageId: string,
+  fetcher?: Fetcher,
+) => api<BackupTarget>(base, "/api/v1/admin/backup-targets", token, {
+  method: "POST",
+  body: JSON.stringify({ cluster_id: clusterId, storage_id: storageId }),
+}, fetcher);
+
+export const updateBackupTarget = (
+  base: string,
+  token: string,
+  target: BackupTarget,
+  isEnabled: boolean,
+  fetcher?: Fetcher,
+) => api<BackupTarget>(
+  base,
+  `/api/v1/admin/backup-targets/${encodeURIComponent(target.id)}`,
+  token,
+  {
+    method: "PATCH",
+    body: JSON.stringify({ is_enabled: isEnabled, version: target.version }),
+  },
+  fetcher,
+);
+
+export async function listBackups(base: string, token: string, fetcher?: Fetcher) {
+  return (await api<{ items: BackupRun[] }>(
+    base,
+    "/api/v1/admin/backups",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const requestWorkloadBackup = (
+  base: string,
+  token: string,
+  workloadId: string,
+  backupTargetId: string,
+  idempotencyKey: string,
+  fetcher?: Fetcher,
+) => api<BackupRun>(
+  base,
+  `/api/v1/admin/workloads/${encodeURIComponent(workloadId)}/backups`,
+  token,
+  {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ backup_target_id: backupTargetId }),
+  },
+  fetcher,
+);
+
+export const getBackup = (
+  base: string,
+  token: string,
+  runId: string,
+  fetcher?: Fetcher,
+) => api<BackupRun>(
+  base,
+  `/api/v1/admin/backups/${encodeURIComponent(runId)}`,
+  token,
+  {},
+  fetcher,
+);
+
+export const requestBackupRestore = (
+  base: string,
+  token: string,
+  runId: string,
+  payload: { target_node: string; target_vmid: number; target_name: string },
+  idempotencyKey: string,
+  fetcher?: Fetcher,
+) => api<RestoreRun>(
+  base,
+  `/api/v1/admin/backups/${encodeURIComponent(runId)}/restores`,
+  token,
+  {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(payload),
+  },
+  fetcher,
+);
+
+export const getRestore = (
+  base: string,
+  token: string,
+  restoreId: string,
+  fetcher?: Fetcher,
+) => api<RestoreRun>(
+  base,
+  `/api/v1/admin/restores/${encodeURIComponent(restoreId)}`,
+  token,
+  {},
   fetcher,
 );
 

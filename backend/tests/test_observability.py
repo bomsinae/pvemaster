@@ -130,6 +130,8 @@ def test_observability_routes_are_registered(app: FastAPI) -> None:
     assert not any(
         method in paths["/api/v1/admin/audit-logs"] for method in ("post", "patch", "delete")
     )
+    operations_schema = app.openapi()["components"]["schemas"]["OperationsStatusResponse"]
+    assert "directory" in operations_schema["required"]
 
 
 async def test_customer_cannot_access_operational_status(settings: Settings) -> None:
@@ -198,6 +200,28 @@ async def test_unassigned_workloads_are_inventory_not_operational_alerts(
         for statement in inventory_session.statements
     )
     assert not any(alert.code == "ORPHANED_VM_FOUND" for alert in alerts)
+
+
+async def test_directory_inventory_reports_active_and_total_counts(
+    settings: Settings,
+) -> None:
+    session = ScalarSequenceSession([5, 4, 3, 2])
+    service = ObservabilityService(
+        session=cast(AsyncSession, session),
+        redis=cast(Redis, object()),
+        settings=settings,
+    )
+
+    directory = await service._directory_inventory()
+
+    assert directory.users.total == 5
+    assert directory.users.active == 4
+    assert directory.organizations.total == 3
+    assert directory.organizations.active == 2
+    assert "users.deleted_at IS NULL" in str(session.statements[0])
+    assert "users.deleted_at IS NULL" in str(session.statements[1])
+    assert "users.is_active IS true" in str(session.statements[1])
+    assert "organizations.is_active IS true" in str(session.statements[3])
 
 
 def test_sparse_ip_pool_availability_counts_cidr_without_double_counting() -> None:

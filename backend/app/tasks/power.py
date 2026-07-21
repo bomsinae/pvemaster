@@ -35,9 +35,10 @@ async def recover_power_operations() -> int:
         async with session_factory() as session:
             operations = await session.scalars(
                 select(Operation).where(
+                    Operation.operation_type != "WORKLOAD_BACKUP",
                     Operation.status.in_(
                         [OperationStatus.QUEUED.value, OperationStatus.RUNNING.value]
-                    )
+                    ),
                 )
             )
             for operation in operations.all():

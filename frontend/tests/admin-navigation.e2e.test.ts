@@ -17,6 +17,10 @@ test("admin section navigation creates reversible URLs", () => {
     "/?section=vms",
   );
   assert.equal(
+    hrefForSection("https://pvemaster.example.test/?section=vms", "backups"),
+    "/?section=backups",
+  );
+  assert.equal(
     hrefForSection("https://pvemaster.example.test/?section=vms", "overview"),
     "/",
   );
@@ -24,6 +28,7 @@ test("admin section navigation creates reversible URLs", () => {
 
 test("admin section navigation restores only permitted sections", () => {
   assert.equal(sectionFromSearch("?section=audit", adminSections), "audit");
+  assert.equal(sectionFromSearch("?section=backups", adminSections), "backups");
   assert.equal(
     sectionFromSearch("?section=audit", ["overview", "clusters", "vms", "access"]),
     "overview",

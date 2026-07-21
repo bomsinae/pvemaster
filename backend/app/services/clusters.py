@@ -220,14 +220,16 @@ class ClusterService:
         connection: ClusterConnection,
     ) -> ClusterResourceOverview:
         async with self._client(connection) as client:
-            raw_nodes, raw_guests, raw_storages = await asyncio.gather(
+            raw_nodes, raw_guests, raw_storages, raw_storage_configs = await asyncio.gather(
                 client.get_nodes(),
                 client.get_guests(),
                 client.get_storages(),
+                client.get_storage_configurations(),
             )
             nodes = self._validate_items(NodeResponse, raw_nodes)
             guests = self._validate_items(GuestResponse, raw_guests)
             storages = self._validate_items(StorageResponse, raw_storages)
+            storage_configs = self._validate_items(StorageResponse, raw_storage_configs)
             node_statuses = await asyncio.gather(
                 *(client.get_node_status(node=node.node) for node in nodes),
                 return_exceptions=True,
@@ -240,12 +242,16 @@ class ClusterService:
             )
             for node, status in zip(nodes, node_statuses, strict=True)
         ]
-        unique_storages: dict[tuple[str, str | None], StorageResponse] = {}
-        for storage in storages:
-            key = (storage.storage, None if bool(storage.shared) else storage.node)
-            unique_storages[key] = storage
-        storage_used = sum(item.used or 0 for item in unique_storages.values())
-        storage_total = sum(item.total or 0 for item in unique_storages.values())
+        storage_count, storage_used, storage_total = self._storage_capacity(storages)
+        vm_storage_ids = {
+            storage.storage
+            for storage in storage_configs
+            if self._stores_guest_disks(storage.content)
+        }
+        vm_storage_count, vm_storage_used, vm_storage_total = self._storage_capacity(
+            storages,
+            allowed_storage_ids=vm_storage_ids,
+        )
         return ClusterResourceOverview(
             cluster_id=cluster_id,
             name=name,
@@ -258,10 +264,38 @@ class ClusterService:
             ),
             qemu_count=sum(1 for guest in guests if guest.type.lower() == "qemu"),
             lxc_count=sum(1 for guest in guests if guest.type.lower() == "lxc"),
-            storage_count=len(unique_storages),
+            storage_count=storage_count,
             storage_used_bytes=storage_used,
             storage_total_bytes=storage_total,
+            vm_storage_count=vm_storage_count,
+            vm_storage_used_bytes=vm_storage_used,
+            vm_storage_total_bytes=vm_storage_total,
             nodes=node_overviews,
+        )
+
+    @staticmethod
+    def _stores_guest_disks(content: str | None) -> bool:
+        if not content:
+            return False
+        content_types = {item.strip().lower() for item in content.split(",")}
+        return bool(content_types & {"images", "rootdir"})
+
+    @staticmethod
+    def _storage_capacity(
+        storages: list[StorageResponse],
+        *,
+        allowed_storage_ids: set[str] | None = None,
+    ) -> tuple[int, int, int]:
+        unique_storages: dict[tuple[str, str | None], StorageResponse] = {}
+        for storage in storages:
+            if allowed_storage_ids is not None and storage.storage not in allowed_storage_ids:
+                continue
+            key = (storage.storage, None if bool(storage.shared) else storage.node)
+            unique_storages[key] = storage
+        return (
+            len(unique_storages),
+            sum(item.used or 0 for item in unique_storages.values()),
+            sum(item.total or 0 for item in unique_storages.values()),
         )
 
     @classmethod
@@ -356,6 +390,9 @@ class ClusterService:
             storage_count=0,
             storage_used_bytes=0,
             storage_total_bytes=0,
+            vm_storage_count=0,
+            vm_storage_used_bytes=0,
+            vm_storage_total_bytes=0,
             nodes=[],
         )
 

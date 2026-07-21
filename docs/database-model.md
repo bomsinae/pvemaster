@@ -27,6 +27,8 @@ users ──< refresh_tokens
 
 sync_runs ──> clusters
 audit_logs ──> actor/target/operation (논리 참조 포함)
+backup_targets ──> clusters
+backup_runs ──> backup_targets, workloads, operations
 ```
 
 ## 3. 공통 enum
@@ -284,6 +286,38 @@ Cloud-Init SSH 공개키는 public 정보지만 별도 정규화 테이블 또�
 
 API 트랜잭션에서 operation과 outbox를 함께 commit하고 별도 dispatcher가 Celery에 발행한다. 발행 중복은 정상으로 간주하고 워커 멱등성으로 흡수한다.
 
+## 9.1 PBS 워크로드 백업
+
+### `backup_targets`
+
+- `id UUID PK`, `cluster_id UUID FK NOT NULL`, `storage_id VARCHAR(255) NOT NULL`.
+- `datastore`, `namespace`: PVE storage 구성에서 관측한 비민감 표시 정보.
+- `is_enabled`, `last_observed_available`, `last_checked_at`.
+- `created_by_id`, timestamps, `version`.
+- `UNIQUE(cluster_id, storage_id)`.
+
+PBS server 주소, token secret, fingerprint와 encryption key는 저장하지 않는다. 실제 연결
+정보는 PVE의 storage 구성이 관리하며 PVE Master는 storage ID만 참조한다.
+
+### `backup_runs`
+
+- `id UUID PK`, `operation_id UUID FK UNIQUE NOT NULL`.
+- `backup_target_id`, `workload_id`, 요청 당시 `organization_id`.
+
+### `restore_runs`
+
+- 성공한 `backup_run_id`와 실행 `operation_id`를 참조한다.
+- `cluster_id`, `source_workload_id`, `target_node`, 새 `target_vmid`, `target_name`과 상태를 저장한다.
+- 같은 클러스터·VMID의 `QUEUED`/`RUNNING` 복구는 부분 unique index로 하나만 허용한다.
+- 기존 workload를 덮어쓰지 않으며 복구된 VM/CT는 inventory 동기화에서 새 workload로 수집한다.
+- `mode`, `compression`, `status`.
+- `snapshot_volume_id`, `snapshot_time`, 논리 크기 `size_bytes`, 이번 실행 신규 전송량 `transferred_bytes`.
+- `started_at`, `finished_at`, `created_at`.
+
+백업 실행 상태의 기준은 연결된 operation이다. 백업이 성공했지만 후속 storage content
+조회가 실패하면 operation은 성공으로 유지하고 snapshot metadata를 후속 재조정 대상으로
+남긴다.
+
 ## 10. IPAM
 
 ### `ip_pools`
@@ -340,6 +374,7 @@ DB trigger가 모든 UPDATE를 차단하고 DELETE는 retention transaction flag
 - `clusters`: active operation과 현재 리소스가 있으면 삭제 금지, 이후 disabled/tombstone 처리.
 - `workloads`: PVE에서 사라져도 tombstone 보존. 할당/operation 참조가 없는 오래된 투영만 별도 정책으로 정리 가능.
 - `operations`, `pve_tasks`: 운영/감사 요구 기간 동안 보존하며 큰 raw result는 더 짧게 정리한다.
+- `backup_runs`: operation 보존 기간과 함께 유지한다. 실제 PBS snapshot 삭제 여부는 주기적 관측으로 조정한다.
 - `audit_logs`: 기본 1년 온라인 보존 후 외부 불변 저장소 정책에 따라 archive.
 - `auth_sessions`, outbox 완료 행, sync run 상세는 더 짧은 TTL로 정리한다.
 - 모든 보존 작업 자체도 감사 대상이다.

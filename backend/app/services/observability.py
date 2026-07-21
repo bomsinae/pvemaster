@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.config import Settings
-from app.models.auth import AuditLog, User, UserRole
+from app.models.auth import AuditLog, Organization, User, UserRole
 from app.models.cluster import Cluster
 from app.models.ipam import IpAddress, IpAddressState, IpPool, IpPoolExclusion
 from app.models.operation import Operation, Workload
@@ -20,6 +20,8 @@ from app.schemas.observability import (
     AuditLogListResponse,
     AuditLogResponse,
     ClusterConnectionStatus,
+    DirectoryCountStatus,
+    DirectoryInventoryStatus,
     OperationalAlert,
     OperationsStatusResponse,
     QueueStatus,
@@ -185,6 +187,7 @@ class ObservabilityService:
         worker = await self._worker_status()
         queue = await self._queue_status()
         workloads = await self._workload_inventory()
+        directory = await self._directory_inventory()
         clusters = await self._cluster_statuses()
         alerts = await self._alerts(worker, queue, clusters)
         return OperationsStatusResponse(
@@ -192,6 +195,7 @@ class ObservabilityService:
             worker=worker,
             queue=queue,
             workloads=workloads,
+            directory=directory,
             clusters=clusters,
             alerts=alerts,
         )
@@ -324,6 +328,32 @@ class ObservabilityService:
             total=total_count,
             assigned=assigned_count,
             unassigned=max(0, total_count - assigned_count),
+        )
+
+    async def _directory_inventory(self) -> DirectoryInventoryStatus:
+        user_total = await self._session.scalar(
+            select(func.count()).select_from(User).where(User.deleted_at.is_(None))
+        )
+        active_users = await self._session.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(User.deleted_at.is_(None), User.is_active.is_(True))
+        )
+        organization_total = await self._session.scalar(
+            select(func.count()).select_from(Organization)
+        )
+        active_organizations = await self._session.scalar(
+            select(func.count()).select_from(Organization).where(Organization.is_active.is_(True))
+        )
+        return DirectoryInventoryStatus(
+            users=DirectoryCountStatus(
+                total=int(user_total or 0),
+                active=int(active_users or 0),
+            ),
+            organizations=DirectoryCountStatus(
+                total=int(organization_total or 0),
+                active=int(active_organizations or 0),
+            ),
         )
 
     async def _alerts(

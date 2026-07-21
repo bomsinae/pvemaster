@@ -185,13 +185,9 @@ class IpamService:
             else self._network(str(pool.cidr))
         )
         if "gateway" in fields:
-            target_gateway = (
-                self._address(payload.gateway) if payload.gateway is not None else None
-            )
+            target_gateway = self._address(payload.gateway) if payload.gateway is not None else None
         else:
-            target_gateway = (
-                self._address(pool.gateway) if pool.gateway is not None else None
-            )
+            target_gateway = self._address(pool.gateway) if pool.gateway is not None else None
         target_dns = (
             [self._address(value) for value in payload.dns_servers or []]
             if "dns_servers" in fields
@@ -347,8 +343,7 @@ class IpamService:
                 status_code=409,
                 code="IP_POOL_IN_USE",
                 message=(
-                    "Release reserved, assigned, or quarantined addresses before "
-                    "deleting the pool."
+                    "Release reserved, assigned, or quarantined addresses before deleting the pool."
                 ),
                 details={
                     "unavailable_addresses": int(unavailable_count or 0),

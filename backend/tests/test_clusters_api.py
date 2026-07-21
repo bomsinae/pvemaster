@@ -203,6 +203,9 @@ class PartialOverviewService(ClusterService):
             storage_count=1,
             storage_used_bytes=25,
             storage_total_bytes=100,
+            vm_storage_count=1,
+            vm_storage_used_bytes=25,
+            vm_storage_total_bytes=100,
             nodes=[],
         )
 
@@ -343,6 +346,27 @@ def test_storage_response_normalizes_cluster_resource_capacity() -> None:
     assert storage.total == 100 * 1024**3
     assert storage.used == 25 * 1024**3
     assert storage.avail == 75 * 1024**3
+
+
+def test_vm_storage_capacity_excludes_node_and_backup_only_storage() -> None:
+    storages = [
+        StorageResponse(storage="local", node="pve-a", used=30, total=100),
+        StorageResponse(storage="local-lvm", node="pve-a", used=70, total=200),
+        StorageResponse(storage="ceph-vm", node="pve-a", shared=True, used=50, total=300),
+        StorageResponse(storage="ceph-vm", node="pve-b", shared=True, used=50, total=300),
+        StorageResponse(storage="pbs", node="pve-a", used=400, total=1_000),
+    ]
+
+    count, used, total = ClusterService._storage_capacity(
+        storages,
+        allowed_storage_ids={"local-lvm", "ceph-vm"},
+    )
+
+    assert count == 2
+    assert used == 120
+    assert total == 500
+    assert ClusterService._stores_guest_disks("images,rootdir") is True
+    assert ClusterService._stores_guest_disks("iso,vztmpl,backup") is False
 
 
 async def test_cluster_list_only_queries_active_clusters(settings: Settings) -> None:

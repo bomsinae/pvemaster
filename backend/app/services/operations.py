@@ -327,6 +327,8 @@ class OperationService:
                 PowerAction(operation.action)
                 if operation.action in {item.value for item in PowerAction}
                 else AdminVmAction(operation.action)
+                if operation.action in {item.value for item in AdminVmAction}
+                else "backup"
             ),
             action_mode=str(
                 result.get(
@@ -335,7 +337,9 @@ class OperationService:
                     if operation.action in {item.value for item in PowerAction}
                     else "DESTRUCTIVE"
                     if operation.action == AdminVmAction.DELETE.value
-                    else "CONFIGURATION",
+                    else "CONFIGURATION"
+                    if operation.action in {item.value for item in AdminVmAction}
+                    else "BACKUP",
                 )
             ),
             status=OperationStatus(operation.status),

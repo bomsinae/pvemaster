@@ -67,6 +67,7 @@ PVE Master는 여러 Proxmox VE(PVE) 클러스터의 인벤토리와 VM 수명�
 | 네트워크 | `ip_pools`, `ip_addresses`, `ip_allocations` | 주소 범위, 예약/할당 상태와 이력 |
 | 프로비저닝 | `provision_requests` | 입력 스냅샷, 멱등성 키, 생성 상태 머신 |
 | 작업 | `operations`, `pve_tasks`, `operation_outbox` | 사용자 작업과 Celery 실행, PVE UPID 추적, DB commit 후 안전한 큐 발행 |
+| PBS 백업 | `backup_targets`, `backup_runs` | PVE에 등록된 PBS 스토리지 참조와 워크로드 백업 실행 이력 |
 | 관측/통제 | `sync_runs`, `audit_logs` | 동기화 실행과 변경 불가능한 감사 사건 |
 
 핵심 식별/제약 조건:
@@ -139,6 +140,20 @@ PVE Master는 여러 Proxmox VE(PVE) 클러스터의 인벤토리와 VM 수명�
 - `GET /api/v1/admin/audit-logs`
 - `GET /api/v1/admin/audit-logs/{audit_id}`
 - `GET /api/v1/health/live`, `GET /api/v1/health/ready`
+
+### PBS 워크로드 백업
+
+- `GET /api/v1/admin/clusters/{cluster_id}/backup-storages`
+- `GET|POST /api/v1/admin/backup-targets`
+- `PATCH /api/v1/admin/backup-targets/{target_id}`
+- `POST /api/v1/admin/workloads/{workload_id}/backups`
+- `GET /api/v1/admin/backups`, `GET /api/v1/admin/backups/{backup_run_id}`
+- `POST /api/v1/admin/backups/{backup_run_id}/restores`, `GET /api/v1/admin/restores/{restore_run_id}`
+
+초기 구현은 PVE에 미리 등록된 PBS 스토리지를 PVE API로 사용한다. PBS credential,
+백업 삭제, prune과 고객 셀프서비스는 포함하지 않는다. 복구는 SUPER_ADMIN이 성공한
+스냅샷을 새 VMID로 만드는 방식만 허용하고 기존 VM 덮어쓰기는 금지한다. 상세 범위는
+`docs/pbs-backup-plan.md`를 따른다.
 
 모든 상태 변경 API는 감사 대상이다. 비동기 API는 `202 Accepted`와 `operation_id`를 반환한다. 생성 요청은 `Idempotency-Key`를 필수로 받는다.
 
@@ -323,6 +338,32 @@ PVE Master는 여러 Proxmox VE(PVE) 클러스터의 인벤토리와 VM 수명�
 - 고위험 보안 발견 사항이 없고 운영·장애·복구·회전 런북이 승인된다.
 - 핵심 SLI(동기화 지연, 작업 성공률/대기시간, PVE 오류율)에 경보가 설정된다.
 
+### 단계 7 — PBS 워크로드 백업
+
+목표:
+
+- 클러스터별 PVE에 등록된 PBS 스토리지를 검색하고 백업 대상으로 등록한다.
+- 관리자가 VM/CT 수동 백업을 실행하고 UPID 기반 진행 상태와 백업 내역을 조회한다.
+- PVE/PBS secret을 새로 저장하지 않고 기존 operation, PVE task와 감사 모델을 재사용한다.
+
+주요 모델/API:
+
+- `backup_targets`, `backup_runs`, 확장된 `operations`, `pve_tasks`
+- PBS storage 검색, 백업 대상 관리, 수동 백업과 백업 내역 API
+
+테스트:
+
+- fake PVE client를 사용한 storage 검색, UPID 성공/실패/timeout 테스트
+- SUPER_ADMIN/OPERATOR/CUSTOMER 권한, 멱등성, 작업 충돌 테스트
+- PVE 인증/권한/TLS 오류와 제출 결과 불명확 시 중복 실행 방지 테스트
+
+완료 조건:
+
+- 서로 다른 클러스터에서 같은 VMID를 각각 안전하게 백업할 수 있다.
+- 백업 작업과 UPID, snapshot 메타데이터 및 감사 사건이 연결된다.
+- PBS token, PVE token과 암호화 키가 API, DB 신규 필드, 로그, Celery 인자에 노출되지 않는다.
+- 자동 스케줄과 복구는 수동 백업 운영 검증 후 별도 단계로 진행한다.
+
 ## 7. 보안 위험과 대응 우선순위
 
 | 위험 | 영향 | 핵심 대응 |
@@ -371,7 +412,7 @@ PVE Master는 여러 Proxmox VE(PVE) 클러스터의 인벤토리와 VM 수명�
 
 ## 9. 범위 밖 및 후속 후보
 
-- PVE 백업/복원, 스냅샷, 라이브 마이그레이션, HA 정책 관리
+- PVE 백업 자동 스케줄/복원, 스냅샷, 라이브 마이그레이션, HA 정책 관리
 - 고객 조직, 팀, 세분화된 사용자 역할과 승인 워크플로
 - SPICE 콘솔, 청구/사용량 정산
 - 템플릿 이미지 빌드 파이프라인과 구성 관리

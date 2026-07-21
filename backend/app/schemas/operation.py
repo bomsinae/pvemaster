@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -33,7 +34,7 @@ class JobResponse(BaseModel):
     vm_id: UUID
     workload_id: UUID
     organization_id: UUID | None
-    action: PowerAction | AdminVmAction
+    action: PowerAction | AdminVmAction | Literal["backup", "restore"]
     action_mode: str
     status: OperationStatus
     result: dict[str, object]

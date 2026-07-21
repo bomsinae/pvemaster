@@ -147,6 +147,17 @@ class ProxmoxClient:
         )
         return self._require_object_list(data)
 
+    async def get_storage_configurations(self) -> list[dict[str, Any]]:
+        data = await self._request_data("/api2/json/storage", expected_type=list)
+        return self._require_object_list(data)
+
+    async def get_node_storages(self, *, node: str) -> list[dict[str, Any]]:
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/storage",
+            expected_type=list,
+        )
+        return self._require_object_list(data)
+
     async def get_vm_status(self, *, node: str, vmid: int) -> dict[str, Any]:
         data = await self._request_data(
             f"/api2/json/nodes/{quote(node, safe='')}/qemu/{vmid}/status/current",
@@ -325,6 +336,86 @@ class ProxmoxClient:
             expected_type=dict,
         )
         return cast(dict[str, Any], data)
+
+    async def submit_guest_backup(
+        self,
+        *,
+        node: str,
+        vmid: int,
+        storage: str,
+        mode: str = "snapshot",
+        compression: str = "zstd",
+    ) -> str:
+        if mode != "snapshot" or compression != "zstd":
+            raise ValueError("unsupported backup option")
+        if vmid <= 0 or not storage or len(storage) > 255:
+            raise ValueError("invalid backup target")
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/vzdump",
+            expected_type=str,
+            method="POST",
+            data={
+                "vmid": str(vmid),
+                "storage": storage,
+                "mode": mode,
+                "compress": compression,
+            },
+        )
+        return self._require_upid(data)
+
+    async def get_backup_content(
+        self,
+        *,
+        node: str,
+        storage: str,
+        vmid: int,
+    ) -> list[dict[str, Any]]:
+        if vmid <= 0 or not storage or len(storage) > 255:
+            raise ValueError("invalid backup target")
+        data = await self._request_data(
+            (f"/api2/json/nodes/{quote(node, safe='')}/storage/{quote(storage, safe='')}/content"),
+            params={"content": "backup", "vmid": str(vmid)},
+            expected_type=list,
+        )
+        return self._require_object_list(data)
+
+    async def submit_guest_restore(
+        self,
+        *,
+        kind: str,
+        node: str,
+        archive: str,
+        vmid: int,
+        name: str,
+    ) -> str:
+        guest_type = self._guest_type(kind)
+        if vmid < 100 or not archive or len(archive) > 1024 or not name or len(name) > 63:
+            raise ValueError("invalid restore target")
+        payload = {
+            "vmid": str(vmid),
+            "start": "0",
+        }
+        if guest_type == "qemu":
+            payload.update({"archive": archive, "name": name, "unique": "1"})
+        else:
+            payload.update({"ostemplate": archive, "hostname": name, "restore": "1"})
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}",
+            expected_type=str,
+            method="POST",
+            data=payload,
+        )
+        return self._require_upid(data)
+
+    async def get_task_log(self, *, node: str, upid: str) -> list[dict[str, Any]]:
+        if not upid or len(upid) > 2048:
+            raise ValueError("invalid PVE task identifier")
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/tasks/{quote(upid, safe='')}/log",
+            params={"start": "0", "limit": "500"},
+            expected_type=list,
+        )
+        return self._require_object_list(data)
 
     async def clone_qemu_template(
         self,

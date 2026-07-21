@@ -127,6 +127,20 @@ PVE API token은 일반적으로 token ID와 secret으로 나뉜다.
 - token 권한 분리를 활성화하고 root 사용자 토큰 사용을 금지한다.
 - 등록 시 기능별 권한 probe 결과를 보여주되 더 넓은 권한을 자동 요구하지 않는다.
 
+### PBS 백업 권한
+
+- PVE Master는 초기 버전에서 PBS credential을 직접 저장하거나 PBS API를 호출하지 않는다.
+- 각 PVE cluster에는 별도 PBS API token과 전용 namespace를 사용한다.
+- PBS token은 특정 datastore/namespace의 `DatastoreBackup` 최소 권한만 부여한다.
+- 백업 client token에 삭제/prune 권한을 부여하지 않고 retention은 PBS prune job에서 실행한다.
+- 복구 API는 SUPER_ADMIN에게만 허용하고 성공한 snapshot volume ID를 서버에서 선택한다.
+- target node와 VMID는 API와 worker에서 다시 검증하며 기존 VMID 덮어쓰기와 `force`는 금지한다.
+- PVE token에는 복구에 필요한 VM allocate와 대상 storage allocate 권한만 추가하고 PBS 삭제 권한은 부여하지 않는다.
+- 백업 제출 timeout이나 결과 불명확 오류는 자동 재제출하지 않는다. 기존 UPID와 storage
+  content를 먼저 확인하여 중복 백업을 방지한다.
+- 고객 역할은 백업 목록과 실행 API에 접근할 수 없다. 조직 재할당 이전 snapshot에는 과거
+  고객 데이터가 포함될 수 있으므로 고객 백업 접근은 별도 보안 설계 전까지 금지한다.
+
 ## 5. 네트워크 및 SSRF 방어
 
 클러스터 endpoint는 관리자 입력이라도 SSRF 입력으로 취급한다.

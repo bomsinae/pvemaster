@@ -287,9 +287,7 @@ async def test_transactional_ipam_concurrency_exclusions_quarantine_and_ipv6() -
                 await ipam.delete_pool(edited_pool_id, version=edited_pool_version)
             assert in_use_delete.value.code == "IP_POOL_IN_USE"
             await session.rollback()
-            editable_quarantine = await ipam.release(
-                editable_allocation.id, "pool retirement"
-            )
+            editable_quarantine = await ipam.release(editable_allocation.id, "pool retirement")
             await ipam.approve_release(editable_quarantine.ip_address_id)
             current_editable = await ipam.get_pool(edited_pool_id)
             await ipam.delete_pool(edited_pool_id, version=current_editable.version)

@@ -99,8 +99,15 @@ class OrganizationCreate(BaseModel):
 
 
 class OrganizationUpdate(BaseModel):
-    name: str = Field(min_length=1, max_length=160)
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    is_active: bool | None = None
     version: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def has_change(self) -> Self:
+        if self.name is None and self.is_active is None:
+            raise ValueError("at least one organization field must be changed")
+        return self
 
 
 class OrganizationResponse(BaseModel):

@@ -9,6 +9,7 @@ from redis.asyncio import Redis
 
 from app.api.accounts import router as accounts_router
 from app.api.auth import router as auth_router
+from app.api.backups import router as backups_router
 from app.api.clusters import router as clusters_router
 from app.api.console import router as console_router
 from app.api.customer import router as customer_router
@@ -31,6 +32,18 @@ from app.security.tokens import TokenManager
 
 def enqueue_power_operation(operation_id: UUID, task_id: str) -> None:
     from app.tasks.power import enqueue_power_operation as publish
+
+    publish(operation_id, task_id)
+
+
+def enqueue_backup_operation(operation_id: UUID, task_id: str) -> None:
+    from app.tasks.backup import enqueue_backup_operation as publish
+
+    publish(operation_id, task_id)
+
+
+def enqueue_restore_operation(operation_id: UUID, task_id: str) -> None:
+    from app.tasks.backup import enqueue_restore_operation as publish
 
     publish(operation_id, task_id)
 
@@ -65,6 +78,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.token_manager = TokenManager(app_settings)
     app.state.proxmox_transport = None
     app.state.operation_publisher = enqueue_power_operation
+    app.state.backup_publisher = enqueue_backup_operation
+    app.state.restore_publisher = enqueue_restore_operation
     app.state.provisioning_publisher = enqueue_provisioning_request
 
     app.add_middleware(RequestIdMiddleware)
@@ -88,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(backups_router)
     app.include_router(accounts_router)
     app.include_router(clusters_router)
     app.include_router(console_router)

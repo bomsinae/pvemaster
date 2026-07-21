@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import String, cast, func, or_, select, update
+from sqlalchemy import String, cast, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -88,7 +88,9 @@ class AccountService:
 
     async def list_users(self) -> list[UserResponse]:
         require_service_role(self._principal, UserRole.SUPER_ADMIN, UserRole.OPERATOR)
-        users = await self._session.scalars(select(User).order_by(User.created_at.desc()))
+        users = await self._session.scalars(
+            select(User).where(User.deleted_at.is_(None)).order_by(User.created_at.desc())
+        )
         user_items = users.all()
         membership_rows = await self._session.execute(
             select(OrganizationMember.user_id, Organization.name)
@@ -174,6 +176,74 @@ class AccountService:
         await self._session.commit()
         await self._session.refresh(user)
         return UserResponse.model_validate(user)
+
+    async def delete_user(self, user_id: UUID, *, version: int) -> None:
+        require_service_role(self._principal, UserRole.SUPER_ADMIN)
+        if user_id == self._principal.user_id:
+            raise AppError(
+                status_code=409,
+                code="USER_SELF_DELETE",
+                message="The current user cannot delete their own account.",
+            )
+        user = await self._get_user(user_id, lock=True)
+        if version != user.version:
+            raise AppError(
+                status_code=409,
+                code="USER_VERSION_CONFLICT",
+                message="The user was modified by another request.",
+            )
+        if user.role == UserRole.SUPER_ADMIN.value and user.is_active:
+            count = await self._session.scalar(
+                select(func.count())
+                .select_from(User)
+                .where(
+                    User.role == UserRole.SUPER_ADMIN.value,
+                    User.is_active.is_(True),
+                    User.deleted_at.is_(None),
+                )
+            )
+            if count is None or count <= 1:
+                raise AppError(
+                    status_code=409,
+                    code="LAST_SUPER_ADMIN",
+                    message="The last active super administrator cannot be deleted.",
+                )
+
+        now = datetime.now(UTC)
+        before = {
+            "display_name": user.display_name,
+            "role": user.role,
+            "is_active": user.is_active,
+        }
+        await self._session.execute(
+            delete(OrganizationMember).where(OrganizationMember.user_id == user.id)
+        )
+        await self._session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+        user.email = f"deleted+{user.id}@deleted.invalid"
+        user.display_name = "삭제된 사용자"
+        user.role = UserRole.CUSTOMER.value
+        user.is_active = False
+        user.disabled_at = now
+        user.deleted_at = now
+        user.session_epoch += 1
+        user.version += 1
+        add_audit_event(
+            self._session,
+            action="USER_DELETED",
+            outcome="SUCCEEDED",
+            request_id=self._request_id,
+            actor_user_id=self._principal.user_id,
+            actor_role=self._principal.role,
+            target_type="user",
+            target_id=user.id,
+            before=before,
+            after={"is_active": False, "deleted": True},
+        )
+        await self._session.commit()
 
     async def reset_password(
         self,
@@ -262,7 +332,9 @@ class AccountService:
         request: OrganizationUpdate,
     ) -> OrganizationResponse:
         require_service_role(self._principal, UserRole.SUPER_ADMIN)
-        organization = await self._get_organization(organization_id, lock=True)
+        organization = await self._get_organization(
+            organization_id, lock=True, include_inactive=True
+        )
         if request.version != organization.version:
             raise AppError(
                 status_code=409,
@@ -270,7 +342,16 @@ class AccountService:
                 message="The organization was modified by another request.",
             )
         before = {"name": organization.name, "is_active": organization.is_active}
-        organization.name = request.name.strip()
+        if request.name is not None:
+            organization.name = request.name.strip()
+        if request.is_active is False and organization.is_active:
+            raise AppError(
+                status_code=422,
+                code="ORGANIZATION_DEACTIVATION_REQUIRES_DELETE",
+                message="Use the organization delete endpoint to validate and deactivate it.",
+            )
+        if request.is_active is True:
+            organization.is_active = True
         organization.version += 1
         add_audit_event(
             self._session,
@@ -392,7 +473,7 @@ class AccountService:
 
     async def list_members(self, organization_id: UUID) -> list[OrganizationMemberDetailResponse]:
         require_service_role(self._principal, UserRole.SUPER_ADMIN, UserRole.OPERATOR)
-        await self._get_organization(organization_id)
+        await self._get_organization(organization_id, include_inactive=True)
         rows = await self._session.execute(
             select(OrganizationMember, User)
             .join(User, User.id == OrganizationMember.user_id)
@@ -445,7 +526,7 @@ class AccountService:
         await self._session.commit()
 
     async def _get_user(self, user_id: UUID, *, lock: bool = False) -> User:
-        query = select(User).where(User.id == user_id)
+        query = select(User).where(User.id == user_id, User.deleted_at.is_(None))
         if lock:
             query = query.with_for_update()
         user = await self._session.scalar(query)
@@ -462,11 +543,11 @@ class AccountService:
         organization_id: UUID,
         *,
         lock: bool = False,
+        include_inactive: bool = False,
     ) -> Organization:
-        query = select(Organization).where(
-            Organization.id == organization_id,
-            Organization.is_active.is_(True),
-        )
+        query = select(Organization).where(Organization.id == organization_id)
+        if not include_inactive:
+            query = query.where(Organization.is_active.is_(True))
         if lock:
             query = query.with_for_update()
         organization = await self._session.scalar(query)

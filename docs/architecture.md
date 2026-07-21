@@ -78,6 +78,7 @@ PVE Master는 PVE 위에 위치하는 제어 플레인이다. 브라우저는 Fa
 - Operations: 사용자 의도, Celery 실행, PVE UPID 추적.
 - Provisioning: 템플릿 복제와 Cloud-Init 상태 머신.
 - IPAM: 풀, 주소, 예약과 할당.
+- Backup: PVE에 등록된 PBS storage 참조, 워크로드 백업 실행과 snapshot 메타데이터.
 - Audit: 보안/관리 사건의 append-only 기록.
 
 각 경계는 한 프로세스 안의 모듈로 시작하는 모듈러 모놀리스로 구현한다. 초기 규모에서 분산 서비스의 운영 복잡성을 피하면서, 큐 기반 작업과 명확한 도메인 인터페이스로 향후 분리를 가능하게 한다.
@@ -149,6 +150,7 @@ PENDING -> QUEUED -> RUNNING -> SUCCEEDED
 
 - 인벤토리 전체 동기화.
 - 모든 PVE 전원 작업.
+- PBS 워크로드 백업 제출과 UPID 추적.
 - VM 생성/복제/설정/시작과 취소.
 - 오래 걸리는 자격 증명 검증이나 대량 작업.
 

@@ -58,6 +58,16 @@ class WorkloadInventoryStatus(BaseModel):
     unassigned: int = Field(ge=0)
 
 
+class DirectoryCountStatus(BaseModel):
+    total: int = Field(ge=0)
+    active: int = Field(ge=0)
+
+
+class DirectoryInventoryStatus(BaseModel):
+    organizations: DirectoryCountStatus
+    users: DirectoryCountStatus
+
+
 class ClusterConnectionStatus(BaseModel):
     cluster_id: UUID
     name: str
@@ -82,5 +92,6 @@ class OperationsStatusResponse(BaseModel):
     worker: WorkerStatus
     queue: QueueStatus
     workloads: WorkloadInventoryStatus
+    directory: DirectoryInventoryStatus
     clusters: list[ClusterConnectionStatus]
     alerts: list[OperationalAlert] = Field(default_factory=list)

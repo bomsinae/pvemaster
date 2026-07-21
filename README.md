@@ -62,6 +62,7 @@ PVE Master는 여러 Proxmox VE 클러스터의 상태와 VM/CT 수명주기, �
 - 등록된 모든 클러스터의 CPU·RAM·디스크·load average와 노드별 RRD 그래프 조회
 - Proxmox 클러스터 등록·해제, 연결 시험과 실시간 노드/VM/CT/스토리지 조회
 - 기존 VM/CT 가져오기, 사양 변경·삭제, 전원 작업과 QEMU/LXC 콘솔
+- PVE에 등록된 PBS 스토리지 검색·대상 등록, VM/CT 수동 백업과 UPID 기반 실행 내역
 - 검색·필터·페이지네이션을 지원하는 조직 목록과 구성원·VM/CT 소유권 관리
 - 전체 사용자 조회, 고객 계정 생성과 비밀번호 초기화
 - IP 풀 생성·수정·안전 삭제와 주소 사용 현황 조회
@@ -75,6 +76,18 @@ VM/CT 가져오기를 실행하면 로컬 `workloads` 투영을 `(cluster_id, vm
 아직 후속 작업입니다.
 
 화면별 역할과 현재 구현 경계는 [`docs/admin-dashboard.md`](docs/admin-dashboard.md)를 참고합니다.
+
+### PBS 워크로드 백업 준비
+
+백업 기능을 사용하기 전에 각 PVE 클러스터에서 PBS를 `pbs` 타입 스토리지로 등록하고
+`content=backup`을 활성화합니다. 클러스터마다 별도 PBS API token과 namespace를 사용하고,
+token에는 특정 datastore/namespace의 `DatastoreBackup` 최소 권한만 부여하는 구성을 권장합니다.
+PVE Master는 PBS credential을 직접 저장하지 않고 PVE storage ID만 참조합니다.
+
+관리자 `백업` 화면에서 클러스터의 스토리지를 검색한 뒤 백업 대상으로 등록할 수 있습니다.
+초기 버전은 수동 `snapshot`/`zstd` 백업과 실행 내역 조회만 지원하며 자동 스케줄, 삭제/prune,
+복구와 고객 셀프서비스는 후속 범위입니다. 상세 설계는
+[`docs/pbs-backup-plan.md`](docs/pbs-backup-plan.md)를 참고합니다.
 
 ## 고객 포털
 

@@ -140,6 +140,9 @@ class ClusterResourceOverview(BaseModel):
     storage_count: int = Field(ge=0)
     storage_used_bytes: int = Field(ge=0)
     storage_total_bytes: int = Field(ge=0)
+    vm_storage_count: int = Field(ge=0)
+    vm_storage_used_bytes: int = Field(ge=0)
+    vm_storage_total_bytes: int = Field(ge=0)
     nodes: list[NodeResourceOverview] = Field(default_factory=list)
 
 

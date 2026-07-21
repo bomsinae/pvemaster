@@ -97,6 +97,26 @@ async def test_super_admin_updates_organization_with_version_check() -> None:
 
 
 @pytest.mark.asyncio
+async def test_super_admin_reactivates_inactive_organization() -> None:
+    service, session = _service()
+    organization = _organization()
+    organization.is_active = False
+    service._get_organization = AsyncMock(return_value=organization)  # type: ignore[method-assign]
+
+    updated = await service.update_organization(
+        organization.id,
+        OrganizationUpdate(is_active=True, version=2),
+    )
+
+    assert updated.is_active is True
+    assert updated.version == 3
+    service._get_organization.assert_awaited_once_with(  # type: ignore[attr-defined]
+        organization.id, lock=True, include_inactive=True
+    )
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_organization_delete_is_blocked_while_members_remain() -> None:
     service, session = _service()
     organization = _organization()

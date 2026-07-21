@@ -1,9 +1,14 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import {
   AuditLog,
+  BackupRun,
+  BackupStorageCandidate,
+  BackupTarget,
+  RestoreRun,
   AdminWorkloadJob,
   AdminApiError,
   Cluster,
@@ -26,8 +31,10 @@ import {
   Template,
   Workload,
   addOrganizationMember,
+  activateOrganization,
   assignWorkload,
   createCluster,
+  createBackupTarget,
   createIpPool,
   createOrganization,
   createOrganizationUser,
@@ -36,18 +43,23 @@ import {
   createTemplate,
   createUser,
   deleteIpPool,
+  deleteUser,
   deleteOrganization,
   deleteCluster,
   deleteProduct,
   deleteTemplate,
   deleteAdminVm,
   getClusterInventory,
+  getBackup,
+  getRestore,
   getClusterResourceOverview,
   getClusterRemovalCheck,
   getOperationsStatus,
   getAdminWorkloadJob,
   importClusterWorkloads,
   listAuditLogs,
+  listBackups,
+  listBackupTargets,
   listClusters,
   listIpPools,
   listOrganizations,
@@ -61,13 +73,18 @@ import {
   removeOrganizationMember,
   resetUserPassword,
   requestAdminWorkloadAction,
+  requestWorkloadBackup,
+  requestBackupRestore,
+  discoverBackupStorages,
   searchOrganizations,
   testCluster,
   unassignWorkload,
   updateAdminVmSpec,
+  updateBackupTarget,
   updateProduct,
   updateIpPool,
   updateOrganization,
+  updateUserStatus,
   updateTemplate,
   upsertProvisioningNode,
 } from "@/lib/admin-api";
@@ -103,6 +120,7 @@ const sectionLabels: Record<Section, string> = {
   overview: "운영 개요",
   clusters: "클러스터",
   vms: "가상 머신",
+  backups: "백업",
   access: "사용자와 조직",
   networks: "IP 주소 관리",
   provisioning: "프로비저닝",
@@ -135,6 +153,20 @@ function formatBytes(value: number | null) {
     unit += 1;
   }
   return `${result.toFixed(result >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function formatTransferredBytes(value: number | null) {
+  if (value === null) return "측정 정보 없음";
+  if (value === 0) return "신규 데이터 없음";
+  return formatBytes(value);
+}
+
+function formatDuration(startedAt: string | null, finishedAt: string | null) {
+  if (!startedAt || !finishedAt) return "—";
+  const seconds = Math.max(0, Math.round((Date.parse(finishedAt) - Date.parse(startedAt)) / 1000));
+  if (seconds < 60) return `${seconds}초`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}분 ${seconds % 60}초`;
 }
 
 function formatPercent(value: number | null) {
@@ -205,6 +237,11 @@ export function AdminDashboard({
   const [organizationTotal, setOrganizationTotal] = useState(0);
   const [organizationMembers, setOrganizationMembers] = useState<OrganizationMember[]>([]);
   const [workloads, setWorkloads] = useState<Workload[]>([]);
+  const [backupTargets, setBackupTargets] = useState<BackupTarget[]>([]);
+  const [backupCandidates, setBackupCandidates] = useState<BackupStorageCandidate[]>([]);
+  const [backupRuns, setBackupRuns] = useState<BackupRun[]>([]);
+  const [activeBackupRun, setActiveBackupRun] = useState<BackupRun | null>(null);
+  const [activeRestoreRun, setActiveRestoreRun] = useState<RestoreRun | null>(null);
   const [pools, setPools] = useState<IpPool[]>([]);
   const [editingPool, setEditingPool] = useState<IpPool | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
@@ -215,7 +252,9 @@ export function AdminDashboard({
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
   const [passwordResetUser, setPasswordResetUser] = useState<CurrentUser | null>(null);
+  const [managedUser, setManagedUser] = useState<CurrentUser | null>(null);
   const [selectedWorkload, setSelectedWorkload] = useState<string | null>(null);
+  const [backupFocusWorkload, setBackupFocusWorkload] = useState<string | null>(null);
   const [activeVmJob, setActiveVmJob] = useState<AdminWorkloadJob | null>(null);
   const [consoleWorkload, setConsoleWorkload] = useState<Workload | null>(null);
   const [audits, setAudits] = useState<AuditLog[]>([]);
@@ -228,13 +267,13 @@ export function AdminDashboard({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [form, setForm] = useState<"cluster" | "cluster-delete" | "user" | "user-password-reset" | "organization-user" | "organization" | "organization-delete" | "pool" | "pool-delete" | "product" | "product-delete" | "template" | "template-delete" | "node" | "vm" | "vm-spec" | "vm-delete" | null>(null);
+  const [form, setForm] = useState<"cluster" | "cluster-delete" | "user" | "user-password-reset" | "user-status" | "user-delete" | "organization-user" | "organization" | "organization-delete" | "pool" | "pool-delete" | "product" | "product-delete" | "template" | "template-delete" | "node" | "vm" | "vm-spec" | "vm-delete" | null>(null);
 
   const isSuperAdmin = user.role === "SUPER_ADMIN";
   const navigation = useMemo<Section[]>(
     () => isSuperAdmin
       ? [...adminSections]
-      : ["overview", "clusters", "vms", "access"],
+      : ["overview", "clusters", "vms", "backups", "access"],
     [isSuperAdmin],
   );
 
@@ -360,8 +399,12 @@ export function AdminDashboard({
         setPools(nextPools);
         setClusters(nextClusters);
       } else if (next === "vms") {
-        const nextWorkloads = await listWorkloads(apiBaseUrl, token);
+        const [nextWorkloads, nextRuns] = await Promise.all([
+          listWorkloads(apiBaseUrl, token),
+          listBackups(apiBaseUrl, token),
+        ]);
         setWorkloads(nextWorkloads);
+        setBackupRuns(nextRuns);
         if (isSuperAdmin) {
           const [nextClusters, nextOrganizations, nextPools, nextProducts, nextTemplates, nextNodes] = await Promise.all([
             listClusters(apiBaseUrl, token), listOrganizations(apiBaseUrl, token), listIpPools(apiBaseUrl, token),
@@ -372,6 +415,17 @@ export function AdminDashboard({
         }
         const visible = nextWorkloads.filter((item) => item.is_present && !item.is_template);
         setSelectedWorkload((current) => current && visible.some((item) => item.id === current) ? current : (visible[0]?.id ?? null));
+      } else if (next === "backups") {
+        const [nextTargets, nextRuns, nextWorkloads, nextClusters] = await Promise.all([
+          listBackupTargets(apiBaseUrl, token),
+          listBackups(apiBaseUrl, token),
+          listWorkloads(apiBaseUrl, token),
+          listClusters(apiBaseUrl, token),
+        ]);
+        setBackupTargets(nextTargets);
+        setBackupRuns(nextRuns);
+        setWorkloads(nextWorkloads);
+        setClusters(nextClusters);
       } else if (next === "provisioning") {
         const [nextProducts, nextTemplates, nextRequests, nextNodes, nextWorkloads, nextClusters] = await Promise.all([
           listProducts(apiBaseUrl, token),
@@ -478,6 +532,42 @@ export function AdminDashboard({
   }, [activeVmJob, apiBaseUrl, loadSection, token]);
 
   useEffect(() => {
+    if (!activeBackupRun || ["SUCCEEDED", "FAILED", "TIMEOUT"].includes(activeBackupRun.status)) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        const run = await getBackup(apiBaseUrl, token, activeBackupRun.id);
+        setActiveBackupRun(run);
+        setBackupRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+        if (["SUCCEEDED", "FAILED", "TIMEOUT"].includes(run.status)) {
+          if (run.status === "SUCCEEDED") setNotice("백업이 완료되었습니다.");
+          else setError(`${run.error_summary ?? "백업이 실패했습니다."} · ${run.error_code ?? run.status}`);
+          await loadSection("backups");
+        }
+      } catch (caught) { setError(readableError(caught)); }
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [activeBackupRun, apiBaseUrl, loadSection, token]);
+
+  useEffect(() => {
+    if (!activeRestoreRun || ["SUCCEEDED", "FAILED", "TIMEOUT"].includes(activeRestoreRun.status)) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        const run = await getRestore(apiBaseUrl, token, activeRestoreRun.id);
+        setActiveRestoreRun(run);
+        if (["SUCCEEDED", "FAILED", "TIMEOUT"].includes(run.status)) {
+          if (run.status === "SUCCEEDED") {
+            setNotice(`복구가 완료되었습니다 · VMID ${run.target_vmid}`);
+            await loadSection("vms");
+          } else {
+            setError(`${run.error_summary ?? "복구가 실패했습니다."} · ${run.error_code ?? run.status}`);
+          }
+        }
+      } catch (caught) { setError(readableError(caught)); }
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [activeRestoreRun, apiBaseUrl, loadSection, token]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => { void loadSection(section); }, 0);
     return () => window.clearTimeout(timer);
   }, [loadSection, section]);
@@ -561,6 +651,76 @@ export function AdminDashboard({
     } finally {
       setSaving(false);
     }
+  }
+
+  async function discoverClusterBackups(clusterId: string) {
+    setSaving(true); setError("");
+    try {
+      setBackupCandidates(await discoverBackupStorages(apiBaseUrl, token, clusterId));
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function registerBackupTarget(candidate: BackupStorageCandidate) {
+    setSaving(true); setError("");
+    try {
+      await createBackupTarget(apiBaseUrl, token, candidate.cluster_id, candidate.storage_id);
+      setNotice(`${candidate.storage_id} 백업 대상을 등록했습니다.`);
+      await loadSection("backups");
+      await discoverClusterBackups(candidate.cluster_id);
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function toggleBackupTarget(target: BackupTarget) {
+    setSaving(true); setError("");
+    try {
+      await updateBackupTarget(apiBaseUrl, token, target, !target.is_enabled);
+      await loadSection("backups");
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function runBackup(workloadId: string, targetId: string) {
+    setSaving(true); setError("");
+    try {
+      const run = await requestWorkloadBackup(
+        apiBaseUrl,
+        token,
+        workloadId,
+        targetId,
+        crypto.randomUUID(),
+      );
+      setActiveBackupRun(run);
+      setBackupRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+      setNotice(`백업 작업을 접수했습니다 · ${run.id.slice(0, 8)}`);
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function runRestore(
+    backupRunId: string,
+    payload: { target_node: string; target_vmid: number; target_name: string },
+  ) {
+    setSaving(true); setError("");
+    try {
+      const run = await requestBackupRestore(
+        apiBaseUrl,
+        token,
+        backupRunId,
+        payload,
+        crypto.randomUUID(),
+      );
+      setActiveRestoreRun(run);
+      setNotice(`복구 작업을 접수했습니다 · VMID ${run.target_vmid}`);
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  function openBackupForWorkload(workloadId: string) {
+    setSelectedWorkload(workloadId);
+    setBackupFocusWorkload(workloadId);
+    navigateToSection("backups");
   }
 
   async function addMember(userId: string) {
@@ -744,6 +904,38 @@ export function AdminDashboard({
     finally { setSaving(false); }
   }
 
+  async function submitUserStatus(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!managedUser) return;
+    setSaving(true);
+    setError("");
+    try {
+      const nextActive = !managedUser.is_active;
+      await updateUserStatus(apiBaseUrl, token, managedUser.id, nextActive, managedUser.version);
+      setUsers(await listUsers(apiBaseUrl, token));
+      setNotice(`${managedUser.display_name} 사용자를 ${nextActive ? "활성화" : "비활성화"}했습니다.`);
+      setManagedUser(null);
+      setForm(null);
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function submitUserDelete(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!managedUser) return;
+    setSaving(true);
+    setError("");
+    try {
+      await deleteUser(apiBaseUrl, token, managedUser.id, managedUser.version);
+      setUsers(await listUsers(apiBaseUrl, token));
+      if (selectedOrganization) await loadOrganizationMembers(selectedOrganization.id);
+      setNotice(`${managedUser.display_name} 사용자를 삭제했습니다.`);
+      setManagedUser(null);
+      setForm(null);
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
   async function submitOrganization(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -777,11 +969,23 @@ export function AdminDashboard({
     try {
       await deleteOrganization(apiBaseUrl, token, editingOrganization.id, editingOrganization.version);
       setForm(null);
-      setNotice(`${editingOrganization.name} 조직을 삭제했습니다.`);
+      setNotice(`${editingOrganization.name} 조직을 비활성화했습니다.`);
       setEditingOrganization(null);
       setSelectedOrganization(null);
       setOrganizationMembers([]);
       await loadSection("access");
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function reactivateOrganization(organization: Organization) {
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await activateOrganization(apiBaseUrl, token, organization.id, organization.version);
+      setSelectedOrganization(updated);
+      setOrganizations((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setNotice(`${updated.name} 조직을 활성화했습니다.`);
     } catch (caught) { setError(readableError(caught)); }
     finally { setSaving(false); }
   }
@@ -994,7 +1198,7 @@ export function AdminDashboard({
         <div className="admin-brand"><span className="brand-mark">PM</span><div><strong>PVE Master</strong><small>Control plane</small></div></div>
         <nav aria-label="관리자 메뉴">
           {navigation.map((item) => (
-            <button key={item} className={section === item ? "active" : ""} onClick={() => navigateToSection(item)}>
+            <button key={item} className={section === item ? "active" : ""} onClick={() => { if (item === "backups") setBackupFocusWorkload(null); navigateToSection(item); }}>
               <span>{sectionLabels[item]}</span>
             </button>
           ))}
@@ -1020,8 +1224,9 @@ export function AdminDashboard({
           <ClustersView clusters={clusters} current={currentCluster} nodes={nodes} guests={guests} storages={storages}
             selectedId={selectedCluster} onSelect={setSelectedCluster} onTest={runClusterTest} onImport={runWorkloadImport} onCreate={() => setForm("cluster")} onDelete={openClusterRemoval} saving={saving} canDelete={isSuperAdmin} />
         )}
-        {section === "vms" && <VmOperationsView workloads={workloads} onSelect={setSelectedWorkload} onCreate={() => setForm("vm")} onEdit={() => setForm("vm-spec")} onDelete={() => setForm("vm-delete")} onAction={runVmAction} onConsole={openConsole} activeJob={activeVmJob} saving={saving} canManage={isSuperAdmin} />}
-        {section === "access" && <AccessView users={users} organizations={organizations} organizationTotal={organizationTotal} members={organizationMembers} workloads={workloads} selectedOrganization={selectedOrganization} canWrite={isSuperAdmin} saving={saving} onSelectOrganization={(organization) => { setSelectedOrganization(organization); setOrganizations((current) => current.some((item) => item.id === organization.id) ? current : [organization, ...current]); }} onSearchOrganizations={searchOrganizationOptions} onAddMember={addMember} onRemoveMember={removeMember} onAssign={assignToOrganization} onUnassign={unassignFromOrganization} onUser={() => setForm("user")} onResetPassword={(targetUser) => { setPasswordResetUser(targetUser); setForm("user-password-reset"); }} onCreateMember={() => setForm("organization-user")} onOrganization={() => { setEditingOrganization(null); setForm("organization"); }} onEditOrganization={(organization) => { setEditingOrganization(organization); setForm("organization"); }} onDeleteOrganization={(organization) => { setEditingOrganization(organization); setForm("organization-delete"); }} />}
+        {section === "vms" && <VmOperationsView workloads={workloads} backupRuns={backupRuns} onSelect={setSelectedWorkload} onCreate={() => setForm("vm")} onEdit={() => setForm("vm-spec")} onDelete={() => setForm("vm-delete")} onBackup={openBackupForWorkload} onAction={runVmAction} onConsole={openConsole} activeJob={activeVmJob} saving={saving} canManage={isSuperAdmin} />}
+        {section === "backups" && <BackupsView clusters={clusters} workloads={workloads} targets={backupTargets} candidates={backupCandidates} runs={backupRuns} preferredWorkloadId={backupFocusWorkload} activeRun={activeBackupRun} activeRestore={activeRestoreRun} saving={saving} canConfigure={isSuperAdmin} onClearPreferredWorkload={() => setBackupFocusWorkload(null)} onDiscover={discoverClusterBackups} onRegister={registerBackupTarget} onToggle={toggleBackupTarget} onBackup={runBackup} onRestore={runRestore} />}
+        {section === "access" && <AccessView currentUserId={user.id} users={users} organizations={organizations} organizationTotal={organizationTotal} members={organizationMembers} workloads={workloads} selectedOrganization={selectedOrganization} canWrite={isSuperAdmin} saving={saving} onSelectOrganization={(organization) => { setSelectedOrganization(organization); setOrganizations((current) => current.some((item) => item.id === organization.id) ? current : [organization, ...current]); }} onSearchOrganizations={searchOrganizationOptions} onAddMember={addMember} onRemoveMember={removeMember} onAssign={assignToOrganization} onUnassign={unassignFromOrganization} onUser={() => setForm("user")} onResetPassword={(targetUser) => { setPasswordResetUser(targetUser); setForm("user-password-reset"); }} onUserStatus={(targetUser) => { setManagedUser(targetUser); setForm("user-status"); }} onDeleteUser={(targetUser) => { setManagedUser(targetUser); setForm("user-delete"); }} onCreateMember={() => setForm("organization-user")} onOrganization={() => { setEditingOrganization(null); setForm("organization"); }} onEditOrganization={(organization) => { setEditingOrganization(organization); setForm("organization"); }} onActivateOrganization={reactivateOrganization} onDeleteOrganization={(organization) => { setEditingOrganization(organization); setForm("organization-delete"); }} />}
         {section === "networks" && <NetworksView pools={pools} clusters={clusters} onCreate={() => { setEditingPool(null); setForm("pool"); }} onEdit={(pool) => { setEditingPool(pool); setForm("pool"); }} onDelete={(pool) => { setEditingPool(pool); setForm("pool-delete"); }} />}
         {section === "provisioning" && <ProvisioningView products={products} templates={templates} workloads={workloads} nodes={provisioningNodes} clusters={clusters} requests={requests} onCreateProduct={() => { setEditingProduct(null); setForm("product"); }} onEditProduct={(product) => { setEditingProduct(product); setForm("product"); }} onDeleteProduct={(product) => { setEditingProduct(product); setEditingTemplate(null); setForm("product-delete"); }} onCreateTemplate={() => { setEditingTemplate(null); setForm("template"); }} onEditTemplate={(template) => { setEditingTemplate(template); setForm("template"); }} onDeleteTemplate={(template) => { setEditingTemplate(template); setEditingProduct(null); setForm("template-delete"); }} onCreateNode={() => { setEditingProvisioningNode(null); setForm("node"); }} onEditNode={(node) => { setEditingProvisioningNode(node); setForm("node"); }} />}
         {section === "audit" && <AuditView audits={audits} total={auditTotal} offset={auditOffset} pageSize={auditPageSize} loading={loading} onPageChange={(offset) => { void loadSection("audit", offset); }} onPageSizeChange={(limit) => { void loadSection("audit", 0, limit); }} />}
@@ -1036,6 +1241,8 @@ export function AdminDashboard({
             {form === "cluster-delete" && currentCluster && <ClusterDeleteForm cluster={currentCluster} check={clusterRemovalCheck} checking={checkingClusterRemoval} onSubmit={submitClusterDelete} saving={saving} />}
             {(form === "user" || form === "organization-user") && <UserForm onSubmit={submitUser} saving={saving} organizationName={form === "organization-user" ? selectedOrganization?.name ?? null : null} />}
             {form === "user-password-reset" && passwordResetUser && <UserPasswordResetForm user={passwordResetUser} onSubmit={submitUserPasswordReset} saving={saving} />}
+            {form === "user-status" && managedUser && <UserStatusForm user={managedUser} onSubmit={submitUserStatus} saving={saving} />}
+            {form === "user-delete" && managedUser && <UserDeleteForm user={managedUser} onSubmit={submitUserDelete} saving={saving} />}
             {form === "organization" && <OrganizationForm onSubmit={submitOrganization} saving={saving} existing={editingOrganization} />}
             {form === "organization-delete" && editingOrganization && <OrganizationDeleteForm organization={editingOrganization} memberCount={organizationMembers.length} workloadCount={workloads.filter((item) => item.organization_id === editingOrganization.id).length} onSubmit={submitOrganizationDelete} saving={saving} />}
             {form === "pool" && <PoolForm onSubmit={submitPool} saving={saving} clusters={clusters} existing={editingPool} />}
@@ -1082,9 +1289,10 @@ function Overview({ apiBaseUrl, token, status, clusters, resources, loading, ref
     : status?.clusters.filter((cluster) => cluster.connected).length ?? 0;
   return <div className="admin-content enter-admin">
     <section className="signal-strip">
-      <div><span>플랫폼</span><strong>{status?.status.toUpperCase() ?? "—"}</strong><small>{status?.alerts.length ?? 0} active alerts</small></div>
       <div><span>할당 VM/CT</span><strong>{status ? `${status.workloads.assigned}/${status.workloads.total}` : "—"}</strong><small>organization assigned</small></div>
       <div><span>미할당 VM/CT</span><strong>{status?.workloads.unassigned ?? "—"}</strong><small>available inventory</small></div>
+      <div><span>조직</span><strong>{status ? `${status.directory.organizations.active}/${status.directory.organizations.total}` : "—"}</strong><small>active organizations</small></div>
+      <div><span>사용자</span><strong>{status ? `${status.directory.users.active}/${status.directory.users.total}` : "—"}</strong><small>active users</small></div>
       <div><span>클러스터</span><strong>{connected}/{clusters.length}</strong><small>connected</small></div>
     </section>
     <section className="admin-section"><div className="admin-section-title"><div><p className="eyebrow">Current state</p><h2>운영 신호</h2></div><span>실시간 운영 API 기준</span></div>
@@ -1115,24 +1323,22 @@ function ClusterResourceCard({ cluster, apiBaseUrl, token }: { cluster: ClusterR
   const cpuRatio = cpuCores > 0 ? usedCpuCores / cpuCores : null;
   const memoryUsed = cluster.nodes.reduce((total, node) => total + (node.memory_used_bytes ?? 0), 0);
   const memoryTotal = cluster.nodes.reduce((total, node) => total + (node.memory_total_bytes ?? 0), 0);
-  const nodeDiskUsed = cluster.nodes.reduce((total, node) => total + (node.disk_used_bytes ?? 0), 0);
-  const nodeDiskTotal = cluster.nodes.reduce((total, node) => total + (node.disk_total_bytes ?? 0), 0);
-  const diskUsed = nodeDiskTotal > 0 ? nodeDiskUsed : cluster.storage_used_bytes;
-  const diskTotal = nodeDiskTotal > 0 ? nodeDiskTotal : cluster.storage_total_bytes;
+  const diskUsed = cluster.vm_storage_used_bytes;
+  const diskTotal = cluster.vm_storage_total_bytes;
   const loadValues = cluster.nodes.map((node) => node.load_average[0]).filter((value): value is number => value !== undefined);
   const averageLoad = loadValues.length ? loadValues.reduce((sum, value) => sum + value, 0) / loadValues.length : null;
   const totalLoad = loadValues.reduce((sum, value) => sum + value, 0);
 
   return <article className="cluster-resource-card">
     <header><div><p className="eyebrow">Live cluster</p><h3>{cluster.name}</h3></div><StatusMark ok label="연결됨" /></header>
-    <div className="cluster-resource-meta"><span>{cluster.node_count} nodes</span><span>{cluster.running_guest_count}/{cluster.guest_count} running</span><span>{cluster.storage_count} storages</span><time>{formatTime(cluster.observed_at)}</time></div>
+    <div className="cluster-resource-meta"><span>{cluster.node_count} nodes</span><span>{cluster.running_guest_count}/{cluster.guest_count} running</span><span>{cluster.vm_storage_count} VM storages</span><time>{formatTime(cluster.observed_at)}</time></div>
     <div className="cluster-metric-grid">
       <ResourceMetric label="CPU" value={formatPercent(cpuRatio)} detail={cpuCores ? `${usedCpuCores.toFixed(1)} / ${cpuCores} cores` : "측정값 없음"} ratio={cpuRatio} />
       <ResourceMetric label="RAM" value={memoryTotal ? formatPercent(memoryUsed / memoryTotal) : "—"} detail={`${formatBytes(memoryUsed)} / ${formatBytes(memoryTotal || null)}`} ratio={memoryTotal ? memoryUsed / memoryTotal : null} />
-      <ResourceMetric label="DISK" value={diskTotal ? formatPercent(diskUsed / diskTotal) : "—"} detail={`${formatBytes(diskUsed)} / ${formatBytes(diskTotal || null)}`} ratio={diskTotal ? diskUsed / diskTotal : null} />
+      <ResourceMetric label="VM/CT DISK" value={diskTotal ? formatPercent(diskUsed / diskTotal) : "—"} detail={diskTotal ? `${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}` : "VM 스토리지 없음"} ratio={diskTotal ? diskUsed / diskTotal : null} />
       <ResourceMetric label="LOAD 1M" value={averageLoad === null ? "—" : averageLoad.toFixed(2)} detail={`${cluster.qemu_count} VM · ${cluster.lxc_count} CT`} ratio={cpuCores && averageLoad !== null ? totalLoad / cpuCores : null} />
     </div>
-    <div className="cluster-node-table"><div className="cluster-node-head"><span>노드</span><span>CPU</span><span>RAM</span><span>디스크</span><span>Load 1/5/15</span><span>가동시간</span></div>
+    <div className="cluster-node-table"><div className="cluster-node-head"><span>노드</span><span>CPU</span><span>RAM</span><span>루트 디스크</span><span>Load 1/5/15</span><span>가동시간</span></div>
       {cluster.nodes.map((node) => {
         const ramRatio = node.memory_used_bytes !== null && node.memory_total_bytes ? node.memory_used_bytes / node.memory_total_bytes : null;
         const diskRatio = node.disk_used_bytes !== null && node.disk_total_bytes ? node.disk_used_bytes / node.disk_total_bytes : null;
@@ -1175,9 +1381,239 @@ function InventoryTable({ title, columns, rows, className = "" }: { title: strin
   return <section className={`inventory-block ${className}`.trim()}><div><h3>{title}</h3><span>{rows.length}</span></div><div className="dynamic-table" style={{ "--columns": columns.length } as React.CSSProperties}><div className="table-head">{columns.map((column) => <span key={column}>{column}</span>)}</div>{rows.map((row, index) => <div className="table-row" key={`${row[0]}-${index}`}>{row.map((value, cell) => <span key={`${cell}-${value}`} data-label={columns[cell]}>{value}</span>)}</div>)}</div>{!rows.length && <p className="empty-state">조회된 항목이 없습니다.</p>}</section>;
 }
 
-function VmOperationsView({ workloads, onSelect, onCreate, onEdit, onDelete, onAction, onConsole, activeJob, saving, canManage }: {
-  workloads: Workload[]; onSelect: (id: string) => void; onCreate: () => void;
+function BackupsView({
+  clusters,
+  workloads,
+  targets,
+  candidates,
+  runs,
+  preferredWorkloadId,
+  activeRun,
+  activeRestore,
+  saving,
+  canConfigure,
+  onClearPreferredWorkload,
+  onDiscover,
+  onRegister,
+  onToggle,
+  onBackup,
+  onRestore,
+}: {
+  clusters: Cluster[];
+  workloads: Workload[];
+  targets: BackupTarget[];
+  candidates: BackupStorageCandidate[];
+  runs: BackupRun[];
+  preferredWorkloadId: string | null;
+  activeRun: BackupRun | null;
+  activeRestore: RestoreRun | null;
+  saving: boolean;
+  canConfigure: boolean;
+  onClearPreferredWorkload: () => void;
+  onDiscover: (clusterId: string) => void;
+  onRegister: (candidate: BackupStorageCandidate) => void;
+  onToggle: (target: BackupTarget) => void;
+  onBackup: (workloadId: string, targetId: string) => void;
+  onRestore: (
+    backupRunId: string,
+    payload: { target_node: string; target_vmid: number; target_name: string },
+  ) => void;
+}) {
+  const visibleWorkloads = useMemo(
+    () => workloads.filter((item) => item.is_present && !item.is_template),
+    [workloads],
+  );
+  const [clusterId, setClusterId] = useState(clusters[0]?.id ?? "");
+  const [workloadId, setWorkloadId] = useState(preferredWorkloadId ?? visibleWorkloads[0]?.id ?? "");
+  const effectiveClusterId = clusters.some((item) => item.id === clusterId)
+    ? clusterId
+    : (clusters[0]?.id ?? "");
+  const effectiveWorkloadId = visibleWorkloads.some((item) => item.id === workloadId)
+    ? workloadId
+    : preferredWorkloadId && visibleWorkloads.some((item) => item.id === preferredWorkloadId)
+      ? preferredWorkloadId
+      : (visibleWorkloads[0]?.id ?? "");
+  const selectedWorkload = visibleWorkloads.find((item) => item.id === effectiveWorkloadId) ?? null;
+  const matchingTargets = useMemo(
+    () => targets.filter(
+      (item) => item.is_enabled && item.cluster_id === selectedWorkload?.cluster_id,
+    ),
+    [selectedWorkload?.cluster_id, targets],
+  );
+  const [targetId, setTargetId] = useState(matchingTargets[0]?.id ?? "");
+  const effectiveTargetId = matchingTargets.some((item) => item.id === targetId)
+    ? targetId
+    : (matchingTargets[0]?.id ?? "");
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyStatus, setHistoryStatus] = useState("ALL");
+  const [historyClusterId, setHistoryClusterId] = useState("ALL");
+  const [historyWorkloadId, setHistoryWorkloadId] = useState(preferredWorkloadId ?? "ALL");
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [restoreFormOpen, setRestoreFormOpen] = useState(false);
+  const [restoreNode, setRestoreNode] = useState("");
+  const [restoreVmid, setRestoreVmid] = useState("");
+  const [restoreName, setRestoreName] = useState("");
+  const filteredRuns = useMemo(() => {
+    const normalizedQuery = historyQuery.trim().toLocaleLowerCase("ko");
+    return runs.filter((item) => {
+      const searchable = [
+        item.workload_name,
+        String(item.vmid),
+        item.organization_name,
+        item.cluster_name,
+        item.storage_id,
+        item.snapshot_volume_id,
+      ].filter(Boolean).join(" ").toLocaleLowerCase("ko");
+      return (!normalizedQuery || searchable.includes(normalizedQuery))
+        && (historyStatus === "ALL" || item.status === historyStatus)
+        && (historyClusterId === "ALL" || item.cluster_id === historyClusterId)
+        && (historyWorkloadId === "ALL" || item.workload_id === historyWorkloadId);
+    });
+  }, [historyClusterId, historyQuery, historyStatus, historyWorkloadId, runs]);
+  const selectedRun = selectedRunId
+    ? filteredRuns.find((item) => item.id === selectedRunId) ?? null
+    : null;
+  const restoreNodes = selectedRun
+    ? [...new Set([
+      selectedRun.source_node,
+      ...visibleWorkloads
+        .filter((item) => item.cluster_id === selectedRun.cluster_id)
+        .map((item) => item.node),
+    ])].sort((left, right) => left.localeCompare(right, "ko"))
+    : [];
+  const resetHistoryFilters = () => {
+    setHistoryQuery("");
+    setHistoryStatus("ALL");
+    setHistoryClusterId("ALL");
+    setHistoryWorkloadId("ALL");
+    onClearPreferredWorkload();
+  };
+  const openRunDetail = (run: BackupRun) => {
+    const source = visibleWorkloads.find((item) => item.id === run.workload_id);
+    const clusterWorkloads = visibleWorkloads.filter((item) => item.cluster_id === run.cluster_id);
+    const maxVmid = clusterWorkloads.reduce(
+      (maximum, item) => Math.max(maximum, item.vmid),
+      99,
+    );
+    setRestoreNode(source?.node ?? run.source_node);
+    setRestoreVmid(String(maxVmid + 1));
+    const safeName = `${run.workload_name ?? `vm-${run.vmid}`}-restored`
+      .replace(/[^A-Za-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 63);
+    setRestoreName(safeName || `vm-${run.vmid}-restored`);
+    setRestoreFormOpen(false);
+    setSelectedRunId(run.id);
+  };
+
+  useEffect(() => {
+    if (!selectedRun) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedRunId(null);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [selectedRun]);
+
+  const successfulWorkloadIds = new Set(
+    runs.filter((item) => item.status === "SUCCEEDED").map((item) => item.workload_id),
+  );
+  const unprotectedCount = visibleWorkloads.filter(
+    (item) => !successfulWorkloadIds.has(item.id),
+  ).length;
+  const terminal = activeRun === null || ["SUCCEEDED", "FAILED", "TIMEOUT"].includes(activeRun.status);
+
+  return <div className="admin-content backup-workspace enter-admin">
+    <section className="backup-summary-grid" aria-label="백업 요약">
+      <article><small>활성 대상</small><strong>{targets.filter((item) => item.is_enabled).length}</strong><span>PBS storages</span></article>
+      <article><small>성공</small><strong>{runs.filter((item) => item.status === "SUCCEEDED").length}</strong><span>최근 실행 내역</span></article>
+      <article><small>실패</small><strong>{runs.filter((item) => ["FAILED", "TIMEOUT"].includes(item.status)).length}</strong><span>확인 필요</span></article>
+      <article><small>백업 없음</small><strong>{unprotectedCount}</strong><span>VM / CT</span></article>
+    </section>
+
+    <section className="backup-command-grid">
+      <div className="backup-panel">
+        <div className="admin-section-title"><div><p className="eyebrow">Manual backup</p><h2>지금 백업</h2><p>VM/CT와 같은 클러스터의 PBS 대상만 선택할 수 있습니다.</p></div></div>
+        <form className="backup-run-form" onSubmit={(event) => { event.preventDefault(); if (effectiveWorkloadId && effectiveTargetId) onBackup(effectiveWorkloadId, effectiveTargetId); }}>
+          <label><span>VM / CT</span><select value={effectiveWorkloadId} onChange={(event) => setWorkloadId(event.target.value)}>{visibleWorkloads.map((item) => <option value={item.id} key={item.id}>{item.name ?? `VMID ${item.vmid}`} · {item.cluster_name}</option>)}</select></label>
+          <label><span>PBS 대상</span><select value={effectiveTargetId} onChange={(event) => setTargetId(event.target.value)} disabled={!matchingTargets.length}><option value="">{matchingTargets.length ? "대상 선택" : "사용 가능한 대상 없음"}</option>{matchingTargets.map((item) => <option value={item.id} key={item.id}>{item.storage_id} · {item.cluster_name}</option>)}</select></label>
+          <div className="backup-run-options"><span>SNAPSHOT</span><span>ZSTD</span><span>{selectedWorkload?.kind ?? "—"}</span></div>
+          <button className="accent-button" type="submit" disabled={saving || !effectiveWorkloadId || !effectiveTargetId || !terminal}>{activeRun && !terminal ? `백업 ${activeRun.status}` : "백업 실행"}</button>
+        </form>
+      </div>
+
+      <div className="backup-panel">
+        <div className="admin-section-title"><div><p className="eyebrow">PVE storage</p><h2>백업 대상 검색</h2><p>PVE에 미리 등록된 PBS 스토리지만 가져옵니다.</p></div></div>
+        <div className="backup-discovery-tools"><select aria-label="PBS 검색 클러스터" value={effectiveClusterId} onChange={(event) => setClusterId(event.target.value)}>{clusters.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><button onClick={() => onDiscover(effectiveClusterId)} disabled={saving || !effectiveClusterId}>스토리지 검색</button></div>
+        <div className="backup-candidate-list">
+          {candidates.filter((item) => item.cluster_id === effectiveClusterId).map((item) => <div key={`${item.cluster_id}-${item.storage_id}`}><span><StatusMark ok={item.available} label={item.available ? "사용 가능" : "확인 필요"} /><strong>{item.storage_id}</strong><small>{item.datastore ?? "datastore 미표시"}{item.namespace ? ` · ${item.namespace}` : ""}</small></span>{item.registered_target_id ? <em>등록됨</em> : canConfigure ? <button onClick={() => onRegister(item)} disabled={saving || !item.enabled_in_pve}>대상 등록</button> : <em>미등록</em>}</div>)}
+          {!candidates.some((item) => item.cluster_id === effectiveClusterId) && <p className="empty-state">클러스터를 선택하고 스토리지를 검색하세요.</p>}
+        </div>
+      </div>
+    </section>
+
+    <section className="backup-panel">
+      <div className="admin-section-title"><div><p className="eyebrow">Backup targets</p><h2>등록된 대상</h2></div></div>
+      <div className="backup-target-list">
+        {targets.map((item) => <div key={item.id}><span><StatusMark ok={item.available && item.is_enabled} label={item.is_enabled ? item.available ? "사용 가능" : "연결 확인 필요" : "비활성"} /><strong>{item.storage_id}</strong><small>{item.cluster_name} · {item.datastore ?? "datastore 미표시"}{item.namespace ? ` / ${item.namespace}` : ""}</small></span>{canConfigure && <button onClick={() => onToggle(item)} disabled={saving}>{item.is_enabled ? "비활성화" : "활성화"}</button>}</div>)}
+        {!targets.length && <p className="empty-state">등록된 PBS 백업 대상이 없습니다.</p>}
+      </div>
+    </section>
+
+    <section className="backup-panel backup-history-panel">
+      <div className="admin-section-title"><div><p className="eyebrow">Backup history</p><h2>백업 내역 관리</h2><p>전체 이력을 검색하고 VM별 실행 결과와 저장 정보를 확인합니다.</p></div><span>{filteredRuns.length} / {runs.length} runs</span></div>
+      {preferredWorkloadId && historyWorkloadId !== "ALL" && <div className="backup-history-context"><span>VM에서 이동한 내역만 표시 중</span><button type="button" onClick={resetHistoryFilters}>전체 내역 보기</button></div>}
+      <div className="backup-history-tools">
+        <input type="search" value={historyQuery} onChange={(event) => setHistoryQuery(event.target.value)} placeholder="VM, 조직, VMID, 스냅샷 검색" aria-label="백업 내역 검색" />
+        <select value={historyStatus} onChange={(event) => setHistoryStatus(event.target.value)} aria-label="백업 상태"><option value="ALL">전체 상태</option><option value="SUCCEEDED">성공</option><option value="FAILED">실패</option><option value="TIMEOUT">시간 초과</option><option value="RUNNING">진행 중</option><option value="QUEUED">대기 중</option></select>
+        <select value={historyClusterId} onChange={(event) => setHistoryClusterId(event.target.value)} aria-label="백업 클러스터"><option value="ALL">전체 클러스터</option>{clusters.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
+        <select value={historyWorkloadId} onChange={(event) => { setHistoryWorkloadId(event.target.value); if (event.target.value === "ALL") onClearPreferredWorkload(); }} aria-label="백업 VM과 CT"><option value="ALL">전체 VM / CT</option>{visibleWorkloads.map((item) => <option key={item.id} value={item.id}>{item.name ?? `VMID ${item.vmid}`} · {item.vmid}</option>)}</select>
+        <button type="button" onClick={resetHistoryFilters}>초기화</button>
+      </div>
+      <div className="backup-table">
+        <div className="backup-table-head"><span>VM / CT · 조직</span><span>클러스터 / 대상</span><span>상태</span><span>백업 시각</span><span>크기</span></div>
+        {filteredRuns.map((item) => <button type="button" className="backup-table-row" key={item.id} onClick={() => openRunDetail(item)} aria-label={`${item.workload_name ?? `VMID ${item.vmid}`} 백업 상세 보기`}><span data-label="VM / CT · 조직"><strong>{item.workload_name ?? `VMID ${item.vmid}`}</strong><small>{item.kind} {item.vmid} · {item.organization_name ?? "미할당"}</small></span><span data-label="클러스터 / 대상"><strong>{item.cluster_name}</strong><small>{item.storage_id}</small></span><span data-label="상태"><StatusMark ok={item.status === "SUCCEEDED"} label={item.status} />{item.error_code && <small>{item.error_code}</small>}</span><span data-label="백업 시각">{formatTime(item.snapshot_time ?? item.requested_at)}</span><span data-label="크기"><strong>{formatBytes(item.size_bytes)}</strong><small>{item.transferred_bytes === 0 ? "기존 데이터 100% 재사용" : `신규 전송 ${formatTransferredBytes(item.transferred_bytes)}`}</small></span></button>)}
+        {!filteredRuns.length && <p className="empty-state">조건에 맞는 백업 내역이 없습니다.</p>}
+      </div>
+    </section>
+    {selectedRun && typeof document !== "undefined" && createPortal(<div className="admin-drawer-backdrop" onMouseDown={() => setSelectedRunId(null)}>
+      <aside className="admin-drawer backup-run-detail" role="dialog" aria-modal="true" aria-label="선택한 백업 상세" onMouseDown={(event) => event.stopPropagation()}>
+        <button className="drawer-close" type="button" onClick={() => setSelectedRunId(null)} aria-label="백업 상세 닫기">×</button>
+        <div><p className="eyebrow">Run detail</p><h3>{selectedRun.workload_name ?? `VMID ${selectedRun.vmid}`}</h3><StatusMark ok={selectedRun.status === "SUCCEEDED"} label={selectedRun.status} /></div>
+        <dl><div><dt>실행 ID</dt><dd>{selectedRun.id.slice(0, 8)}</dd></div><div><dt>조직</dt><dd>{selectedRun.organization_name ?? "미할당"}</dd></div><div><dt>대상</dt><dd>{selectedRun.cluster_name} / {selectedRun.storage_id}</dd></div><div><dt>백업 방식</dt><dd>{selectedRun.mode.toUpperCase()} · {selectedRun.compression.toUpperCase()}</dd></div><div><dt>논리 크기</dt><dd>{formatBytes(selectedRun.size_bytes)}</dd></div><div className="backup-transfer-metric"><dt>신규 전송 데이터</dt><dd>{formatTransferredBytes(selectedRun.transferred_bytes)}</dd></div><div><dt>소요 시간</dt><dd>{formatDuration(selectedRun.started_at, selectedRun.finished_at)}</dd></div><div><dt>스냅샷 시각</dt><dd>{formatTime(selectedRun.snapshot_time)}</dd></div></dl>
+        <div className="backup-volume-id"><span>스냅샷 ID</span><code>{selectedRun.snapshot_volume_id ?? "아직 연결된 스냅샷 정보가 없습니다."}</code></div>
+        {(selectedRun.error_code || selectedRun.error_summary) && <div className="backup-run-error"><strong>{selectedRun.error_code ?? "BACKUP_FAILED"}</strong><span>{selectedRun.error_summary ?? "백업 작업이 완료되지 않았습니다."}</span></div>}
+        <p className={`backup-size-note ${selectedRun.transferred_bytes === 0 ? "fully-reused" : ""}`}>{selectedRun.transferred_bytes === 0 ? "정상 백업입니다. PBS가 기존 청크를 100% 재사용해 이번 실행에서 새로 전송할 데이터가 없었습니다." : "논리 크기는 백업 데이터 전체 크기이며, 신규 전송 데이터는 PBS 중복제거로 재사용된 데이터를 제외하고 이번 실행에서 새로 전송된 양입니다."}</p>
+        <div className="backup-detail-actions">
+          <button className="accent-button" type="button" disabled={saving || !targets.some((item) => item.id === selectedRun.backup_target_id && item.is_enabled)} onClick={() => onBackup(selectedRun.workload_id, selectedRun.backup_target_id)}>같은 대상으로 다시 백업</button>
+          {canConfigure && selectedRun.status === "SUCCEEDED" && selectedRun.snapshot_volume_id && <button className="restore-button" type="button" disabled={saving || Boolean(activeRestore && !["SUCCEEDED", "FAILED", "TIMEOUT"].includes(activeRestore.status))} onClick={() => setRestoreFormOpen((current) => !current)}>{restoreFormOpen ? "복구 입력 닫기" : "새 VM/CT로 복구"}</button>}
+        </div>
+        {activeRestore?.backup_run_id === selectedRun.id && <div className={`restore-progress ${activeRestore.status.toLowerCase()}`} role="status"><span>복구 작업</span><strong>VMID {activeRestore.target_vmid} · {activeRestore.status}</strong>{activeRestore.error_code && <small>{activeRestore.error_code}</small>}</div>}
+        {restoreFormOpen && <form className="restore-run-form" onSubmit={(event) => {
+          event.preventDefault();
+          const targetVmid = Number(restoreVmid);
+          if (!restoreNode || !restoreName || !Number.isInteger(targetVmid)) return;
+          onRestore(selectedRun.id, { target_node: restoreNode, target_vmid: targetVmid, target_name: restoreName });
+        }}>
+          <div className="restore-safety-note"><strong>새 VM/CT로만 복구됩니다.</strong><span>기존 VMID는 덮어쓰지 않으며 복구 후 전원은 꺼진 상태로 유지됩니다.</span></div>
+          <label><span>대상 노드</span><select value={restoreNode} onChange={(event) => setRestoreNode(event.target.value)} required><option value="">노드 선택</option>{restoreNodes.map((node) => <option key={node} value={node}>{node}</option>)}</select></label>
+          <div className="restore-target-grid"><label><span>새 VMID</span><input type="number" min="100" max="999999999" value={restoreVmid} onChange={(event) => setRestoreVmid(event.target.value)} required /></label><label><span>새 이름</span><input type="text" minLength={1} maxLength={63} pattern="[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?" value={restoreName} onChange={(event) => setRestoreName(event.target.value)} required /></label></div>
+          <button className="accent-button" type="submit" disabled={saving || !restoreNode || !restoreName || Number(restoreVmid) < 100}>{saving ? "복구 요청 중…" : "복구 시작"}</button>
+        </form>}
+      </aside>
+    </div>, document.body)}
+  </div>;
+}
+
+function VmOperationsView({ workloads, backupRuns, onSelect, onCreate, onEdit, onDelete, onBackup, onAction, onConsole, activeJob, saving, canManage }: {
+  workloads: Workload[]; backupRuns: BackupRun[]; onSelect: (id: string) => void; onCreate: () => void;
   onEdit: () => void; onDelete: () => void;
+  onBackup: (workloadId: string) => void;
   onAction: (workload: Workload, action: AdminPowerAction) => void;
   onConsole: (workload: Workload) => void;
   activeJob: AdminWorkloadJob | null; saving: boolean; canManage: boolean;
@@ -1197,19 +1633,21 @@ function VmOperationsView({ workloads, onSelect, onCreate, onEdit, onDelete, onA
         <span>{filtered.length} / {visible.length} resources</span>
       </div>
       <div className="vm-table-scroll" aria-label="VM과 CT 목록"><div className="vm-table">
-        <div className="vm-table-head"><span>리소스</span><span>상태</span><span>vCPU</span><span>메모리</span><span>디스크</span><span>IP 주소</span><span>조직</span><span>사양 관리</span><span>전원 작업</span></div>
+        <div className="vm-table-head"><span>리소스</span><span>상태</span><span>vCPU</span><span>메모리</span><span>디스크</span><span>IP 주소</span><span>조직</span><span>최근 백업</span><span>관리 작업</span><span>전원 작업</span></div>
         {filtered.map((item) => {
           const running = item.power_state.toUpperCase() === "RUNNING";
           const actionPending = activeJob?.workload_id === item.id && !["SUCCEEDED", "FAILED", "TIMEOUT"].includes(activeJob.status);
           const capabilities = getAdminWorkloadCapabilities(item.kind);
           const hasPowerAction = (action: AdminPowerAction) => capabilities.powerActions.includes(action);
+          const latestBackup = backupRuns.find((run) => run.workload_id === item.id) ?? null;
           return <div key={item.id} className="vm-table-row">
             <span className="vm-resource-cell" data-label="리소스"><strong>{item.name ?? `VMID ${item.vmid}`}</strong><small>{item.kind} {item.vmid} · {item.cluster_name} / {item.node}</small>{actionPending && <small className="vm-inline-job">작업: {activeJob.action.toUpperCase()} · {activeJob.status}</small>}</span>
             <span className="vm-status-cell" data-label="상태"><StatusMark ok={running} label={item.power_state} /></span>
             <strong data-label="vCPU">{item.cpu_cores ?? "—"}</strong><strong data-label="메모리">{formatBytes(item.memory_bytes)}</strong><strong data-label="디스크">{formatBytes(item.disk_bytes)}</strong>
             <span className="vm-cell-muted" data-label="IP 주소">{item.assigned_ip_addresses?.length ? item.assigned_ip_addresses.join(", ") : "—"}</span>
             <span className="vm-ownership-cell" data-label="조직">{item.organization_id && item.organization_name ? <strong className="vm-ownership-badge assigned" aria-label={`${item.organization_name} 조직에 할당됨`} title={`${item.organization_name} 조직에 할당됨`}><i aria-hidden="true">✓</i><span>{item.organization_name}</span></strong> : <span className="vm-ownership-badge unassigned">미할당</span>}</span>
-            {canManage ? <span className="vm-row-actions" data-label="사양 관리">{capabilities.canUpdateSpec && <button disabled={saving || Boolean(actionPending)} onClick={() => { onSelect(item.id); onEdit(); }}>사양</button>}{capabilities.canDelete && <button className="danger" disabled={saving || Boolean(actionPending) || running || item.organization_id !== null} onClick={() => { onSelect(item.id); onDelete(); }}>삭제</button>}</span> : <span data-label="사양 관리">—</span>}
+            <button type="button" className="vm-backup-summary" data-label="최근 백업" onClick={() => onBackup(item.id)}>{latestBackup ? <><StatusMark ok={latestBackup.status === "SUCCEEDED"} label={latestBackup.status} /><small>{formatTime(latestBackup.snapshot_time ?? latestBackup.requested_at)}</small><em>{latestBackup.transferred_bytes === 0 ? "기존 데이터 100% 재사용" : `신규 전송 ${formatTransferredBytes(latestBackup.transferred_bytes)}`}</em></> : <><strong>백업 없음</strong><small>보호를 시작하세요</small></>}</button>
+            <span className="vm-row-actions" data-label="관리 작업"><button disabled={saving || Boolean(actionPending)} onClick={() => onBackup(item.id)}>백업 관리</button>{canManage && capabilities.canUpdateSpec && <button disabled={saving || Boolean(actionPending)} onClick={() => { onSelect(item.id); onEdit(); }}>사양</button>}{canManage && capabilities.canDelete && <button className="danger" disabled={saving || Boolean(actionPending) || running || item.organization_id !== null} onClick={() => { onSelect(item.id); onDelete(); }}>삭제</button>}</span>
             <span className="vm-row-actions vm-power-actions" data-label="전원 작업"><span className="vm-standard-actions"><button className="console-row-button" disabled={!running} onClick={() => onConsole(item)}>콘솔</button>{hasPowerAction("start") && <button disabled={saving || Boolean(actionPending) || running} onClick={() => onAction(item, "start")}>시작</button>}{hasPowerAction("shutdown") && <button disabled={saving || Boolean(actionPending) || !running} onClick={() => onAction(item, "shutdown")}>종료</button>}{hasPowerAction("reboot") && <button disabled={saving || Boolean(actionPending) || !running} onClick={() => onAction(item, "reboot")}>재부팅</button>}</span><span className="vm-forced-actions">{hasPowerAction("stop") && <button className="danger" disabled={saving || Boolean(actionPending) || !running} onClick={() => onAction(item, "stop")}>강제 중지</button>}{hasPowerAction("reset") && <button className="danger" disabled={saving || Boolean(actionPending) || !running} onClick={() => onAction(item, "reset")}>강제 재설정</button>}</span></span>
           </div>;
         })}
@@ -1319,6 +1757,7 @@ function OrganizationSearchSelect({
 }
 
 function AccessView({
+  currentUserId,
   users,
   organizations,
   organizationTotal,
@@ -1335,11 +1774,15 @@ function AccessView({
   onUnassign,
   onUser,
   onResetPassword,
+  onUserStatus,
+  onDeleteUser,
   onCreateMember,
   onOrganization,
   onEditOrganization,
+  onActivateOrganization,
   onDeleteOrganization,
 }: {
+  currentUserId: string;
   users: CurrentUser[];
   organizations: Organization[];
   organizationTotal: number;
@@ -1356,9 +1799,12 @@ function AccessView({
   onUnassign: (workloadId: string) => void;
   onUser: () => void;
   onResetPassword: (user: CurrentUser) => void;
+  onUserStatus: (user: CurrentUser) => void;
+  onDeleteUser: (user: CurrentUser) => void;
   onCreateMember: () => void;
   onOrganization: () => void;
   onEditOrganization: (organization: Organization) => void;
+  onActivateOrganization: (organization: Organization) => void;
   onDeleteOrganization: (organization: Organization) => void;
 }) {
   const [memberCandidate, setMemberCandidate] = useState("");
@@ -1472,13 +1918,13 @@ function AccessView({
 
     <section className="organization-detail access-global-detail">
       {accessScope === "organizations" && organizationView === "detail" && current && <>
-        <div className="resource-title"><div><p className="eyebrow">Organization workspace</p><h2>{current.name}</h2><p>구성원 접근과 VM/CT 소유권을 한 곳에서 관리합니다.</p></div><div className="organization-title-actions"><StatusMark ok={current.is_active} label={current.is_active ? "활성" : "비활성"} />{canWrite && <><button disabled={saving} onClick={() => onEditOrganization(current)}>수정</button><button className="danger" disabled={saving} onClick={() => onDeleteOrganization(current)}>삭제</button></>}</div></div>
+        <div className="resource-title"><div><p className="eyebrow">Organization workspace</p><h2>{current.name}</h2><p>구성원 접근과 VM/CT 소유권을 한 곳에서 관리합니다.</p></div><div className="organization-title-actions"><StatusMark ok={current.is_active} label={current.is_active ? "활성" : "비활성"} />{canWrite && <>{current.is_active && <button disabled={saving} onClick={() => onEditOrganization(current)}>수정</button>}{current.is_active ? <button className="danger" disabled={saving} onClick={() => onDeleteOrganization(current)}>비활성화</button> : <button disabled={saving} onClick={() => onActivateOrganization(current)}>활성화</button>}</>}</div></div>
         <div className="organization-summary organization-summary-compact"><div><strong>{members.length}</strong><span>구성원</span></div><div><strong>{assigned.length}</strong><span>할당 리소스</span></div></div>
       </>}
       {accessScope === "organizations" && organizationView === "detail" && <div className="organization-tabs" role="tablist" aria-label="조직 상세 관리 영역"><button className={activePane === "members" ? "active" : ""} disabled={!current} onClick={() => setActivePane("members")}>구성원 <span>{members.length}</span></button><button className={activePane === "workloads" ? "active" : ""} disabled={!current} onClick={() => setActivePane("workloads")}>할당 VM/CT <span>{assigned.length}</span></button></div>}
 
       {accessScope === "organizations" && organizationView === "detail" && activePane === "members" && current && <section className="organization-block organization-tab-panel">
-        <div className="admin-section-title"><div><p className="eyebrow">Membership</p><h2>구성원</h2><p>기존 고객을 연결하거나 새 고객 계정을 바로 만들어 추가합니다.</p></div>{canWrite && <div className="membership-actions"><div className="inline-control"><select aria-label="추가할 기존 고객" value={memberCandidate} onChange={(event) => setMemberCandidate(event.target.value)}><option value="">기존 고객 선택</option>{availableCustomers.map((item) => <option key={item.id} value={item.id}>{item.display_name} · {item.email}</option>)}</select><button disabled={!memberCandidate || saving} onClick={() => { onAddMember(memberCandidate); setMemberCandidate(""); }}>추가</button></div><button className="accent-button" disabled={saving} onClick={onCreateMember}>새 사용자 추가</button></div>}</div>
+        <div className="admin-section-title"><div><p className="eyebrow">Membership</p><h2>구성원</h2><p>기존 고객을 연결하거나 새 고객 계정을 바로 만들어 추가합니다.</p></div>{canWrite && current.is_active && <div className="membership-actions"><div className="inline-control"><select aria-label="추가할 기존 고객" value={memberCandidate} onChange={(event) => setMemberCandidate(event.target.value)}><option value="">기존 고객 선택</option>{availableCustomers.map((item) => <option key={item.id} value={item.id}>{item.display_name} · {item.email}</option>)}</select><button disabled={!memberCandidate || saving} onClick={() => { onAddMember(memberCandidate); setMemberCandidate(""); }}>추가</button></div><button className="accent-button" disabled={saving} onClick={onCreateMember}>새 사용자 추가</button></div>}</div>
         <label className="list-search"><span className="sr-only">구성원 검색</span><input type="search" value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} placeholder="이름, 이메일 또는 역할 검색" /></label>
         <div className="management-list management-list-scroll">{filteredMembers.map((member) => <div key={member.id}><span><strong>{member.display_name}</strong><small>{member.email} · {member.role}</small></span><StatusMark ok={member.is_active} label={member.is_active ? "활성" : "중지"} />{canWrite && <button className="text-danger" disabled={saving} onClick={() => { if (window.confirm(`${member.display_name} 사용자를 조직에서 제거할까요?`)) onRemoveMember(member.user_id); }}>제거</button>}</div>)}</div>
         {!members.length && <p className="empty-state">연결된 고객 사용자가 없습니다.</p>}
@@ -1505,7 +1951,7 @@ function AccessView({
       {accessScope === "users" && <section className="organization-block organization-tab-panel">
         <div className="admin-section-title"><div><p className="eyebrow">Identity directory</p><h2>전체 사용자</h2><p>조직 소속 여부를 포함한 전체 계정 목록입니다.</p></div>{canWrite && <button onClick={onUser}>사용자 추가</button>}</div>
         <div className="user-directory-controls"><label className="list-search"><span className="sr-only">사용자 검색</span><input type="search" value={userQuery} onChange={(event) => setUserQuery(event.target.value)} placeholder="이름, 이메일, 역할 또는 조직 검색" /></label><label className="unassigned-user-filter"><input type="checkbox" checked={onlyUnassignedUsers} onChange={(event) => setOnlyUnassignedUsers(event.target.checked)} /> <span>조직 미할당만</span><strong>{unassignedUserCount}</strong></label></div>
-        <div className="admin-table users-table table-scroll"><div className="table-head"><span>사용자</span><span>역할</span><span>조직</span><span>상태</span><span>최근 로그인</span><span>계정 관리</span></div>{filteredUsers.map((item) => <div className="table-row" key={item.id}><span><strong>{item.display_name}</strong><small>{item.email}</small></span><code>{item.role}</code><span className={organizationNames(item).length ? "user-organizations" : "user-unassigned"}>{organizationNames(item).length ? organizationNames(item).join(", ") : "미할당"}</span><StatusMark ok={item.is_active} label={item.is_active ? "활성" : "비활성"} /><span>{formatTime(item.last_login_at)}</span><span className="user-row-actions">{canWrite && <button type="button" disabled={saving} onClick={() => onResetPassword(item)}>비밀번호 초기화</button>}</span></div>)}</div>
+        <div className="admin-table users-table table-scroll"><div className="table-head"><span>사용자</span><span>역할</span><span>조직</span><span>상태</span><span>최근 로그인</span><span>계정 관리</span></div>{filteredUsers.map((item) => <div className="table-row" key={item.id}><span><strong>{item.display_name}</strong><small>{item.email}</small></span><code>{item.role}</code><span className={organizationNames(item).length ? "user-organizations" : "user-unassigned"}>{organizationNames(item).length ? organizationNames(item).join(", ") : "미할당"}</span><StatusMark ok={item.is_active} label={item.is_active ? "활성" : "비활성"} /><span>{formatTime(item.last_login_at)}</span><span className="user-row-actions">{canWrite && <><button type="button" disabled={saving || !item.is_active} onClick={() => onResetPassword(item)}>비밀번호 초기화</button><button type="button" disabled={saving || item.id === currentUserId} onClick={() => onUserStatus(item)}>{item.is_active ? "비활성화" : "활성화"}</button><button type="button" className="danger" disabled={saving || item.id === currentUserId} onClick={() => onDeleteUser(item)}>삭제</button></>}</span></div>)}</div>
         {users.length > 0 && !filteredUsers.length && <p className="empty-state">검색 조건에 맞는 사용자가 없습니다.</p>}
       </section>}
       {accessScope === "organizations" && organizationView === "detail" && !current && <p className="empty-state">조직 목록에서 관리할 조직을 선택하세요.</p>}
@@ -1584,11 +2030,29 @@ function UserPasswordResetForm({ user, onSubmit, saving }: { user: CurrentUser; 
     <SubmitButton saving={saving} label="비밀번호 초기화" />
   </form>;
 }
+function UserStatusForm({ user, onSubmit, saving }: { user: CurrentUser; onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) {
+  const nextLabel = user.is_active ? "비활성화" : "활성화";
+  return <form className="admin-form" onSubmit={onSubmit}>
+    <DrawerIntro eyebrow="Account status" title={`${user.display_name} ${nextLabel}`} copy={user.is_active ? "로그인을 즉시 차단하고 현재 세션을 모두 종료합니다. 조직 소속과 감사 이력은 유지됩니다." : "사용자가 다시 로그인하고 소속 조직의 VM에 접근할 수 있도록 계정을 활성화합니다."} />
+    <div className="form-fixed-value"><span>대상 계정</span><strong>{user.email}</strong><small>{user.role} · {user.organization_names?.join(", ") || "조직 미할당"}</small></div>
+    {user.is_active && <p className="form-security node-inventory-error">실행 즉시 현재 기기를 포함한 모든 로그인 세션이 종료됩니다.</p>}
+    <SubmitButton saving={saving} label={`사용자 ${nextLabel}`} />
+  </form>;
+}
+function UserDeleteForm({ user, onSubmit, saving }: { user: CurrentUser; onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) {
+  const pattern = user.email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return <form className="admin-form" onSubmit={onSubmit}>
+    <DrawerIntro eyebrow="Account removal" title={`${user.display_name} 삭제`} copy="로그인 계정과 조직 소속을 제거합니다. 운영 작업과 감사 이력의 참조는 익명화된 상태로 보존됩니다." />
+    <label>확인 문자열 <small>{user.email} 입력</small><input name="confirmation" required autoComplete="off" pattern={pattern} autoFocus /></label>
+    <p className="form-security node-inventory-error">삭제 후에는 계정을 복구할 수 없습니다. 일시적으로 접근만 막으려면 비활성화를 사용하세요.</p>
+    <SubmitButton saving={saving} label="사용자 삭제" />
+  </form>;
+}
 function OrganizationForm({ onSubmit, saving, existing }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean; existing: Organization | null }) { return <form className="admin-form" onSubmit={onSubmit}><DrawerIntro eyebrow={existing ? "Tenant settings" : "New tenant"} title={existing ? `${existing.name} 수정` : "조직 생성"} copy={existing ? "조직 이름 변경은 구성원 권한과 VM/CT 소유권을 유지합니다." : "VM 소유권과 고객 접근 경계를 구성하는 기본 단위입니다."} /><label>조직 이름<input name="name" required maxLength={160} defaultValue={existing?.name ?? ""} autoFocus /></label><SubmitButton saving={saving} label={existing ? "조직 수정" : "조직 생성"} /></form>; }
 function OrganizationDeleteForm({ organization, memberCount, workloadCount, onSubmit, saving }: { organization: Organization; memberCount: number; workloadCount: number; onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) {
   const blocked = memberCount > 0 || workloadCount > 0;
   const pattern = organization.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return <form className="admin-form" onSubmit={onSubmit}><DrawerIntro eyebrow="Tenant removal" title={`${organization.name} 삭제`} copy="조직을 비활성화하고 신규 접근과 할당 대상에서 제거합니다. 기존 감사 이력은 보존됩니다." /><div className="removal-blocks"><strong>삭제 전 정리 상태</strong><span>구성원<b>{memberCount}명</b></span><span>할당 VM/CT<b>{workloadCount}개</b></span></div>{blocked ? <p className="form-security node-inventory-error">구성원과 VM/CT 할당을 모두 제거한 뒤 삭제할 수 있습니다.</p> : <><label>확인 문자열 <small>{organization.name} 입력</small><input name="confirmation" required autoComplete="off" pattern={pattern} /></label><p className="form-security node-inventory-error">진행 중인 프로비저닝 요청이 있으면 서버에서 삭제를 거부합니다.</p></>}<SubmitButton saving={saving} disabled={blocked} label="조직 삭제" /></form>;
+  return <form className="admin-form" onSubmit={onSubmit}><DrawerIntro eyebrow="Tenant status" title={`${organization.name} 비활성화`} copy="신규 접근과 할당 대상에서 조직을 제외합니다. 조직 정보와 감사 이력은 보존되며 나중에 다시 활성화할 수 있습니다." /><div className="removal-blocks"><strong>비활성화 전 정리 상태</strong><span>구성원<b>{memberCount}명</b></span><span>할당 VM/CT<b>{workloadCount}개</b></span></div>{blocked ? <p className="form-security node-inventory-error">구성원과 VM/CT 할당을 모두 제거한 뒤 비활성화할 수 있습니다.</p> : <><label>확인 문자열 <small>{organization.name} 입력</small><input name="confirmation" required autoComplete="off" pattern={pattern} /></label><p className="form-security node-inventory-error">진행 중인 프로비저닝 요청이 있으면 서버에서 비활성화를 거부합니다.</p></>}<SubmitButton saving={saving} disabled={blocked} label="조직 비활성화" /></form>;
 }
 function PoolForm({ onSubmit, saving, clusters, existing }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean; clusters: Cluster[]; existing: IpPool | null }) { return <form className="admin-form" onSubmit={onSubmit}><DrawerIntro eyebrow="Address space" title={existing ? `${existing.name} 수정` : "IP 풀 생성"} copy={existing ? "주소가 사용된 풀은 CIDR, 클러스터와 Gateway를 변경할 수 없습니다." : "네트워크·브로드캐스트·gateway는 자동 할당에서 제외됩니다."} /><label>풀 이름<input name="name" required defaultValue={existing?.name ?? ""} /></label><label>클러스터<select name="cluster_id" defaultValue={existing?.cluster_id ?? ""}><option value="">공유 정책</option>{clusters.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.name}</option>)}</select></label><label>CIDR<input name="cidr" required placeholder="192.0.2.0/24" defaultValue={existing?.cidr ?? ""} /></label><label>Gateway<input name="gateway" placeholder="192.0.2.1" defaultValue={existing?.gateway ?? ""} /></label><label>DNS <small>쉼표 구분</small><input name="dns_servers" placeholder="1.1.1.1, 8.8.8.8" defaultValue={existing?.dns_servers.join(", ") ?? ""} /></label><label>Bridge<input name="bridge" defaultValue={existing?.bridge ?? "vmbr0"} required /></label><label>VLAN tag <small>선택</small><input name="vlan_tag" type="number" min="1" max="4094" defaultValue={existing?.vlan_tag ?? ""} /></label><label>할당 방식<select name="allocation_strategy" defaultValue={existing?.allocation_strategy ?? "SEQUENTIAL"}><option value="SEQUENTIAL">순차 할당</option><option value="RANDOM">무작위 할당</option></select></label><label>격리 시간(초)<input name="quarantine_seconds" type="number" min="0" max="2592000" defaultValue={existing?.quarantine_seconds ?? 600} required /></label><SubmitButton saving={saving} label={existing ? "IP 풀 수정" : "IP 풀 생성"} /></form>; }
 function PoolDeleteForm({ pool, onSubmit, saving }: { pool: IpPool; onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) {

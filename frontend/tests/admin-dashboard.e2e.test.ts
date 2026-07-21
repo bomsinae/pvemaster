@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   addOrganizationMember,
+  activateOrganization,
   AdminApiError,
   assignWorkload,
   createCluster,
@@ -12,6 +13,7 @@ import {
   deleteProduct,
   deleteIpPool,
   deleteOrganization,
+  deleteUser,
   deleteCluster,
   deleteTemplate,
   getAdminVmJob,
@@ -43,6 +45,7 @@ import {
   updateProduct,
   updateIpPool,
   updateOrganization,
+  updateUserStatus,
   updateTemplate,
   upsertProvisioningNode,
 } from "../lib/admin-api.ts";
@@ -118,9 +121,9 @@ test("admin login, operations, cluster registration and inventory flow", async (
       return response({ access_token: "admin-access", refresh_token: "admin-refresh" });
     }
     if (url.endsWith("/auth/me")) return response({ id: "admin-id", email: "admin@example.test", display_name: "Admin", role: "SUPER_ADMIN", is_active: true, last_login_at: null, created_at: "2026-07-14T12:00:00Z", updated_at: "2026-07-14T12:00:00Z", version: 1 });
-    if (url.endsWith("/admin/operations/status")) return response({ status: "ok", worker: { available: true, alive: true, workers: ["worker-1"], stale_after_seconds: 60 }, queue: { available: true, total: 0, queues: { operations: 0 }, backlog_threshold: 100 }, workloads: { total: 3, assigned: 2, unassigned: 1 }, clusters: [], alerts: [] });
+    if (url.endsWith("/admin/operations/status")) return response({ status: "ok", worker: { available: true, alive: true, workers: ["worker-1"], stale_after_seconds: 60 }, queue: { available: true, total: 0, queues: { operations: 0 }, backlog_threshold: 100 }, workloads: { total: 3, assigned: 2, unassigned: 1 }, directory: { organizations: { total: 3, active: 2 }, users: { total: 5, active: 4 } }, clusters: [], alerts: [] });
     if (url.endsWith("/admin/clusters") && init?.method === "POST") return response(cluster, 201);
-    if (url.endsWith("/admin/clusters/overview")) return response({ items: [{ cluster_id: cluster.id, name: cluster.name, connected: true, observed_at: "2026-07-14T12:00:00Z", error_code: null, node_count: 1, guest_count: 1, running_guest_count: 1, qemu_count: 1, lxc_count: 0, storage_count: 1, storage_used_bytes: 25, storage_total_bytes: 100, nodes: [{ node: "pve-a", status: "online", cpu: 0.25, maxcpu: 16, memory_used_bytes: 1024, memory_total_bytes: 2048, disk_used_bytes: 25, disk_total_bytes: 100, load_average: [1.1, 0.9, 0.7], uptime_seconds: 3600 }] }] });
+    if (url.endsWith("/admin/clusters/overview")) return response({ items: [{ cluster_id: cluster.id, name: cluster.name, connected: true, observed_at: "2026-07-14T12:00:00Z", error_code: null, node_count: 1, guest_count: 1, running_guest_count: 1, qemu_count: 1, lxc_count: 0, storage_count: 2, storage_used_bytes: 60, storage_total_bytes: 200, vm_storage_count: 1, vm_storage_used_bytes: 25, vm_storage_total_bytes: 100, nodes: [{ node: "pve-a", status: "online", cpu: 0.25, maxcpu: 16, memory_used_bytes: 1024, memory_total_bytes: 2048, disk_used_bytes: 35, disk_total_bytes: 100, load_average: [1.1, 0.9, 0.7], uptime_seconds: 3600 }] }] });
     if (url.endsWith(`/admin/clusters/${cluster.id}`) && init?.method === "DELETE") return new Response(null, { status: 204 });
     if (url.endsWith(`/admin/clusters/${cluster.id}/removal-check`)) return response({ cluster_id: cluster.id, can_remove: false, blocks: [{ code: "ASSIGNED_WORKLOADS", count: 1 }] });
     if (url.endsWith("/admin/clusters")) return response({ items: [cluster] });
@@ -223,6 +226,8 @@ test("admin login, operations, cluster registration and inventory flow", async (
 
   assert.equal(me.role, "SUPER_ADMIN");
   assert.equal(operations.worker.alive, true);
+  assert.equal(operations.directory.organizations.active, 2);
+  assert.equal(operations.directory.users.total, 5);
   assert.equal(initialClusters[0].id, cluster.id);
   assert.equal(resourceOverview[0].nodes[0].load_average[0], 1.1);
   assert.equal(nodeMetrics.items[0].network_receive_bps, 4096);
@@ -264,6 +269,33 @@ test("super administrator resets a user password without exposing it in a respon
   assert.deepEqual(JSON.parse(String(requests[0].init?.body)), {
     new_password: "new-password-at-least-12",
   });
+});
+
+test("super administrator changes user status and deletes an account with version checks", async () => {
+  const requests: Array<{ url: string; init?: RequestInit }> = [];
+  const updatedUser = {
+    id: "user-id",
+    email: "customer@example.test",
+    display_name: "Customer",
+    role: "CUSTOMER",
+    is_active: false,
+    last_login_at: null,
+    created_at: "2026-07-21T00:00:00Z",
+    updated_at: "2026-07-21T00:01:00Z",
+    version: 3,
+  };
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push({ url: String(input), init });
+    return init?.method === "DELETE" ? new Response(null, { status: 204 }) : response(updatedUser);
+  };
+
+  await updateUserStatus("http://api.test", "admin-access", "user/id", false, 2, fetcher);
+  await deleteUser("http://api.test", "admin-access", "user/id", 3, fetcher);
+
+  assert.equal(requests[0].url, "http://api.test/api/v1/admin/users/user%2Fid");
+  assert.deepEqual(JSON.parse(String(requests[0].init?.body)), { is_active: false, version: 2 });
+  assert.equal(requests[1].url, "http://api.test/api/v1/admin/users/user%2Fid?version=3");
+  assert.equal(requests[1].init?.method, "DELETE");
 });
 
 test("administrator updates and deletes an IP pool with optimistic versioning", async () => {
@@ -342,6 +374,13 @@ test("administrator updates and deletes an organization with optimistic versioni
     3,
     fetcher,
   );
+  await activateOrganization(
+    "http://api.test",
+    "admin-access",
+    "organization/id",
+    4,
+    fetcher,
+  );
 
   assert.equal(requests[0].url, "http://api.test/api/v1/admin/organizations/organization%2Fid");
   assert.equal(requests[0].init?.method, "PATCH");
@@ -351,6 +390,10 @@ test("administrator updates and deletes an organization with optimistic versioni
   });
   assert.equal(requests[1].url, "http://api.test/api/v1/admin/organizations/organization%2Fid?version=3");
   assert.equal(requests[1].init?.method, "DELETE");
+  assert.deepEqual(JSON.parse(String(requests[2].init?.body)), {
+    is_active: true,
+    version: 4,
+  });
 });
 
 test("removed clusters are excluded from administrator cluster options", async () => {

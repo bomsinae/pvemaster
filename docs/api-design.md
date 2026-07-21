@@ -157,9 +157,9 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 | GET | `/admin/users` | role, active, 검색 필터로 사용자 목록 |
 | POST | `/admin/users` | 고객/관리자 생성; 관리자 생성은 step-up MFA |
 | GET | `/admin/users/{user_id}` | 사용자 상세와 현재 할당 수 |
-| PATCH | `/admin/users/{user_id}` | 표시명, 활성 상태, 정책 변경 |
+| PATCH | `/admin/users/{user_id}` | 표시명, 활성 상태, 정책 변경. 비활성화 시 모든 세션 폐기 |
 | POST | `/admin/users/{user_id}/reset-password` | 새 비밀번호 설정 및 대상 사용자 전체 세션 폐기 |
-| DELETE | `/admin/users/{user_id}` | 물리 삭제가 아닌 비활성화; 현재 할당 처리 필요 |
+| DELETE | `/admin/users/{user_id}` | 계정 삭제. 로그인 식별정보를 익명화하고 조직 소속·세션을 제거하되 감사·작업 참조용 내부 행은 보존 |
 
 생성 body:
 
@@ -181,7 +181,7 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 | Method | Path | 동기성 | 설명 |
 |---|---|---:|---|
 | GET | `/admin/clusters` | 동기 | 활성 클러스터의 연결/동기화 상태 목록; 등록 해제된 tombstone 제외 |
-| GET | `/admin/clusters/overview` | 동기/짧은 timeout | 모든 활성 클러스터의 실시간 CPU, RAM, 루트 디스크, load average, VM/CT 및 스토리지 집계. 클러스터별 부분 실패는 해당 항목의 `error_code`로 반환 |
+| GET | `/admin/clusters/overview` | 동기/짧은 timeout | 모든 활성 클러스터의 실시간 CPU, RAM, 노드 루트 디스크, load average, VM/CT 및 스토리지 집계. 전체 스토리지 필드와 별도로 `images`/`rootdir` 지원 스토리지의 `vm_storage_count`, `vm_storage_used_bytes`, `vm_storage_total_bytes`를 반환한다. 클러스터별 부분 실패는 해당 항목의 `error_code`로 반환 |
 | POST | `/admin/clusters` | 동기 | 검증 후 클러스터와 암호화 credential 저장 |
 | GET | `/admin/clusters/{cluster_id}` | 동기 | 상세; secret 제외 |
 | PATCH | `/admin/clusters/{cluster_id}` | 동기 | 이름, endpoint, sync 설정 변경 |
@@ -269,8 +269,8 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 |---|---|---|
 | POST | `/admin/clusters/{cluster_id}/workloads/import` | 실시간 VM/CT를 로컬 workload로 멱등 upsert |
 | GET | `/admin/organizations` | 조직 목록. `q`, `status=active|inactive|all`, `sort=newest|oldest|name`, `limit`, `offset`을 지원하며 기본값은 활성 조직·최근 생성순이라 기존 조회와 호환 |
-| PATCH | `/admin/organizations/{organization_id}` | 조직 이름 수정; version 충돌 검사 |
-| DELETE | `/admin/organizations/{organization_id}` | 구성원·할당·진행 중 프로비저닝이 없을 때 비활성화 |
+| PATCH | `/admin/organizations/{organization_id}` | 조직 이름 수정 또는 비활성 조직 재활성화; version 충돌 검사 |
+| DELETE | `/admin/organizations/{organization_id}` | 구성원·할당·진행 중 프로비저닝이 없을 때 비활성화. 조직 행과 감사 이력은 보존 |
 | GET | `/admin/organizations/{organization_id}/members` | 조직 구성원 조회 |
 | POST | `/admin/organizations/{organization_id}/members` | 활성 사용자 추가 |
 | DELETE | `/admin/organizations/{organization_id}/members/{user_id}` | 구성원 제거 및 고객 접근 회수 |
@@ -464,6 +464,27 @@ worker는 UPID가 저장된 작업을 재시작할 때 제출을 반복하지 �
 
 API의 `available_count`는 sparse IPv6 pool에서 추정/계산 비용이 클 수 있으므로 `allocated_count`, `quarantined_count`, `availability_status`를 분리한다. 자동 할당은 네트워크 주소, IPv4 broadcast, gateway, 제외 범위와 `DISABLED` 주소를 건너뛴다. IP 해제는 즉시 `AVAILABLE`이 아니라 `QUARANTINED`로 전환하며, 격리 만료 후에도 관리자 승인 API가 호출되어야 재사용된다. VM이 삭제 또는 동기화에서 사라져도 할당 상태는 자동 변경하지 않는다.
 
+## 11.1 PBS 백업 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/admin/clusters/{cluster_id}/backup-storages` | SUPER_ADMIN/OPERATOR | PVE에 등록된 PBS storage 검색 |
+| GET | `/admin/backup-targets` | SUPER_ADMIN/OPERATOR | 등록된 백업 대상 목록 |
+| POST | `/admin/backup-targets` | SUPER_ADMIN | 검색된 PBS storage를 대상에 등록 |
+| PATCH | `/admin/backup-targets/{target_id}` | SUPER_ADMIN | 대상 활성/비활성 전환 |
+| POST | `/admin/workloads/{workload_id}/backups` | SUPER_ADMIN/OPERATOR | 수동 snapshot 백업 접수 |
+| GET | `/admin/backups` | SUPER_ADMIN/OPERATOR | 백업 실행 내역 검색 |
+| GET | `/admin/backups/{backup_run_id}` | SUPER_ADMIN/OPERATOR | 백업 실행 상태와 snapshot 메타데이터 |
+| POST | `/admin/backups/{backup_run_id}/restores` | SUPER_ADMIN | 성공 스냅샷을 새 VM/CT로 복구 |
+| GET | `/admin/restores/{restore_run_id}` | SUPER_ADMIN | 복구 실행과 PVE 작업 상태 조회 |
+
+백업 실행 응답의 `size_bytes`는 논리 백업 크기이고 `transferred_bytes`는 이번 실행에서 PBS로 새로 전송된 데이터 양이다. 기존 실행이나 PVE 작업 로그에 측정 정보가 없으면 `transferred_bytes`는 `null`이다.
+
+수동 백업은 `Idempotency-Key`가 필요하고 `202 Accepted`를 반환한다. 대상 storage는
+workload와 같은 cluster여야 하며 초기 지원 option은 `mode=snapshot`,
+`compression=zstd`로 제한한다. 고객 API, 삭제와 prune은 제공하지 않는다. 복구는 새 VMID,
+대상 node와 이름을 필수로 받고 기존 VMID 덮어쓰기와 `force` 옵션을 허용하지 않는다.
+
 ## 12. Operation API
 
 | Method | Path | 권한 | 설명 |
@@ -502,7 +523,7 @@ operation은 immutable request identity를 가지며 terminal status를 되돌�
 |---|---|---|---|
 | GET | `/health/live` | 내부/프록시 | 프로세스 event loop 생존 여부만 |
 | GET | `/health/ready` | 내부/오케스트레이터 | DB, 필수 migration, queue publish 가능 여부 |
-| GET | `/admin/operations/status` | SUPER_ADMIN/OPERATOR | worker, queue, cluster 연결과 활성 경보 |
+| GET | `/admin/operations/status` | SUPER_ADMIN/OPERATOR | worker, queue, VM/CT 할당, 활성·전체 사용자와 조직 수, cluster 연결과 활성 경보 |
 | GET | `/metrics` | 내부/Prometheus | worker, queue, cluster, operation, IP pool 지표 |
 
 PVE 개별 클러스터 장애는 전체 API readiness를 실패시키지 않고 관리자 상태/지표로 표시한다. 응답에 DSN, host 상세, version fingerprint 같은 공격 유용 정보를 노출하지 않는다.

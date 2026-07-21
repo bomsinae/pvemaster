@@ -7,6 +7,7 @@ from app.models.auth import (
     User,
     UserRole,
 )
+from app.models.backup import BackupRun, BackupTarget, RestoreRun
 from app.models.cluster import Cluster, ClusterCredential
 from app.models.ipam import (
     IpAddress,
@@ -37,6 +38,9 @@ from app.models.provisioning import (
 
 __all__ = [
     "AuditLog",
+    "BackupRun",
+    "BackupTarget",
+    "RestoreRun",
     "Cluster",
     "ClusterCredential",
     "IpAddress",

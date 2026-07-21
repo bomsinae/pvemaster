@@ -89,7 +89,9 @@ async def test_authentication_rotation_and_role_matrix() -> None:
     settings = Settings(
         _env_file=None,
         database_url=SecretStr(os.environ["AUTH_TEST_DATABASE_URL"]),
-        redis_url=SecretStr("redis://localhost:6379/15"),
+        redis_url=SecretStr(
+            os.environ.get("AUTH_TEST_REDIS_URL", "redis://localhost:6379/15")
+        ),
         app_secret_key=SecretStr(token_urlsafe(32)),
     )
     app = create_app(settings)
@@ -181,7 +183,8 @@ async def test_authentication_rotation_and_role_matrix() -> None:
             assert (
                 await client.get("/api/v1/auth/me", headers=operator_headers)
             ).status_code == 401
-            await _login(client, "operator@example.test", new_operator_password)
+            operator = await _login(client, "operator@example.test", new_operator_password)
+            operator_headers = {"Authorization": f"Bearer {operator['access_token']}"}
 
             super_admin = await _login(
                 client, "super@example.test", passwords_by_role[UserRole.SUPER_ADMIN]
@@ -281,9 +284,7 @@ async def test_authentication_rotation_and_role_matrix() -> None:
             ]
             assert users_by_email["customer@example.test"]["organization_names"] == []
             created_login = await _login(client, "created@example.test", created_password)
-            created_headers = {
-                "Authorization": f"Bearer {created_login['access_token']}"
-            }
+            created_headers = {"Authorization": f"Bearer {created_login['access_token']}"}
             reset_password = token_urlsafe(24)
             denied_reset = await client.post(
                 f"/api/v1/admin/users/{super_create.json()['id']}/reset-password",
@@ -297,9 +298,7 @@ async def test_authentication_rotation_and_role_matrix() -> None:
                 json={"new_password": reset_password},
             )
             assert password_reset.status_code == 204
-            assert (
-                await client.get("/api/v1/auth/me", headers=created_headers)
-            ).status_code == 401
+            assert (await client.get("/api/v1/auth/me", headers=created_headers)).status_code == 401
             revoked_refresh = await client.post(
                 "/api/v1/auth/refresh",
                 json={"refresh_token": created_login["refresh_token"]},
@@ -311,10 +310,16 @@ async def test_authentication_rotation_and_role_matrix() -> None:
             )
             assert old_password_login.status_code == 401
             await _login(client, "created@example.test", reset_password)
+            refreshed_users = await client.get("/api/v1/admin/users", headers=super_headers)
+            refreshed_created = next(
+                item
+                for item in refreshed_users.json()["items"]
+                if item["id"] == super_create.json()["id"]
+            )
             deactivated = await client.patch(
                 f"/api/v1/admin/users/{super_create.json()['id']}",
                 headers=super_headers,
-                json={"is_active": False, "version": super_create.json()["version"]},
+                json={"is_active": False, "version": refreshed_created["version"]},
             )
             assert deactivated.status_code == 200
             inactive_created = await client.post(
@@ -322,6 +327,27 @@ async def test_authentication_rotation_and_role_matrix() -> None:
                 json={"email": "created@example.test", "password": created_password},
             )
             assert inactive_created.status_code == 401
+
+            deleted_customer = await client.delete(
+                f"/api/v1/admin/users/{super_create.json()['id']}",
+                headers=super_headers,
+                params={"version": deactivated.json()["version"]},
+            )
+            assert deleted_customer.status_code == 204
+            users_after_delete = await client.get(
+                "/api/v1/admin/users", headers=super_headers
+            )
+            assert super_create.json()["id"] not in {
+                item["id"] for item in users_after_delete.json()["items"]
+            }
+            deleted_login = await client.post(
+                "/api/v1/auth/login",
+                json={
+                    "email": "created@example.test",
+                    "password": reset_password,
+                },
+            )
+            assert deleted_login.status_code == 401
 
             logout = await client.post(
                 "/api/v1/auth/logout",
