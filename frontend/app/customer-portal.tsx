@@ -6,7 +6,6 @@ import {
   AuthSession,
   CustomerPowerAction,
   CustomerApiError,
-  CustomerJob,
   CustomerVm,
   getCustomerJob,
   listCustomerVms,
@@ -14,8 +13,8 @@ import {
 } from "@/lib/customer-api";
 import { endBrowserSession } from "@/lib/browser-session";
 import { openConsoleWindow } from "@/lib/console-window";
-import { filterCustomerVms } from "@/lib/customer-portal-state";
-import type { CustomerPowerFilter } from "@/lib/customer-portal-state";
+import { filterCustomerVms, upsertCustomerJob } from "@/lib/customer-portal-state";
+import type { CustomerJobsByVmId, CustomerPowerFilter } from "@/lib/customer-portal-state";
 
 import { LoginPanel } from "./login-panel";
 import { PasswordChangeDialog } from "./password-change-dialog";
@@ -114,7 +113,7 @@ export function CustomerPortal({
   const [pendingAction, setPendingAction] = useState<CustomerPowerAction | null>(null);
   const [pendingVm, setPendingVm] = useState<CustomerVm | null>(null);
   const [forcedAcknowledged, setForcedAcknowledged] = useState(false);
-  const [activeJob, setActiveJob] = useState<CustomerJob | null>(null);
+  const [jobsByVmId, setJobsByVmId] = useState<CustomerJobsByVmId>({});
   const [consoleVm, setConsoleVm] = useState<CustomerVm | null>(null);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -136,12 +135,33 @@ export function CustomerPortal({
   }, [refreshList, session]);
 
   useEffect(() => {
-    if (!session || !activeJob || terminalStatuses.has(activeJob.status)) return;
+    if (!session) return;
+    const activeJobs = Object.values(jobsByVmId).filter(
+      (job) => !terminalStatuses.has(job.status),
+    );
+    if (activeJobs.length === 0) return;
     const timer = window.setTimeout(async () => {
       try {
-        const next = await getCustomerJob(apiBaseUrl, session.accessToken, activeJob.id);
-        setActiveJob(next);
-        if (terminalStatuses.has(next.status)) {
+        const pollResults = await Promise.allSettled(
+          activeJobs.map((job) => getCustomerJob(apiBaseUrl, session.accessToken, job.id)),
+        );
+        const polledJobs = pollResults.flatMap((result) =>
+          result.status === "fulfilled" ? [result.value] : [],
+        );
+        setJobsByVmId((current) => {
+          let next = current;
+          for (const job of polledJobs) {
+            if (current[job.vm_id]?.id === job.id) {
+              next = upsertCustomerJob(next, job);
+            }
+          }
+          return next;
+        });
+        const failedPoll = pollResults.find((result) => result.status === "rejected");
+        if (failedPoll?.status === "rejected") {
+          setError(errorMessage(failedPoll.reason));
+        }
+        if (polledJobs.some((job) => terminalStatuses.has(job.status))) {
           await refreshList(session);
         }
       } catch (caught) {
@@ -149,7 +169,7 @@ export function CustomerPortal({
       }
     }, 1500);
     return () => window.clearTimeout(timer);
-  }, [activeJob, apiBaseUrl, refreshList, session]);
+  }, [apiBaseUrl, jobsByVmId, refreshList, session]);
 
   async function runAction() {
     if (!session || !pendingVm || !pendingAction) return;
@@ -169,7 +189,7 @@ export function CustomerPortal({
         crypto.randomUUID(),
         { confirmForced: action === "stop" },
       );
-      setActiveJob(job);
+      setJobsByVmId((current) => upsertCustomerJob(current, job));
     } catch (caught) {
       setError(errorMessage(caught));
     }
@@ -202,7 +222,7 @@ export function CustomerPortal({
       setPendingVm(null);
       setConsoleVm(null);
       setPasswordDialogOpen(false);
-      setActiveJob(null);
+      setJobsByVmId({});
       onSessionEnded?.();
     }
   }
@@ -277,7 +297,7 @@ export function CustomerPortal({
               </div>
               {visibleVms.map((vm) => {
                 const running = vm.power_state.toUpperCase() === "RUNNING";
-                const vmJob = activeJob?.vm_id === vm.id ? activeJob : null;
+                const vmJob = jobsByVmId[vm.id] ?? null;
                 const jobPending = vmJob !== null && !terminalStatuses.has(vmJob.status);
                 return (
                   <div

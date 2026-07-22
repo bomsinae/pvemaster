@@ -267,6 +267,7 @@ export function AdminDashboard({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [form, setForm] = useState<"cluster" | "cluster-delete" | "user" | "user-password-reset" | "user-status" | "user-delete" | "organization-user" | "organization" | "organization-delete" | "pool" | "pool-delete" | "product" | "product-delete" | "template" | "template-delete" | "node" | "vm" | "vm-spec" | "vm-delete" | null>(null);
 
   const isSuperAdmin = user.role === "SUPER_ADMIN";
@@ -282,6 +283,7 @@ export function AdminDashboard({
   function navigateToSection(next: Section) {
     setForm(null);
     setNotice("");
+    setMobileNavOpen(false);
     if (next === section) return;
     window.history.pushState(
       { ...window.history.state, pveMasterSection: next },
@@ -1196,9 +1198,20 @@ export function AdminDashboard({
     <main className="admin-shell">
       <aside className="admin-nav">
         <div className="admin-brand"><span className="brand-mark">PM</span><div><strong>PVE Master</strong><small>Control plane</small></div></div>
-        <nav aria-label="관리자 메뉴">
+        <button
+          type="button"
+          className="admin-menu-toggle"
+          aria-expanded={mobileNavOpen}
+          aria-controls="admin-primary-navigation"
+          onClick={() => setMobileNavOpen((open) => !open)}
+        >
+          <span>메뉴</span>
+          <strong>{sectionLabels[section]}</strong>
+          <span aria-hidden="true">{mobileNavOpen ? "−" : "+"}</span>
+        </button>
+        <nav id="admin-primary-navigation" className={mobileNavOpen ? "mobile-open" : ""} aria-label="관리자 메뉴">
           {navigation.map((item) => (
-            <button key={item} className={section === item ? "active" : ""} onClick={() => { if (item === "backups") setBackupFocusWorkload(null); navigateToSection(item); }}>
+            <button key={item} type="button" aria-current={section === item ? "page" : undefined} className={section === item ? "active" : ""} onClick={() => { if (item === "backups") setBackupFocusWorkload(null); navigateToSection(item); }}>
               <span>{sectionLabels[item]}</span>
             </button>
           ))}
@@ -1951,7 +1964,7 @@ function AccessView({
       {accessScope === "users" && <section className="organization-block organization-tab-panel">
         <div className="admin-section-title"><div><p className="eyebrow">Identity directory</p><h2>전체 사용자</h2><p>조직 소속 여부를 포함한 전체 계정 목록입니다.</p></div>{canWrite && <button onClick={onUser}>사용자 추가</button>}</div>
         <div className="user-directory-controls"><label className="list-search"><span className="sr-only">사용자 검색</span><input type="search" value={userQuery} onChange={(event) => setUserQuery(event.target.value)} placeholder="이름, 이메일, 역할 또는 조직 검색" /></label><label className="unassigned-user-filter"><input type="checkbox" checked={onlyUnassignedUsers} onChange={(event) => setOnlyUnassignedUsers(event.target.checked)} /> <span>조직 미할당만</span><strong>{unassignedUserCount}</strong></label></div>
-        <div className="admin-table users-table table-scroll"><div className="table-head"><span>사용자</span><span>역할</span><span>조직</span><span>상태</span><span>최근 로그인</span><span>계정 관리</span></div>{filteredUsers.map((item) => <div className="table-row" key={item.id}><span><strong>{item.display_name}</strong><small>{item.email}</small></span><code>{item.role}</code><span className={organizationNames(item).length ? "user-organizations" : "user-unassigned"}>{organizationNames(item).length ? organizationNames(item).join(", ") : "미할당"}</span><StatusMark ok={item.is_active} label={item.is_active ? "활성" : "비활성"} /><span>{formatTime(item.last_login_at)}</span><span className="user-row-actions">{canWrite && <><button type="button" disabled={saving || !item.is_active} onClick={() => onResetPassword(item)}>비밀번호 초기화</button><button type="button" disabled={saving || item.id === currentUserId} onClick={() => onUserStatus(item)}>{item.is_active ? "비활성화" : "활성화"}</button><button type="button" className="danger" disabled={saving || item.id === currentUserId} onClick={() => onDeleteUser(item)}>삭제</button></>}</span></div>)}</div>
+        <div className="admin-table users-table table-scroll"><div className="table-head"><span>사용자</span><span>역할</span><span>조직</span><span>상태</span><span>최근 로그인</span><span>계정 관리</span></div>{filteredUsers.map((item) => <div className="table-row" key={item.id}><span data-label="사용자"><strong>{item.display_name}</strong><small>{item.email}</small></span><code data-label="역할">{item.role}</code><span data-label="조직" className={organizationNames(item).length ? "user-organizations" : "user-unassigned"}>{organizationNames(item).length ? organizationNames(item).join(", ") : "미할당"}</span><span className="user-status-cell" data-label="상태"><StatusMark ok={item.is_active} label={item.is_active ? "활성" : "비활성"} /></span><span data-label="최근 로그인">{formatTime(item.last_login_at)}</span><span className="user-row-actions" data-label="계정 관리">{canWrite && <><button type="button" disabled={saving || !item.is_active} onClick={() => onResetPassword(item)}>비밀번호 초기화</button><button type="button" disabled={saving || item.id === currentUserId} onClick={() => onUserStatus(item)}>{item.is_active ? "비활성화" : "활성화"}</button><button type="button" className="danger" disabled={saving || item.id === currentUserId} onClick={() => onDeleteUser(item)}>삭제</button></>}</span></div>)}</div>
         {users.length > 0 && !filteredUsers.length && <p className="empty-state">검색 조건에 맞는 사용자가 없습니다.</p>}
       </section>}
       {accessScope === "organizations" && organizationView === "detail" && !current && <p className="empty-state">조직 목록에서 관리할 조직을 선택하세요.</p>}
@@ -1961,7 +1974,7 @@ function AccessView({
 
 function NetworksView({ pools, clusters, onCreate, onEdit, onDelete }: { pools: IpPool[]; clusters: Cluster[]; onCreate: () => void; onEdit: (pool: IpPool) => void; onDelete: (pool: IpPool) => void }) {
   const clusterNames = new Map(clusters.map((cluster) => [cluster.id, cluster.name]));
-  return <div className="admin-content enter-admin"><section className="admin-section"><div className="admin-section-title"><div><p className="eyebrow">Address space</p><h2>IP 풀</h2></div><button className="accent-button" onClick={onCreate}>풀 생성</button></div><div className="admin-table pool-table"><div className="table-head"><span>풀</span><span>클러스터</span><span>네트워크</span><span>Gateway</span><span>할당</span><span>격리</span><span>상태</span><span>관리</span></div>{pools.map((pool) => <div className="table-row" key={pool.id}><span><strong>{pool.name}</strong><small>{pool.bridge}{pool.vlan_tag ? ` · VLAN ${pool.vlan_tag}` : ""}</small></span><span className={pool.cluster_id ? "pool-cluster-scope" : "pool-cluster-scope shared"}><strong>{pool.cluster_id ? clusterNames.get(pool.cluster_id) ?? "미확인 클러스터" : "공유 정책"}</strong>{pool.cluster_id && !clusterNames.has(pool.cluster_id) && <small>{pool.cluster_id.slice(0, 8)}</small>}</span><code>{pool.cidr}</code><code>{pool.gateway ?? "—"}</code><strong>{pool.allocated_count}</strong><span>{pool.quarantined_count}</span><StatusMark ok={pool.availability_status !== "EXHAUSTED"} label={pool.availability_status} /><span className="pool-row-actions"><button onClick={() => onEdit(pool)}>수정</button><button className="danger" onClick={() => onDelete(pool)}>삭제</button></span></div>)}</div>{!pools.length && <p className="empty-state">등록된 IP 풀이 없습니다.</p>}</section></div>;
+  return <div className="admin-content enter-admin"><section className="admin-section"><div className="admin-section-title"><div><p className="eyebrow">Address space</p><h2>IP 풀</h2></div><button className="accent-button" onClick={onCreate}>풀 생성</button></div><div className="admin-table pool-table"><div className="table-head"><span>풀</span><span>클러스터</span><span>네트워크</span><span>Gateway</span><span>할당</span><span>격리</span><span>상태</span><span>관리</span></div>{pools.map((pool) => <div className="table-row" key={pool.id}><span data-label="풀"><strong>{pool.name}</strong><small>{pool.bridge}{pool.vlan_tag ? ` · VLAN ${pool.vlan_tag}` : ""}</small></span><span data-label="클러스터" className={pool.cluster_id ? "pool-cluster-scope" : "pool-cluster-scope shared"}><strong>{pool.cluster_id ? clusterNames.get(pool.cluster_id) ?? "미확인 클러스터" : "공유 정책"}</strong>{pool.cluster_id && !clusterNames.has(pool.cluster_id) && <small>{pool.cluster_id.slice(0, 8)}</small>}</span><code data-label="네트워크">{pool.cidr}</code><code data-label="Gateway">{pool.gateway ?? "—"}</code><strong data-label="할당">{pool.allocated_count}</strong><span data-label="격리">{pool.quarantined_count}</span><span className="responsive-table-field" data-label="상태"><StatusMark ok={pool.availability_status !== "EXHAUSTED"} label={pool.availability_status} /></span><span className="pool-row-actions" data-label="관리"><button onClick={() => onEdit(pool)}>수정</button><button className="danger" onClick={() => onDelete(pool)}>삭제</button></span></div>)}</div>{!pools.length && <p className="empty-state">등록된 IP 풀이 없습니다.</p>}</section></div>;
 }
 
 function ProvisioningView({ products, templates, workloads, nodes, clusters, requests, onCreateProduct, onEditProduct, onDeleteProduct, onCreateTemplate, onEditTemplate, onDeleteTemplate, onCreateNode, onEditNode }: {
@@ -1984,7 +1997,7 @@ function ProvisioningView({ products, templates, workloads, nodes, clusters, req
       {!templates.length && <p className="empty-state">등록된 템플릿이 없습니다. Proxmox 템플릿을 가져온 뒤 등록하세요.</p>}
     </section>
     <section className="admin-section provisioning-nodes"><div className="admin-section-title"><div><p className="eyebrow">Placement policy</p><h2>프로비저닝 노드</h2><p className="section-note">활성·유지보수·예약 가능 용량을 기준으로 VM 배치 대상을 결정합니다.</p></div><div className="setup-actions"><span>{eligible} / {nodes.length} eligible</span><button onClick={onCreateNode}>노드 추가</button></div></div>
-      <div className="admin-table provisioning-node-table"><div className="table-head"><span>노드</span><span>클러스터</span><span>가용 RAM</span><span>가용 스토리지</span><span>배치 상태</span><span>최근 선택</span><span>관리</span></div>{nodes.map((node) => <div className="table-row" key={node.id}><span><strong>{node.name}</strong><small>{node.id.slice(0, 8)}</small></span><strong>{clusterNames.get(node.cluster_id) ?? node.cluster_id.slice(0, 8)}</strong><code>{formatBytes(node.available_memory_bytes)}</code><code>{formatBytes(node.available_storage_bytes)}</code><StatusMark ok={node.is_enabled && !node.is_maintenance} label={!node.is_enabled ? "중지" : node.is_maintenance ? "유지보수" : "자동 배치"} /><span>{formatTime(node.last_selected_at)}</span><button className="row-action" onClick={() => onEditNode(node)}>정책 수정</button></div>)}</div>
+      <div className="admin-table provisioning-node-table"><div className="table-head"><span>노드</span><span>클러스터</span><span>가용 RAM</span><span>가용 스토리지</span><span>배치 상태</span><span>최근 선택</span><span>관리</span></div>{nodes.map((node) => <div className="table-row" key={node.id}><span data-label="노드"><strong>{node.name}</strong><small>{node.id.slice(0, 8)}</small></span><strong data-label="클러스터">{clusterNames.get(node.cluster_id) ?? node.cluster_id.slice(0, 8)}</strong><code data-label="가용 RAM">{formatBytes(node.available_memory_bytes)}</code><code data-label="가용 스토리지">{formatBytes(node.available_storage_bytes)}</code><span className="responsive-table-field" data-label="배치 상태"><StatusMark ok={node.is_enabled && !node.is_maintenance} label={!node.is_enabled ? "중지" : node.is_maintenance ? "유지보수" : "자동 배치"} /></span><span data-label="최근 선택">{formatTime(node.last_selected_at)}</span><span className="responsive-table-field" data-label="관리"><button className="row-action" onClick={() => onEditNode(node)}>정책 수정</button></span></div>)}</div>
       {!nodes.length && <p className="empty-state">등록된 노드 정책이 없습니다. 클러스터 인벤토리에서 노드를 선택해 추가하세요.</p>}
     </section>
     <section className="admin-section"><div className="admin-section-title"><div><p className="eyebrow">Execution</p><h2>최근 프로비저닝</h2></div><span>{requests.length} requests</span></div><div className="admin-table request-table"><div className="table-head"><span>대상</span><span>VMID / IP</span><span>현재 단계</span><span>상태</span><span>요청 시각</span></div>{requests.map((request) => <div className="table-row" key={request.id}><span className="request-target"><strong>{request.target_name}</strong>{request.error_code && <small>{request.error_code}</small>}</span><code>{request.target_vmid ?? "auto"} · {request.ip_address ?? "reserved"}</code><span>{request.current_step}</span><StatusMark ok={request.status === "SUCCEEDED"} label={request.status} /><span>{formatTime(request.requested_at)}</span></div>)}</div></section>

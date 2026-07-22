@@ -1,6 +1,14 @@
-import type { CustomerVm } from "./customer-api";
+import type { CustomerJob, CustomerVm } from "./customer-api";
 
 export type CustomerPowerFilter = "ALL" | "RUNNING" | "STOPPED";
+export type CustomerJobsByVmId = Record<string, CustomerJob>;
+
+export function upsertCustomerJob(
+  jobsByVmId: CustomerJobsByVmId,
+  job: CustomerJob,
+): CustomerJobsByVmId {
+  return { ...jobsByVmId, [job.vm_id]: job };
+}
 
 export function filterCustomerVms(
   vms: CustomerVm[],

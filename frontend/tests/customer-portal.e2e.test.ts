@@ -9,7 +9,7 @@ import {
   login,
   requestPowerAction,
 } from "../lib/customer-api.ts";
-import { filterCustomerVms } from "../lib/customer-portal-state.ts";
+import { filterCustomerVms, upsertCustomerJob } from "../lib/customer-portal-state.ts";
 import {
   endBrowserSession,
   persistBrowserSession,
@@ -150,6 +150,39 @@ test("customer VM inventory searches names and IP addresses and filters power st
     ),
     ["stopped-vm"],
   );
+});
+
+test("customer VM operation statuses are retained independently for each VM", () => {
+  const firstJob = {
+    id: "57aec936-c0c3-4e39-b262-733512911f65",
+    job_id: "57aec936-c0c3-4e39-b262-733512911f65",
+    vm_id: "first-vm",
+    action: "shutdown" as const,
+    action_mode: "GRACEFUL" as const,
+    status: "SUCCEEDED" as const,
+    result: { final_power_state: "STOPPED" },
+    error_code: null,
+    error_summary: null,
+    retryable: false,
+    requested_at: "2026-07-22T01:00:00Z",
+    started_at: "2026-07-22T01:00:01Z",
+    finished_at: "2026-07-22T01:00:02Z",
+  };
+  const secondJob = {
+    ...firstJob,
+    id: "9198fe5c-ced4-4590-8307-24c570ee7241",
+    job_id: "9198fe5c-ced4-4590-8307-24c570ee7241",
+    vm_id: "second-vm",
+    action: "reboot" as const,
+    status: "RUNNING" as const,
+    result: {},
+    finished_at: null,
+  };
+
+  const jobsByVmId = upsertCustomerJob(upsertCustomerJob({}, firstJob), secondJob);
+
+  assert.equal(jobsByVmId["first-vm"], firstJob);
+  assert.equal(jobsByVmId["second-vm"], secondJob);
 });
 
 test("customer forced stop sends explicit server confirmation", async () => {
