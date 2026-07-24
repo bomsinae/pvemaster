@@ -62,6 +62,8 @@ Playwright는 세 browser project와 개발 서버를 한 설정에서 관리한
 | Production build | 통과 |
 | Playwright Chromium/Firefox/WebKit | 39 passed |
 | Alembic 왕복 | 14 revisions upgrade/downgrade/re-upgrade 통과 |
+| Python dependency audit | 알려진 취약점 없음 |
+| Node dependency audit | `npm install` audit 기준 취약점 없음 |
 | secret scan | 통과 |
 | workflow YAML parse | 통과 |
 
@@ -87,7 +89,8 @@ required check가 이를 병합 차단 범위에 포함한다.
 
 1. GitHub dependency graph를 활성화하고 dependency review를 required check로
    승격한다.
-2. dependency audit와 image scan에서 새로 발견되는 실제 취약점을 triage한다.
+2. dependency audit와 image scan에서 새로 발견되는 실제 취약점을 지속적으로
+   triage한다.
 3. [branch protection 운영 기준](branch-protection.md)을 repository settings에
    적용하고 실패 check의 병합 차단을 확인한다.
 4. staging에서 실제 PVE/PBS와 console WebSocket을 포함한 smoke test를 수행한다.
@@ -95,7 +98,9 @@ required check가 이를 병합 차단 범위에 포함한다.
 
 최초 원격 Python audit에서 `cryptography 46.0.7`의
 `GHSA-537c-gmf6-5ccf`가 발견되어 최소 버전을 `48.0.1`로 상향했다. 로컬
-`npm install`은 audit 요약으로 high severity 항목 3개가 있음을 알렸지만, 현재
-환경에서는 상세 audit 조회가 허용되지 않았다. 취약점을 무시한 완료 판정을 하지
-않으며, 원격 production Node audit 결과를 triage한 뒤 보안 gate 적용을 최종
-확인한다.
+환경에서의 Python audit와 원격 재검사는 모두 알려진 취약점 없이 통과했다.
+
+최초 원격 production Node audit에서는 `next 16.2.10`, `postcss 8.5.10`,
+`sharp 0.34.5`에 high severity 취약점 3건이 발견됐다. Next.js와 ESLint 구성을
+`16.2.11`, PostCSS를 `8.5.12`, Sharp를 `0.35.0`으로 상향했다. 갱신 후
+`npm install` audit은 355 packages에서 취약점 0건을 보고했다.
