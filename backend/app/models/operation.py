@@ -56,6 +56,8 @@ class Workload(Base):
     __table_args__ = (
         UniqueConstraint("cluster_id", "vmid"),
         CheckConstraint("kind IN ('QEMU', 'LXC')", name="ck_workloads_kind"),
+        Index("ix_workloads_cluster_present_kind", "cluster_id", "is_present", "kind"),
+        Index("ix_workloads_observed_at", "observed_at"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -72,6 +74,8 @@ class Workload(Base):
     disk_bytes: Mapped[int | None] = mapped_column(BigInteger)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_present: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sync_generation: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    missing_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     organization_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("organizations.id", ondelete="SET NULL")
     )

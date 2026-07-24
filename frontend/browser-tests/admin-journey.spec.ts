@@ -66,3 +66,31 @@ test("admin drawer traps focus, closes with Escape, and restores trigger focus",
   await expect(drawer).toBeHidden();
   await expect(trigger).toBeFocused();
 });
+
+test("admin reviews inventory freshness, requests sync, and acknowledges drift", async ({ page }) => {
+  const state = await installApiMock(page);
+  await loginAs(page, "admin");
+
+  await page.getByRole("button", { name: "동기화와 재조정", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "클러스터 동기화 상태" })).toBeVisible();
+  await expect(page.getByText("customer-web-01의 메모리 사양이 변경되었습니다.")).toBeVisible();
+  await expect(page.getByText("FULL · #7")).toBeVisible();
+
+  await page.getByRole("button", { name: "전체 동기화" }).click();
+  await expect(page.getByText(/인벤토리 동기화를 요청했습니다/)).toBeVisible();
+
+  await page.getByLabel(/담당자/).selectOption("admin-id");
+  await page.getByRole("button", { name: "확인", exact: true }).click();
+  await expect(page.getByText("재조정 항목을 확인 처리했습니다.")).toBeVisible();
+  await expect(page.getByText("ACKNOWLEDGED", { exact: true })).toBeVisible();
+  await expect(page.getByText("담당자 Admin", { exact: true })).toBeVisible();
+
+  expect(state.requests).toContainEqual({
+    method: "POST",
+    path: `/api/v1/admin/clusters/${ids.cluster}/sync`,
+  });
+  expect(state.requests).toContainEqual({
+    method: "POST",
+    path: `/api/v1/admin/inventory/reconciliation/findings/${ids.finding}/acknowledge`,
+  });
+});

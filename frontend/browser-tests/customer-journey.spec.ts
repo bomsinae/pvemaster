@@ -58,3 +58,15 @@ test("customer action dialog traps focus and restores the table action", async (
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
 });
+
+test("customer sees stale inventory warning and cannot request power operations", async ({ page }) => {
+  await installApiMock(page, { staleCustomerInventory: true });
+  await loginAs(page, "customer");
+
+  await expect(page.getByRole("status").filter({
+    hasText: "일부 VM 정보가 오래되었습니다.",
+  })).toBeVisible();
+  await expect(page.getByText("확인 필요", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "시작", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "콘솔", exact: true })).toBeDisabled();
+});

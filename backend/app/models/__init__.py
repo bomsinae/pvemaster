@@ -9,6 +9,15 @@ from app.models.auth import (
 )
 from app.models.backup import BackupRun, BackupTarget, RestoreRun
 from app.models.cluster import Cluster, ClusterCredential
+from app.models.inventory import (
+    FindingKind,
+    FindingSeverity,
+    FindingStatus,
+    InventoryNode,
+    InventoryStorage,
+    ReconciliationFinding,
+    WorkloadChangeEvent,
+)
 from app.models.ipam import (
     IpAddress,
     IpAddressState,
@@ -57,6 +66,13 @@ __all__ = [
     "IpAllocationKind",
     "IpAllocationStatus",
     "IpPool",
+    "FindingKind",
+    "FindingSeverity",
+    "FindingStatus",
+    "InventoryNode",
+    "InventoryStorage",
+    "ReconciliationFinding",
+    "WorkloadChangeEvent",
     "IpPoolExclusion",
     "LoginThrottle",
     "MaintenanceRun",

@@ -87,7 +87,8 @@ PVE Master는 PVE 위에 위치하는 제어 플레인이다. 브라우저는 Fa
 
 ### 인벤토리 투영
 
-`nodes`와 `workloads`는 PVE 데이터의 로컬 투영이다. 각 행은 `observed_at`, `sync_generation`, `is_present`를 가진다.
+`nodes`, `inventory_storages`, `workloads`는 PVE 데이터의 로컬 투영이다. 각 행은
+`observed_at`, `sync_generation`, `is_present`를 가진다.
 
 1. 동기화 시작 시 `sync_runs`와 generation을 만든다.
 2. PVE에서 리소스를 읽고 `(cluster_id, natural_key)` 기준 upsert한다.
@@ -96,6 +97,9 @@ PVE Master는 PVE 위에 위치하는 제어 플레인이다. 브라우저는 Fa
 5. API는 클러스터별 stale 임계치와 마지막 성공 시각을 함께 반환한다.
 
 PVE 외부에서 이루어진 변경도 다음 동기화에서 반영된다. 로컬 이름/상태를 PVE에 덮어써서 맞추지 않는다.
+node 이동, 사양·전원 변경과 전체 응답에서의 누락은 `reconciliation_findings`와
+`workload_change_events`에 기록한다. 누락 workload의 고객 할당과 IP는 자동
+해제하지 않으며 관리자가 원인을 확인하고 해결 상태를 기록한다.
 
 ### Operation과 PVE task
 

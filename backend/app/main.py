@@ -14,6 +14,7 @@ from app.api.clusters import router as clusters_router
 from app.api.console import router as console_router
 from app.api.customer import router as customer_router
 from app.api.health import router as health_router
+from app.api.inventory import router as inventory_router
 from app.api.ipam import router as ipam_router
 from app.api.observability import router as observability_router
 from app.api.operations import router as operations_router
@@ -54,6 +55,12 @@ def enqueue_provisioning_request(request_id: UUID, task_id: str) -> None:
     publish(request_id, task_id)
 
 
+def enqueue_inventory_sync(run_id: UUID) -> None:
+    from app.tasks.inventory import enqueue_inventory_sync as publish
+
+    publish(run_id)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or get_settings()
     configure_logging(app_settings.log_level)
@@ -81,6 +88,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.backup_publisher = enqueue_backup_operation
     app.state.restore_publisher = enqueue_restore_operation
     app.state.provisioning_publisher = enqueue_provisioning_request
+    app.state.inventory_publisher = enqueue_inventory_sync
 
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(
@@ -111,6 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(operations_router)
     app.include_router(observability_router)
     app.include_router(ipam_router)
+    app.include_router(inventory_router)
     app.include_router(provisioning_router)
     app.include_router(workloads_router)
     return app

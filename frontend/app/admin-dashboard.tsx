@@ -19,6 +19,8 @@ import {
   ClusterStorage,
   CurrentUser,
   IpPool,
+  InventoryFreshness,
+  InventorySyncRun,
   OperationsStatus,
   Organization,
   OrganizationPage,
@@ -28,9 +30,11 @@ import {
   Product,
   ProvisioningNode,
   ProvisionRequest,
+  ReconciliationFinding,
   Template,
   Workload,
   addOrganizationMember,
+  acknowledgeReconciliationFinding,
   activateOrganization,
   assignWorkload,
   createCluster,
@@ -62,11 +66,14 @@ import {
   listBackupTargets,
   listClusters,
   listIpPools,
+  listInventoryFreshness,
+  listInventorySyncRuns,
   listOrganizations,
   listOrganizationMembers,
   listProducts,
   listProvisioningNodes,
   listProvisionRequests,
+  listReconciliationFindings,
   listTemplates,
   listUsers,
   listWorkloads,
@@ -75,6 +82,8 @@ import {
   requestAdminWorkloadAction,
   requestWorkloadBackup,
   requestBackupRestore,
+  requestClusterSync,
+  resolveReconciliationFinding,
   discoverBackupStorages,
   searchOrganizations,
   testCluster,
@@ -121,6 +130,7 @@ const CLUSTER_INVENTORY_REFRESH_INTERVAL_MS = 10_000;
 const sectionLabels: Record<Section, string> = {
   overview: "운영 개요",
   clusters: "클러스터",
+  inventory: "동기화와 재조정",
   vms: "가상 머신",
   backups: "백업",
   access: "사용자와 조직",
@@ -243,6 +253,9 @@ export function AdminDashboard({
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
   const [guests, setGuests] = useState<ClusterGuest[]>([]);
   const [storages, setStorages] = useState<ClusterStorage[]>([]);
+  const [inventoryFreshness, setInventoryFreshness] = useState<InventoryFreshness[]>([]);
+  const [inventorySyncRuns, setInventorySyncRuns] = useState<InventorySyncRun[]>([]);
+  const [reconciliationFindings, setReconciliationFindings] = useState<ReconciliationFinding[]>([]);
   const [users, setUsers] = useState<CurrentUser[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
@@ -290,7 +303,7 @@ export function AdminDashboard({
   const navigation = useMemo<Section[]>(
     () => isSuperAdmin
       ? [...adminSections]
-      : ["overview", "clusters", "vms", "backups", "access"],
+      : ["overview", "clusters", "inventory", "vms", "backups", "access"],
     [isSuperAdmin],
   );
 
@@ -401,6 +414,19 @@ export function AdminDashboard({
             ? current
             : (nextClusters[0]?.id ?? null),
         );
+      } else if (next === "inventory") {
+        const [nextClusters, nextFreshness, nextRuns, nextFindings, nextUsers] = await Promise.all([
+          listClusters(apiBaseUrl, token),
+          listInventoryFreshness(apiBaseUrl, token),
+          listInventorySyncRuns(apiBaseUrl, token),
+          listReconciliationFindings(apiBaseUrl, token),
+          listUsers(apiBaseUrl, token),
+        ]);
+        setClusters(nextClusters);
+        setInventoryFreshness(nextFreshness);
+        setInventorySyncRuns(nextRuns);
+        setReconciliationFindings(nextFindings);
+        setUsers(nextUsers);
       } else if (next === "access") {
         const [nextUsers, organizationPage, nextWorkloads] = await Promise.all([
           listUsers(apiBaseUrl, token),
@@ -740,6 +766,61 @@ export function AdminDashboard({
     }
   }
 
+  async function runInventorySync(clusterId: string) {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const result = await requestClusterSync(apiBaseUrl, token, clusterId);
+      setNotice(`인벤토리 동기화를 요청했습니다 · ${result.operation_id.slice(0, 8)}`);
+      await loadSection("inventory");
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function acknowledgeFinding(findingId: string, assignedToId: string | null) {
+    setSaving(true); setError("");
+    try {
+      const updated = await acknowledgeReconciliationFinding(
+        apiBaseUrl,
+        token,
+        findingId,
+        assignedToId,
+      );
+      setReconciliationFindings((items) =>
+        items.map((item) => item.id === updated.id ? updated : item)
+      );
+      setNotice("재조정 항목을 확인 처리했습니다.");
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resolveFinding(findingId: string) {
+    const note = window.prompt("해결 근거를 입력하세요. (3자 이상)");
+    if (!note || note.trim().length < 3) return;
+    setSaving(true); setError("");
+    try {
+      const updated = await resolveReconciliationFinding(
+        apiBaseUrl,
+        token,
+        findingId,
+        note.trim(),
+      );
+      setReconciliationFindings((items) =>
+        items.map((item) => item.id === updated.id ? updated : item)
+      );
+      setNotice("재조정 항목을 해결 처리했습니다.");
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function discoverClusterBackups(clusterId: string) {
     setSaving(true); setError("");
     try {
@@ -882,6 +963,7 @@ export function AdminDashboard({
         token_identifier: String(data.get("token_identifier")),
         token_secret: String(data.get("token_secret")),
         ca_bundle_pem: String(data.get("ca_bundle_pem") || "") || null,
+        sync_interval_seconds: Number(data.get("sync_interval_seconds") || 60),
       });
       setForm(null);
       setNotice("클러스터를 등록하고 최소 권한 연결 시험을 완료했습니다.");
@@ -1322,6 +1404,18 @@ export function AdminDashboard({
           <ClustersView clusters={clusters} current={currentCluster} nodes={nodes} guests={guests} storages={storages}
             selectedId={selectedCluster} onSelect={setSelectedCluster} onTest={runClusterTest} onImport={runWorkloadImport} onCreate={() => setForm("cluster")} onDelete={openClusterRemoval} saving={saving || loading} canDelete={isSuperAdmin} />
         )}
+        {section === "inventory" && (
+          <InventoryReconciliationView
+            freshness={inventoryFreshness}
+            runs={inventorySyncRuns}
+            findings={reconciliationFindings}
+            users={users}
+            saving={saving}
+            onSync={runInventorySync}
+            onAcknowledge={acknowledgeFinding}
+            onResolve={resolveFinding}
+          />
+        )}
         {section === "vms" && <VmOperationsView workloads={workloads} backupRuns={backupRuns} onSelect={setSelectedWorkload} onCreate={() => setForm("vm")} onEdit={() => setForm("vm-spec")} onDelete={() => setForm("vm-delete")} onBackup={openBackupForWorkload} onAction={runVmAction} onConsole={openConsole} activeJob={activeVmJob} saving={saving} canManage={isSuperAdmin} />}
         {section === "backups" && <BackupsView clusters={clusters} workloads={workloads} targets={backupTargets} candidates={backupCandidates} runs={backupRuns} preferredWorkloadId={backupFocusWorkload} activeRun={activeBackupRun} activeRestore={activeRestoreRun} saving={saving} canConfigure={isSuperAdmin} onClearPreferredWorkload={() => setBackupFocusWorkload(null)} onDiscover={discoverClusterBackups} onRegister={registerBackupTarget} onToggle={toggleBackupTarget} onBackup={runBackup} onRestore={runRestore} />}
         {section === "access" && <AccessView currentUserId={user.id} users={users} organizations={organizations} organizationTotal={organizationTotal} members={organizationMembers} workloads={workloads} selectedOrganization={selectedOrganization} canWrite={isSuperAdmin} saving={saving} onSelectOrganization={(organization) => { setSelectedOrganization(organization); setOrganizations((current) => current.some((item) => item.id === organization.id) ? current : [organization, ...current]); }} onSearchOrganizations={searchOrganizationOptions} onAddMember={addMember} onRemoveMember={removeMember} onAssign={assignToOrganization} onUnassign={unassignFromOrganization} onUser={() => setForm("user")} onResetPassword={(targetUser) => { setPasswordResetUser(targetUser); setForm("user-password-reset"); }} onUserStatus={(targetUser) => { setManagedUser(targetUser); setForm("user-status"); }} onDeleteUser={(targetUser) => { setManagedUser(targetUser); setForm("user-delete"); }} onCreateMember={() => setForm("organization-user")} onOrganization={() => { setEditingOrganization(null); setForm("organization"); }} onEditOrganization={(organization) => { setEditingOrganization(organization); setForm("organization"); }} onActivateOrganization={reactivateOrganization} onDeleteOrganization={(organization) => { setEditingOrganization(organization); setForm("organization-delete"); }} />}
@@ -1367,6 +1461,152 @@ export function AdminDashboard({
         />
       )}
     </main>
+  );
+}
+
+function InventoryReconciliationView({
+  freshness,
+  runs,
+  findings,
+  users,
+  saving,
+  onSync,
+  onAcknowledge,
+  onResolve,
+}: {
+  freshness: InventoryFreshness[];
+  runs: InventorySyncRun[];
+  findings: ReconciliationFinding[];
+  users: CurrentUser[];
+  saving: boolean;
+  onSync: (clusterId: string) => void;
+  onAcknowledge: (findingId: string, assignedToId: string | null) => void;
+  onResolve: (findingId: string) => void;
+}) {
+  const activeFindings = findings.filter((item) => item.status !== "RESOLVED");
+  const assignableUsers = users.filter(
+    (item) => item.is_active && ["SUPER_ADMIN", "OPERATOR"].includes(item.role),
+  );
+  const [assigneeByFinding, setAssigneeByFinding] = useState<Record<string, string>>({});
+  const displayNameByUserId = new Map(users.map((item) => [item.id, item.display_name]));
+  return (
+    <div className="inventory-reconciliation">
+      <section className="admin-panel">
+        <div className="admin-panel-heading">
+          <div><p className="eyebrow">Freshness</p><h2>클러스터 동기화 상태</h2></div>
+          <span>{freshness.filter((item) => item.is_stale).length} stale</span>
+        </div>
+        <div className="inventory-freshness-grid">
+          {freshness.map((item) => (
+            <article key={item.cluster_id} className={item.is_stale ? "is-stale" : ""}>
+              <div>
+                <strong>{item.cluster_name}</strong>
+                <StatusMark ok={!item.is_stale} label={item.is_stale ? "정보 오래됨" : "정상"} />
+              </div>
+              <dl>
+                <div><dt>마지막 전체 성공</dt><dd>{formatTime(item.last_full_success_at)}</dd></div>
+                <div><dt>최근 상태</dt><dd>{item.latest_status ?? "기록 없음"}</dd></div>
+                <div><dt>stale 기준</dt><dd>{item.stale_after_seconds}초</dd></div>
+              </dl>
+              <button type="button" disabled={saving} onClick={() => onSync(item.cluster_id)}>
+                전체 동기화
+              </button>
+            </article>
+          ))}
+          {!freshness.length && <div className="admin-empty">활성 클러스터가 없습니다.</div>}
+        </div>
+      </section>
+
+      <section className="admin-panel">
+        <div className="admin-panel-heading">
+          <div><p className="eyebrow">Drift queue</p><h2>재조정 항목</h2></div>
+          <span>{activeFindings.length} active</span>
+        </div>
+        <div className="inventory-finding-list" aria-live="polite">
+          {activeFindings.map((finding) => (
+            <article key={finding.id}>
+              <span className={`finding-severity ${finding.severity.toLowerCase()}`}>
+                {finding.severity}
+              </span>
+              <div>
+                <strong>{finding.kind.replaceAll("_", " ")}</strong>
+                <p>{finding.summary}</p>
+                <small>{finding.cluster_name} · 마지막 관측 {formatTime(finding.last_observed_at)}</small>
+              </div>
+              <span className="finding-status">{finding.status}</span>
+              <div className="finding-actions">
+                {finding.status === "OPEN" && (
+                  <>
+                    <select
+                      aria-label={`${finding.summary} 담당자`}
+                      disabled={saving}
+                      value={assigneeByFinding[finding.id] ?? finding.assigned_to_id ?? ""}
+                      onChange={(event) => setAssigneeByFinding((current) => ({
+                        ...current,
+                        [finding.id]: event.target.value,
+                      }))}
+                    >
+                      <option value="">담당자 미지정</option>
+                      {assignableUsers.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.display_name} · {item.role}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      disabled={saving}
+                      onClick={() => onAcknowledge(
+                        finding.id,
+                        assigneeByFinding[finding.id] || finding.assigned_to_id,
+                      )}
+                    >
+                      확인
+                    </button>
+                  </>
+                )}
+                {finding.status === "ACKNOWLEDGED" && (
+                  <small>
+                    담당자 {finding.assigned_to_id
+                      ? displayNameByUserId.get(finding.assigned_to_id) ?? "확인 필요"
+                      : "미지정"}
+                  </small>
+                )}
+                <button disabled={saving} onClick={() => onResolve(finding.id)}>해결</button>
+              </div>
+            </article>
+          ))}
+          {!activeFindings.length && <div className="admin-empty">열린 drift 항목이 없습니다.</div>}
+        </div>
+      </section>
+
+      <section className="admin-panel">
+        <div className="admin-panel-heading">
+          <div><p className="eyebrow">Recent runs</p><h2>최근 동기화 실행</h2></div>
+          <span>{runs.length} runs</span>
+        </div>
+        <div className="inventory-run-table">
+          <div className="inventory-run-head" aria-hidden="true">
+            <span>클러스터</span><span>범위</span><span>상태</span><span>변경</span><span>시작</span>
+          </div>
+          {runs.map((run) => (
+            <div key={run.id} className="inventory-run-row">
+              <strong>{run.cluster_name}</strong>
+              <span>{run.scope} · #{run.generation}</span>
+              <StatusMark
+                ok={run.status === "SUCCEEDED" ? true : run.status === "FAILED" ? false : null}
+                label={run.partial_failure ? `${run.status} · 부분 실패` : run.status}
+              />
+              <span>
+                +{String(run.resource_counts.created ?? 0)} / Δ{String(run.resource_counts.updated ?? 0)}
+                {" "}/ −{String(run.resource_counts.missing ?? 0)}
+              </span>
+              <span>{formatTime(run.started_at)}</span>
+            </div>
+          ))}
+          {!runs.length && <div className="admin-empty">동기화 실행 기록이 없습니다.</div>}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -2148,7 +2388,7 @@ function AuditView({ audits, total, offset, pageSize, loading, onPageChange, onP
 
 function DrawerIntro({ eyebrow, title, copy }: { eyebrow: string; title: string; copy: string }) { return <div className="drawer-intro"><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p>{copy}</p></div>; }
 function SubmitButton({ saving, label, disabled = false }: { saving: boolean; label: string; disabled?: boolean }) { return <button className="drawer-submit" type="submit" disabled={saving || disabled}>{saving ? "검증 중…" : label}<span>↗</span></button>; }
-function ClusterForm({ onSubmit, saving }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) { return <form className="admin-form" onSubmit={onSubmit}><DrawerIntro eyebrow="New cluster" title="Proxmox 연결" copy="등록 전에 TLS, 인증, 최소 권한을 실제 endpoint에서 확인합니다." /><label>표시 이름<input name="name" required placeholder="seoul-pve-1" /></label><label>API endpoint<input name="api_base_url" type="url" required placeholder="https://pve.example.internal:8006" /></label><label>Token identifier<input name="token_identifier" required placeholder="svc@pve!pvemaster" /></label><label>Token secret<input name="token_secret" type="password" required autoComplete="off" /></label><label>사설 CA PEM <small>선택</small><textarea name="ca_bundle_pem" rows={6} spellCheck={false} /></label><p className="form-security">Secret은 응답과 로그에 표시되지 않으며 암호화되어 저장됩니다.</p><SubmitButton saving={saving} label="검증 후 등록" /></form>; }
+function ClusterForm({ onSubmit, saving }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) { return <form className="admin-form" onSubmit={onSubmit}><DrawerIntro eyebrow="New cluster" title="Proxmox 연결" copy="등록 전에 TLS, 인증, 최소 권한을 실제 endpoint에서 확인합니다." /><label>표시 이름<input name="name" required placeholder="seoul-pve-1" /></label><label>API endpoint<input name="api_base_url" type="url" required placeholder="https://pve.example.internal:8006" /></label><label>동기화 주기(초)<input name="sync_interval_seconds" type="number" min={15} max={86400} defaultValue={60} required /></label><label>Token identifier<input name="token_identifier" required placeholder="svc@pve!pvemaster" /></label><label>Token secret<input name="token_secret" type="password" required autoComplete="off" /></label><label>사설 CA PEM <small>선택</small><textarea name="ca_bundle_pem" rows={6} spellCheck={false} /></label><p className="form-security">Secret은 응답과 로그에 표시되지 않으며 암호화되어 저장됩니다.</p><SubmitButton saving={saving} label="검증 후 등록" /></form>; }
 function ClusterDeleteForm({ cluster, check, checking, onSubmit, saving }: { cluster: Cluster; check: ClusterRemovalCheck | null; checking: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) {
   const pattern = cluster.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const blockLabels: Record<string, string> = { ASSIGNED_WORKLOADS: "조직 할당 VM/CT", ACTIVE_OPERATIONS: "진행 중 VM 작업", ACTIVE_PROVISIONING_REQUESTS: "진행 중 프로비저닝", PROVISIONING_NODES: "프로비저닝 노드 정책", TEMPLATES: "등록 템플릿", CLUSTER_IP_POOLS: "클러스터 전용 IP 풀" };

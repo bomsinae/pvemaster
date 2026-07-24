@@ -191,7 +191,7 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 | GET | `/admin/clusters/{cluster_id}/nodes/{node}/metrics?range=hour\|six_hours\|day\|week` | 동기/짧은 timeout | Proxmox RRD 기반 CPU, load, 메모리, 네트워크, CPU·IO·메모리 PSI 시계열. 지원하지 않는 PSI 값은 `null` |
 | GET | `/admin/clusters/{cluster_id}/guests` | 동기 | 해당 PVE 클러스터의 실시간 QEMU/LXC 목록. 실행 중 게스트는 `cpu`, `maxcpu`, `mem`, `maxmem`, `disk`, `maxdisk`, `uptime` 현재 사용량과 한도를 포함 |
 | GET | `/admin/clusters/{cluster_id}/storages` | 동기 | 해당 PVE 클러스터의 실시간 스토리지 목록 |
-| POST | `/admin/clusters/{cluster_id}/sync` | 비동기 | 전체 인벤토리 동기화 operation 생성 |
+| POST | `/admin/clusters/{cluster_id}/sync` | 비동기 | 전체 또는 `workload_id` 대상 인벤토리 동기화 요청. 응답의 `operation_id`는 `sync_runs.id` |
 | POST | `/admin/clusters/{cluster_id}/rotate-credential` | 동기 | 새 token 시험 후 활성 전환 |
 
 클러스터 생성 body:
@@ -224,6 +224,14 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 | GET | `/admin/workloads/{workload_id}` | ADMIN | 없음 |
 | GET | `/customer/vms` | CUSTOMER | 현재 사용자의 활성 조직에 할당된 QEMU VM으로 서버 강제 제한. 각 항목에 안전한 `organization_name`을 포함하고 내부 조직 ID는 노출하지 않음 |
 | GET | `/customer/vms/{vm_id}` | CUSTOMER | 현재 사용자의 활성 조직 멤버십 필요. 안전한 `organization_name` 포함 |
+| GET | `/admin/inventory/sync-runs` | ADMIN | cluster별 sync 실행, scope, generation, 부분 실패와 변경 건수 |
+| GET | `/admin/inventory/sync-runs/{run_id}` | ADMIN | sync run 상세 |
+| GET | `/admin/inventory/freshness` | ADMIN | 마지막 전체 성공, stale 기준과 최근 상태 |
+| GET | `/admin/inventory/reconciliation/findings` | ADMIN | status, severity, cluster별 drift finding |
+| GET | `/admin/inventory/reconciliation/findings/{finding_id}` | ADMIN | finding 상세 |
+| POST | `/admin/inventory/reconciliation/findings/{finding_id}/acknowledge` | ADMIN | 확인·담당자 지정 |
+| POST | `/admin/inventory/reconciliation/findings/{finding_id}/resolve` | ADMIN | 해결 근거 기록 |
+| POST | `/admin/inventory/reconciliation/run` | ADMIN | cluster 전체 재조정 요청 |
 
 정렬 allowlist는 `name`, `vmid`, `observed_at`, `power_state`다. admin 검색에서 VMID는 반드시 `cluster_id`와 함께 식별하거나 결과를 목록으로 취급한다.
 
@@ -238,6 +246,8 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 ```
 
 클러스터 단절 시 마지막 관측 데이터를 `200`으로 줄 수 있으나 `is_stale=true`와 마지막 성공 시각을 명확히 제공한다. 상태 변경 요청은 별도 PVE preflight를 수행한다.
+고객 workload가 stale이면 고객 전원 작업은 `503 INVENTORY_STALE`로 제한한다. 고객
+응답에는 cluster, node, sync run ID 또는 내부 오류 원문을 포함하지 않는다.
 
 ## 7. 할당 API
 

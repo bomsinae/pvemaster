@@ -39,6 +39,9 @@ class InventoryAlertService(ObservabilityService):
     async def _ip_pool_counts(self) -> list[tuple[UUID, str, int]]:
         return []
 
+    async def _stale_cluster_count(self) -> int:
+        return 0
+
 
 def test_audit_values_mask_sensitive_fields_recursively() -> None:
     raw = {

@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -25,8 +27,10 @@ class OutboxStatus(StrEnum):
 
 
 class RunStatus(StrEnum):
+    QUEUED = "QUEUED"
     RUNNING = "RUNNING"
     SUCCEEDED = "SUCCEEDED"
+    PARTIAL = "PARTIAL"
     FAILED = "FAILED"
     SKIPPED = "SKIPPED"
 
@@ -104,10 +108,24 @@ class SyncRun(Base):
     __table_args__ = (
         UniqueConstraint("cluster_id", "generation"),
         CheckConstraint(
-            "status IN ('RUNNING','SUCCEEDED','FAILED','SKIPPED')",
+            "status IN ('QUEUED','RUNNING','SUCCEEDED','PARTIAL','FAILED','SKIPPED')",
             name="ck_sync_runs_status",
         ),
         Index("ix_sync_runs_cluster_started", "cluster_id", "started_at"),
+        Index(
+            "uq_sync_runs_active_full_cluster",
+            "cluster_id",
+            unique=True,
+            postgresql_where=text("scope = 'FULL' AND status IN ('QUEUED', 'RUNNING')"),
+        ),
+        Index(
+            "uq_sync_runs_active_target",
+            "target_workload_id",
+            unique=True,
+            postgresql_where=text(
+                "target_workload_id IS NOT NULL AND status IN ('QUEUED', 'RUNNING')"
+            ),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -116,6 +134,11 @@ class SyncRun(Base):
     )
     generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False, default="FULL")
+    target_workload_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("workloads.id", ondelete="SET NULL")
+    )
+    partial_failure: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     triggered_by: Mapped[str] = mapped_column(String(24), nullable=False)
     requested_by_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")

@@ -96,10 +96,14 @@ export type Workload = {
   disk_bytes: number | null;
   is_template: boolean;
   is_present: boolean;
+  sync_generation?: number;
+  missing_since?: string | null;
   organization_id: string | null;
   organization_name: string | null;
   assigned_ip_addresses?: string[];
   observed_at: string;
+  is_stale?: boolean;
+  stale_reason?: string | null;
   version: number;
 };
 
@@ -202,6 +206,9 @@ export type Cluster = {
   ca_configured: boolean;
   last_connection_error_code: string | null;
   last_connected_at: string | null;
+  last_sync_succeeded_at?: string | null;
+  sync_interval_seconds?: number;
+  inventory_stale?: boolean;
   credential: { token_identifier: string; configured: boolean; last_used_at: string | null };
   created_at: string;
   updated_at: string;
@@ -339,6 +346,8 @@ export type OperationsStatus = {
     processed_count: number;
     error_code: string | null;
   }>;
+  open_reconciliation_findings?: number;
+  stale_inventory_clusters?: number;
   alerts: Array<{
     code: string;
     severity: string;
@@ -348,6 +357,58 @@ export type OperationsStatus = {
     value: number | null;
     threshold: number | null;
   }>;
+};
+
+export type InventoryFreshness = {
+  cluster_id: string;
+  cluster_name: string;
+  last_full_success_at: string | null;
+  stale_after_seconds: number;
+  is_stale: boolean;
+  stale_reason: string | null;
+  latest_status: string | null;
+};
+
+export type InventorySyncRun = {
+  id: string;
+  operation_id: string;
+  cluster_id: string;
+  cluster_name: string;
+  generation: number;
+  scope: string;
+  status: string;
+  partial_failure: boolean;
+  triggered_by: string;
+  requested_by_id: string | null;
+  target_workload_id: string | null;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  error_code: string | null;
+  resource_counts: Record<string, unknown>;
+};
+
+export type ReconciliationFinding = {
+  id: string;
+  kind: string;
+  severity: "INFO" | "WARNING" | "CRITICAL";
+  status: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+  cluster_id: string;
+  cluster_name: string;
+  workload_id: string | null;
+  sync_run_id: string | null;
+  target_type: string;
+  target_id: string;
+  summary: string;
+  details: Record<string, unknown>;
+  first_observed_at: string;
+  last_observed_at: string;
+  acknowledged_by_id: string | null;
+  acknowledged_at: string | null;
+  assigned_to_id: string | null;
+  resolved_by_id: string | null;
+  resolved_at: string | null;
+  resolution_note: string | null;
 };
 
 export type IpPool = {
@@ -552,6 +613,81 @@ export const importClusterWorkloads = (
   `/api/v1/admin/clusters/${encodeURIComponent(id)}/workloads/import`,
   token,
   { method: "POST" },
+  fetcher,
+);
+
+export const requestClusterSync = (
+  base: string,
+  token: string,
+  id: string,
+  fetcher?: Fetcher,
+) => api<{ operation_id: string; status: string }>(
+  base,
+  `/api/v1/admin/clusters/${encodeURIComponent(id)}/sync`,
+  token,
+  { method: "POST" },
+  fetcher,
+);
+
+export async function listInventoryFreshness(base: string, token: string, fetcher?: Fetcher) {
+  return (await api<{ items: InventoryFreshness[] }>(
+    base,
+    "/api/v1/admin/inventory/freshness",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export async function listInventorySyncRuns(base: string, token: string, fetcher?: Fetcher) {
+  return (await api<{ items: InventorySyncRun[] }>(
+    base,
+    "/api/v1/admin/inventory/sync-runs?limit=50",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export async function listReconciliationFindings(
+  base: string,
+  token: string,
+  fetcher?: Fetcher,
+) {
+  return (await api<{ items: ReconciliationFinding[] }>(
+    base,
+    "/api/v1/admin/inventory/reconciliation/findings?limit=100",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const acknowledgeReconciliationFinding = (
+  base: string,
+  token: string,
+  findingId: string,
+  assignedToId: string | null = null,
+  fetcher?: Fetcher,
+) => api<ReconciliationFinding>(
+  base,
+  `/api/v1/admin/inventory/reconciliation/findings/${encodeURIComponent(findingId)}/acknowledge`,
+  token,
+  { method: "POST", body: JSON.stringify({ assigned_to_id: assignedToId }) },
+  fetcher,
+);
+
+export const resolveReconciliationFinding = (
+  base: string,
+  token: string,
+  findingId: string,
+  resolutionNote: string,
+  fetcher?: Fetcher,
+) => api<ReconciliationFinding>(
+  base,
+  `/api/v1/admin/inventory/reconciliation/findings/${encodeURIComponent(findingId)}/resolve`,
+  token,
+  { method: "POST", body: JSON.stringify({ resolution_note: resolutionNote }) },
   fetcher,
 );
 

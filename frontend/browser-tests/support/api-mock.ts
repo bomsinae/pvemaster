@@ -8,12 +8,15 @@ export const ids = {
   formerWorkload: "257328ea-917e-488c-bde0-e85ee7bda641",
   inactiveWorkload: "d8d452fe-1bf5-41bb-b5c9-abd715c68ab1",
   job: "57aec936-c0c3-4e39-b262-733512911f65",
+  syncRun: "8d8c145f-c7f5-4b65-a85c-aa6c32360271",
+  finding: "66c1d306-e05f-4890-8e1e-c30fa3137f9c",
 } as const;
 
 type MockOptions = {
   initialClusters?: boolean;
   delayCustomerListMs?: number;
   failCustomerListOnce?: boolean;
+  staleCustomerInventory?: boolean;
 };
 
 type MockState = {
@@ -24,6 +27,7 @@ type MockState = {
   powerState: "STOPPED" | "RUNNING";
   jobPolls: number;
   customerListCalls: number;
+  findingStatus: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
   requests: Array<{ method: string; path: string }>;
 };
 
@@ -38,6 +42,9 @@ function cluster() {
     ca_configured: false,
     last_connection_error_code: null,
     last_connected_at: observedAt,
+    last_sync_succeeded_at: observedAt,
+    sync_interval_seconds: 60,
+    inventory_stale: false,
     credential: {
       token_identifier: "svc@pve!portal",
       configured: true,
@@ -83,7 +90,7 @@ function organization() {
   };
 }
 
-function customerVm(state: MockState) {
+function customerVm(state: MockState, stale = false) {
   const item = workload(state);
   return {
     id: item.id,
@@ -95,6 +102,33 @@ function customerVm(state: MockState) {
     disk_bytes: item.disk_bytes,
     assigned_ip_addresses: item.assigned_ip_addresses,
     observed_at: item.observed_at,
+    is_stale: stale,
+    stale_reason: stale ? "마지막 전체 동기화가 최신성 기준을 초과했습니다." : null,
+  };
+}
+
+function reconciliationFinding(state: MockState) {
+  return {
+    id: ids.finding,
+    kind: "SPEC_DRIFT",
+    severity: "WARNING",
+    status: state.findingStatus,
+    cluster_id: ids.cluster,
+    cluster_name: "staging-pve",
+    workload_id: ids.workload,
+    sync_run_id: ids.syncRun,
+    target_type: "workload",
+    target_id: ids.workload,
+    summary: "customer-web-01의 메모리 사양이 변경되었습니다.",
+    details: { changed_fields: ["memory_bytes"] },
+    first_observed_at: observedAt,
+    last_observed_at: observedAt,
+    acknowledged_by_id: state.findingStatus === "OPEN" ? null : "admin-id",
+    acknowledged_at: state.findingStatus === "OPEN" ? null : observedAt,
+    assigned_to_id: state.findingStatus === "OPEN" ? null : "admin-id",
+    resolved_by_id: state.findingStatus === "RESOLVED" ? "admin-id" : null,
+    resolved_at: state.findingStatus === "RESOLVED" ? observedAt : null,
+    resolution_note: state.findingStatus === "RESOLVED" ? "브라우저 검증 완료" : null,
   };
 }
 
@@ -140,6 +174,7 @@ export async function installApiMock(
     powerState: "STOPPED",
     jobPolls: 0,
     customerListCalls: 0,
+    findingStatus: "OPEN",
     requests: [],
   };
 
@@ -207,6 +242,67 @@ export async function installApiMock(
     }
     if (path === "/api/v1/admin/clusters") {
       await json(route, { items: state.clustersRegistered ? [cluster()] : [] });
+      return;
+    }
+    if (path === `/api/v1/admin/clusters/${ids.cluster}/sync` && method === "POST") {
+      await json(route, { operation_id: ids.syncRun, status: "QUEUED" }, 202);
+      return;
+    }
+    if (path === "/api/v1/admin/inventory/freshness") {
+      await json(route, {
+        items: [{
+          cluster_id: ids.cluster,
+          cluster_name: "staging-pve",
+          last_full_success_at: observedAt,
+          stale_after_seconds: 180,
+          is_stale: false,
+          stale_reason: null,
+          latest_status: "SUCCEEDED",
+        }],
+      });
+      return;
+    }
+    if (path === "/api/v1/admin/inventory/sync-runs") {
+      await json(route, {
+        items: [{
+          id: ids.syncRun,
+          operation_id: ids.syncRun,
+          cluster_id: ids.cluster,
+          cluster_name: "staging-pve",
+          generation: 7,
+          scope: "FULL",
+          status: "SUCCEEDED",
+          partial_failure: false,
+          triggered_by: "SCHEDULED",
+          requested_by_id: null,
+          target_workload_id: null,
+          started_at: observedAt,
+          finished_at: observedAt,
+          duration_ms: 420,
+          error_code: null,
+          resource_counts: { created: 0, updated: 1, missing: 0 },
+        }],
+      });
+      return;
+    }
+    if (path === "/api/v1/admin/inventory/reconciliation/findings") {
+      await json(route, { items: [reconciliationFinding(state)] });
+      return;
+    }
+    if (
+      path === `/api/v1/admin/inventory/reconciliation/findings/${ids.finding}/acknowledge`
+      && method === "POST"
+    ) {
+      state.findingStatus = "ACKNOWLEDGED";
+      await json(route, reconciliationFinding(state));
+      return;
+    }
+    if (
+      path === `/api/v1/admin/inventory/reconciliation/findings/${ids.finding}/resolve`
+      && method === "POST"
+    ) {
+      state.findingStatus = "RESOLVED";
+      await json(route, reconciliationFinding(state));
       return;
     }
     if (path === `/api/v1/admin/clusters/${ids.cluster}/test`) {
@@ -279,7 +375,19 @@ export async function installApiMock(
       return;
     }
     if (path === "/api/v1/admin/users") {
-      await json(route, { items: [] });
+      await json(route, {
+        items: [{
+          id: "admin-id",
+          email: "admin@example.test",
+          display_name: "Admin",
+          role: "SUPER_ADMIN",
+          is_active: true,
+          last_login_at: observedAt,
+          created_at: observedAt,
+          updated_at: observedAt,
+          version: 1,
+        }],
+      });
       return;
     }
     if (path === "/api/v1/admin/organizations") {
@@ -306,7 +414,7 @@ export async function installApiMock(
         await json(route, apiError("PVE_TIMEOUT", "가상 머신 목록 조회 시간이 초과되었습니다."), 504);
         return;
       }
-      await json(route, { items: [customerVm(state)] });
+      await json(route, { items: [customerVm(state, options.staleCustomerInventory)] });
       return;
     }
     if (

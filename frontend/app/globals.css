@@ -3459,6 +3459,132 @@ body,
   }
 }
 
+.inventory-reconciliation {
+  display: grid;
+  gap: 18px;
+}
+
+.customer-inline-alert {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, #e3a45a 55%, var(--line));
+  border-radius: 10px;
+  color: #e3a45a;
+  background: color-mix(in srgb, #e3a45a 8%, transparent);
+  font-size: 0.82rem;
+}
+
+.inventory-freshness-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.inventory-freshness-grid article {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  background: color-mix(in srgb, var(--admin-panel) 92%, white 8%);
+}
+
+.inventory-freshness-grid article.is-stale {
+  border-color: color-mix(in srgb, #e38b41 65%, var(--line));
+}
+
+.inventory-freshness-grid article > div,
+.inventory-freshness-grid dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inventory-freshness-grid dl {
+  display: grid;
+  gap: 7px;
+  margin: 14px 0;
+}
+
+.inventory-freshness-grid dt,
+.inventory-freshness-grid dd {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.inventory-freshness-grid dt {
+  color: var(--muted);
+}
+
+.inventory-finding-list {
+  display: grid;
+  gap: 8px;
+}
+
+.inventory-finding-list article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.inventory-finding-list p {
+  margin: 3px 0;
+  color: var(--muted);
+}
+
+.finding-severity,
+.finding-status {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+}
+
+.finding-severity {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 4px 7px;
+}
+
+.finding-severity.critical { color: #ef786f; }
+.finding-severity.warning { color: #e3a45a; }
+.finding-severity.info { color: #75a8ef; }
+
+.finding-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.inventory-run-table {
+  overflow-x: auto;
+}
+
+.inventory-run-head,
+.inventory-run-row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr 1fr 1fr 1fr;
+  min-width: 720px;
+  padding: 11px 0;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.inventory-run-head {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+@media (max-width: 720px) {
+  .inventory-finding-list article {
+    grid-template-columns: auto 1fr;
+  }
+
+  .finding-status,
+  .finding-actions {
+    grid-column: 2;
+  }
+}
+
 @media (forced-colors: active) {
   button,
   input,

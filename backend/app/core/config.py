@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     operation_watchdog_seconds: int = Field(default=120, ge=30, le=3600)
     outbox_dispatch_batch_size: int = Field(default=100, ge=1, le=1000)
     outbox_max_backoff_seconds: int = Field(default=300, ge=5, le=3600)
+    inventory_stale_after_seconds: int = Field(default=180, ge=30, le=86400)
 
 
 @lru_cache

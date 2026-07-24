@@ -1,6 +1,7 @@
 import hmac
 import logging
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID, uuid4
 
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.auth import Organization, OrganizationMember, UserRole
+from app.models.cluster import Cluster
 from app.models.ipam import IpAddress, IpAllocation, IpAllocationStatus
 from app.models.operation import Operation, OperationStatus, PowerAction, Workload
 from app.schemas.customer import (
@@ -59,14 +61,16 @@ class CustomerPortalService:
         owned = workloads.all()
         assigned_ips = await self._assigned_ip_addresses([item.id for item in owned])
         organization_names = await self._organization_names(owned)
+        sync_intervals = await self._cluster_sync_intervals(owned)
         return [
             self._vm_summary(
                 item,
                 organization_name=organization_names[item.organization_id],
                 assigned_ip_addresses=assigned_ips.get(item.id, []),
+                sync_interval_seconds=sync_intervals[item.cluster_id],
             )
             for item in owned
-            if item.organization_id in organization_names
+            if item.organization_id in organization_names and item.cluster_id in sync_intervals
         ]
 
     async def get_vm(self, vm_id: UUID) -> CustomerVmDetailResponse:
@@ -74,12 +78,15 @@ class CustomerPortalService:
         jobs = await self._recent_jobs(workload.id)
         assigned_ips = await self._assigned_ip_addresses([workload.id])
         organization_names = await self._organization_names([workload])
-        if workload.organization_id not in organization_names:
+        sync_intervals = await self._cluster_sync_intervals([workload])
+        sync_interval_seconds = sync_intervals.get(workload.cluster_id)
+        if workload.organization_id not in organization_names or sync_interval_seconds is None:
             raise self._not_found()
         summary = self._vm_summary(
             workload,
             organization_name=organization_names[workload.organization_id],
             assigned_ip_addresses=assigned_ips.get(workload.id, []),
+            sync_interval_seconds=sync_interval_seconds,
         )
         return CustomerVmDetailResponse(**summary.model_dump(), recent_jobs=jobs)
 
@@ -104,6 +111,14 @@ class CustomerPortalService:
                 message="This power action is not available to customers.",
             )
         workload = await self._owned_vm(vm_id)
+        sync_intervals = await self._cluster_sync_intervals([workload])
+        sync_interval_seconds = sync_intervals.get(workload.cluster_id)
+        if sync_interval_seconds is None:
+            raise self._not_found()
+        self._require_fresh_inventory(
+            workload,
+            sync_interval_seconds=sync_interval_seconds,
+        )
         if workload.organization_id is None:
             raise self._not_found()
         if action is PowerAction.STOP and not confirm_forced:
@@ -253,6 +268,12 @@ class CustomerPortalService:
                 Organization.is_active.is_(True),
             )
         )
+        active_cluster = exists(
+            select(Cluster.id).where(
+                Cluster.id == Workload.cluster_id,
+                Cluster.is_active.is_(True),
+            )
+        )
         return select(Workload).where(
             Workload.organization_id.is_not(None),
             Workload.kind == "QEMU",
@@ -260,6 +281,7 @@ class CustomerPortalService:
             Workload.is_template.is_(False),
             membership,
             active_organization,
+            active_cluster,
         )
 
     async def _owned_vm(self, vm_id: UUID) -> Workload:
@@ -314,13 +336,33 @@ class CustomerPortalService:
         )
         return {organization_id: name for organization_id, name in rows.all()}
 
-    @staticmethod
+    async def _cluster_sync_intervals(
+        self,
+        workloads: Sequence[Workload],
+    ) -> dict[UUID, int]:
+        cluster_ids = {item.cluster_id for item in workloads}
+        if not cluster_ids:
+            return {}
+        rows = await self._session.execute(
+            select(Cluster.id, Cluster.sync_interval_seconds).where(
+                Cluster.id.in_(cluster_ids),
+                Cluster.is_active.is_(True),
+            )
+        )
+        return {cluster_id: sync_interval for cluster_id, sync_interval in rows.all()}
+
     def _vm_summary(
+        self,
         workload: Workload,
         *,
         organization_name: str,
         assigned_ip_addresses: list[str],
+        sync_interval_seconds: int,
     ) -> CustomerVmSummary:
+        is_stale = self._is_stale(
+            workload,
+            sync_interval_seconds=sync_interval_seconds,
+        )
         return CustomerVmSummary(
             id=workload.id,
             name=workload.name or "Unnamed VM",
@@ -331,7 +373,29 @@ class CustomerPortalService:
             disk_bytes=workload.disk_bytes,
             assigned_ip_addresses=assigned_ip_addresses,
             observed_at=workload.observed_at,
+            is_stale=is_stale,
+            stale_reason="LAST_OBSERVATION_EXPIRED" if is_stale else None,
         )
+
+    def _is_stale(self, workload: Workload, *, sync_interval_seconds: int) -> bool:
+        stale_after_seconds = max(
+            self._settings.inventory_stale_after_seconds,
+            sync_interval_seconds * 3,
+        )
+        return workload.observed_at < datetime.now(UTC) - timedelta(seconds=stale_after_seconds)
+
+    def _require_fresh_inventory(
+        self,
+        workload: Workload,
+        *,
+        sync_interval_seconds: int,
+    ) -> None:
+        if self._is_stale(workload, sync_interval_seconds=sync_interval_seconds):
+            raise AppError(
+                status_code=503,
+                code="INVENTORY_STALE",
+                message="The VM state is stale. Try again after inventory synchronization.",
+            )
 
     @staticmethod
     def _job_response(operation: Operation) -> CustomerJobResponse:

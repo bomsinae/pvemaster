@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -20,6 +21,12 @@ from app.db import Base
 
 class Cluster(Base):
     __tablename__ = "clusters"
+    __table_args__ = (
+        CheckConstraint(
+            "sync_interval_seconds >= 15",
+            name="ck_clusters_sync_interval_seconds",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
@@ -30,6 +37,10 @@ class Cluster(Base):
     last_connected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    last_sync_succeeded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sync_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

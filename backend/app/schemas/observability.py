@@ -105,4 +105,6 @@ class OperationsStatusResponse(BaseModel):
     directory: DirectoryInventoryStatus
     clusters: list[ClusterConnectionStatus]
     scheduler: list[SchedulerJobStatus] = Field(default_factory=list)
+    open_reconciliation_findings: int = Field(default=0, ge=0)
+    stale_inventory_clusters: int = Field(default=0, ge=0)
     alerts: list[OperationalAlert] = Field(default_factory=list)

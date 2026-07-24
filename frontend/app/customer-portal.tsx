@@ -295,6 +295,11 @@ export function CustomerPortal({
           </div>
 
           <div className="customer-table-scroll" aria-label="가상 머신 목록">
+            {visibleVms.some((vm) => vm.is_stale) && (
+              <div className="customer-inline-alert" role="status">
+                일부 VM 정보가 오래되었습니다. 최신 상태가 확인될 때까지 전원 제어가 제한됩니다.
+              </div>
+            )}
             <div className="customer-vm-table">
               <div className="customer-vm-table-head" aria-hidden="true">
                 <span>가상 머신</span><span>조직</span><span>상태</span><span>IP 주소</span><span>vCPU</span><span>메모리</span><span>디스크</span><span>마지막 확인</span><span>전원 제어</span>
@@ -310,19 +315,19 @@ export function CustomerPortal({
                   >
                     <span className="customer-vm-identity" data-label="가상 머신"><strong>{vm.name}</strong><small>{vm.id.slice(0, 8)}</small></span>
                     <strong className="customer-organization-badge" data-label="조직"><span aria-hidden="true" />{vm.organization_name}</strong>
-                    <span className="customer-vm-status" data-label="상태"><span className={`status-pip ${vm.power_state.toLowerCase()}`} aria-hidden="true" />{running ? "실행 중" : "중지됨"}</span>
+                    <span className="customer-vm-status" data-label="상태"><span className={`status-pip ${vm.power_state.toLowerCase()}`} aria-hidden="true" />{vm.is_stale ? "확인 필요" : running ? "실행 중" : "중지됨"}</span>
                     <span className={vm.assigned_ip_addresses.length ? "customer-vm-ip" : "customer-vm-muted"} data-label="IP 주소">{vm.assigned_ip_addresses.length ? vm.assigned_ip_addresses.join(", ") : "미할당"}</span>
                     <strong data-label="vCPU">{vm.cpu_cores ?? "—"}</strong>
                     <span data-label="메모리">{formatBytes(vm.memory_bytes)}</span>
                     <span data-label="디스크">{formatBytes(vm.disk_bytes)}</span>
-                    <span className="customer-vm-muted" data-label="마지막 확인">{formatTime(vm.observed_at)}</span>
+                    <span className="customer-vm-muted" data-label="마지막 확인">{formatTime(vm.observed_at)}{vm.is_stale ? " · 오래됨" : ""}</span>
                     <span className="customer-row-actions" data-label="전원 제어">
                       <span className="customer-row-action-buttons">
-                        <button className="console-row-button" disabled={!running} onClick={() => openConsole(vm)}>콘솔</button>
-                        <button disabled={running || jobPending} onClick={() => openActionDialog(vm, "start")}>시작</button>
-                        <button disabled={!running || jobPending} onClick={() => openActionDialog(vm, "shutdown")}>정상 종료</button>
-                        <button disabled={!running || jobPending} onClick={() => openActionDialog(vm, "reboot")}>재부팅</button>
-                        <button className="customer-danger-action" disabled={!running || jobPending} onClick={() => openActionDialog(vm, "stop")}>강제 중지</button>
+                        <button className="console-row-button" disabled={!running || vm.is_stale} onClick={() => openConsole(vm)}>콘솔</button>
+                        <button disabled={running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "start")}>시작</button>
+                        <button disabled={!running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "shutdown")}>정상 종료</button>
+                        <button disabled={!running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "reboot")}>재부팅</button>
+                        <button className="customer-danger-action" disabled={!running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "stop")}>강제 중지</button>
                       </span>
                       {vmJob && (
                         <small className={`customer-row-job ${vmJob.status.toLowerCase()}`} role="status" aria-live="polite">

@@ -101,6 +101,7 @@ class ClusterService:
             ca_bundle_pem=request.ca_bundle_pem,
             is_active=True,
             last_connected_at=now,
+            sync_interval_seconds=request.sync_interval_seconds,
             version=1,
         )
         credential = ClusterCredential(
@@ -405,6 +406,7 @@ class ClusterService:
             "ca_configured": cluster.ca_bundle_pem is not None,
             "token_identifier": credential.token_identifier,
             "is_active": cluster.is_active,
+            "sync_interval_seconds": cluster.sync_interval_seconds,
         }
         if request.version is not None and request.version != cluster.version:
             raise AppError(
@@ -474,6 +476,8 @@ class ClusterService:
 
         if request.name is not None:
             cluster.name = request.name.strip()
+        if request.sync_interval_seconds is not None:
+            cluster.sync_interval_seconds = request.sync_interval_seconds
         cluster.api_base_url = api_base_url
         cluster.ca_bundle_pem = ca_bundle_pem
         cluster.version += 1
@@ -509,6 +513,7 @@ class ClusterService:
             "ca_configured": cluster.ca_bundle_pem is not None,
             "token_identifier": credential.token_identifier,
             "is_active": cluster.is_active,
+            "sync_interval_seconds": cluster.sync_interval_seconds,
         }
         add_audit_event(
             self._session,
@@ -791,6 +796,7 @@ class ClusterService:
                 workload.disk_bytes = guest.maxdisk
                 workload.is_template = bool(guest.template)
                 workload.is_present = True
+                workload.missing_since = None
                 workload.observed_at = now
                 workload.version += 1
                 updated += 1
@@ -943,8 +949,15 @@ class ClusterService:
             message="The Proxmox cluster has no credential metadata.",
         )
 
-    @staticmethod
-    def _to_response(cluster: Cluster, credential: ClusterCredential) -> ClusterResponse:
+    def _to_response(self, cluster: Cluster, credential: ClusterCredential) -> ClusterResponse:
+        stale_after = max(
+            self._settings.inventory_stale_after_seconds,
+            cluster.sync_interval_seconds * 3,
+        )
+        inventory_stale = (
+            cluster.last_sync_succeeded_at is None
+            or cluster.last_sync_succeeded_at < datetime.now(UTC) - timedelta(seconds=stale_after)
+        )
         return ClusterResponse(
             id=cluster.id,
             name=cluster.name,
@@ -953,6 +966,9 @@ class ClusterService:
             ca_configured=cluster.ca_bundle_pem is not None,
             last_connection_error_code=cluster.last_connection_error_code,
             last_connected_at=cluster.last_connected_at,
+            last_sync_succeeded_at=cluster.last_sync_succeeded_at,
+            sync_interval_seconds=cluster.sync_interval_seconds,
+            inventory_stale=inventory_stale,
             credential=CredentialSummary(
                 token_identifier=credential.token_identifier,
                 last_used_at=credential.last_used_at,

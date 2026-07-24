@@ -165,11 +165,29 @@ URL 전체 유일 제약은 정규화된 endpoint 중복 등록을 막는다. ho
 ### `sync_runs`
 
 - `id UUID PK`, `cluster_id UUID FK`, `generation BIGINT`.
-- `status`, `started_at`, `finished_at`, `error_code`, `resource_counts JSONB`.
+- `status`: `QUEUED`, `RUNNING`, `SUCCEEDED`, `PARTIAL`, `FAILED`, `SKIPPED`.
+- `scope`: `FULL` 또는 `TARGET`; target은 `target_workload_id`를 가진다.
+- `partial_failure`, `started_at`, `finished_at`, `error_code`, `resource_counts JSONB`.
 - `triggered_by`: scheduler/admin/operation 구분, `requested_by_id NULL`.
 - `UNIQUE(cluster_id, generation)`.
+- 클러스터별 활성 전체 sync와 workload별 활성 target sync는 각각 최대 하나다.
 
 완전 성공한 run만 누락 리소스 tombstone에 사용할 수 있다.
+
+### `inventory_storages`
+
+- `id UUID PK`, `cluster_id UUID FK`, `natural_key`, `storage_id`, `node`.
+- 상태, 종류, 용량, content allowlist와 shared 여부를 저장한다.
+- `observed_at`, `sync_generation`, `is_present`, `missing_since`를 node/workload와
+  동일하게 사용한다.
+- `UNIQUE(cluster_id, natural_key)`.
+
+### `reconciliation_findings`, `workload_change_events`
+
+- finding은 종류, 심각도, 대상, 안전한 변경 요약, 최초·최근 관측 시각을 가진다.
+- 상태는 `OPEN`, `ACKNOWLEDGED`, `RESOLVED`이며 담당자와 해결 근거를 기록한다.
+- workload change event는 sync run과 workload에 연결된 append형 외부 변경 요약이다.
+- finding 처리로 workload assignment나 IP allocation을 자동 변경하지 않는다.
 
 ## 7. 고객 소유권
 

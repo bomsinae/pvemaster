@@ -13,6 +13,7 @@ from sqlalchemy.orm import aliased
 from app.core.config import Settings
 from app.models.auth import AuditLog, Organization, User, UserRole
 from app.models.cluster import Cluster
+from app.models.inventory import FindingSeverity, FindingStatus, ReconciliationFinding
 from app.models.ipam import IpAddress, IpAddressState, IpPool, IpPoolExclusion
 from app.models.operation import Operation, Workload
 from app.models.provisioning import ProvisioningRequest, ProvisioningStatus
@@ -192,6 +193,8 @@ class ObservabilityService:
         directory = await self._directory_inventory()
         clusters = await self._cluster_statuses()
         scheduler = await self._scheduler_status()
+        open_findings = await self._open_finding_count()
+        stale_clusters = await self._stale_cluster_count()
         alerts = await self._alerts(worker, queue, clusters, scheduler)
         return OperationsStatusResponse(
             status="degraded" if alerts else "ok",
@@ -201,6 +204,8 @@ class ObservabilityService:
             directory=directory,
             clusters=clusters,
             scheduler=scheduler,
+            open_reconciliation_findings=open_findings,
+            stale_inventory_clusters=stale_clusters,
             alerts=alerts,
         )
 
@@ -238,6 +243,35 @@ class ObservabilityService:
         )
         for status, count in operation_counts:
             lines.append(f'pvemaster_operations{{status="{status}"}} {count}')
+        finding_counts = await self._session.execute(
+            select(
+                ReconciliationFinding.status,
+                ReconciliationFinding.severity,
+                func.count(),
+            ).group_by(
+                ReconciliationFinding.status,
+                ReconciliationFinding.severity,
+            )
+        )
+        lines.extend(
+            [
+                "# HELP pvemaster_reconciliation_findings Number of drift findings.",
+                "# TYPE pvemaster_reconciliation_findings gauge",
+            ]
+        )
+        for status, severity, count in finding_counts:
+            lines.append(
+                "pvemaster_reconciliation_findings"
+                f'{{status="{status}",severity="{severity}"}} {count}'
+            )
+        lines.extend(
+            [
+                "# HELP pvemaster_inventory_stale_clusters Number of active clusters "
+                "without a recent full inventory sync.",
+                "# TYPE pvemaster_inventory_stale_clusters gauge",
+                f"pvemaster_inventory_stale_clusters {await self._stale_cluster_count()}",
+            ]
+        )
         scheduler = await self._scheduler_status()
         lines.extend(
             [
@@ -433,6 +467,35 @@ class ObservabilityService:
                         message="The Proxmox cluster is not connected.",
                     )
                 )
+        critical_findings = await self._session.scalar(
+            select(func.count())
+            .select_from(ReconciliationFinding)
+            .where(
+                ReconciliationFinding.status != FindingStatus.RESOLVED.value,
+                ReconciliationFinding.severity == FindingSeverity.CRITICAL.value,
+            )
+        )
+        if critical_findings:
+            alerts.append(
+                OperationalAlert(
+                    code="RECONCILIATION_CRITICAL",
+                    severity="critical",
+                    resource_type="inventory",
+                    message="Critical inventory drift findings require review.",
+                    value=int(critical_findings),
+                )
+            )
+        stale_clusters = await self._stale_cluster_count()
+        if stale_clusters:
+            alerts.append(
+                OperationalAlert(
+                    code="INVENTORY_STALE",
+                    severity="critical",
+                    resource_type="inventory",
+                    message="One or more clusters have stale inventory.",
+                    value=stale_clusters,
+                )
+            )
         for job in scheduler or []:
             if job.status == RunStatus.FAILED.value:
                 alerts.append(
@@ -482,6 +545,31 @@ class ObservabilityService:
                     )
                 )
         return alerts
+
+    async def _open_finding_count(self) -> int:
+        count = await self._session.scalar(
+            select(func.count())
+            .select_from(ReconciliationFinding)
+            .where(ReconciliationFinding.status != FindingStatus.RESOLVED.value)
+        )
+        return int(count or 0)
+
+    async def _stale_cluster_count(self) -> int:
+        now = datetime.now(UTC)
+        clusters = await self._session.scalars(select(Cluster).where(Cluster.is_active.is_(True)))
+        return sum(
+            1
+            for cluster in clusters
+            if cluster.last_sync_succeeded_at is None
+            or cluster.last_sync_succeeded_at
+            < now
+            - timedelta(
+                seconds=max(
+                    self._settings.inventory_stale_after_seconds,
+                    cluster.sync_interval_seconds * 3,
+                )
+            )
+        )
 
     async def _scheduler_status(self) -> list[SchedulerJobStatus]:
         rows = (

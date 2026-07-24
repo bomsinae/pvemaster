@@ -13,6 +13,12 @@ from app.main import create_app
 from app.models.auth import AuditLog, LoginThrottle, Organization, RefreshToken, User, UserRole
 from app.models.backup import BackupRun, BackupTarget
 from app.models.cluster import Cluster, ClusterCredential
+from app.models.inventory import (
+    InventoryNode,
+    InventoryStorage,
+    ReconciliationFinding,
+    WorkloadChangeEvent,
+)
 from app.models.ipam import (
     IpAddress,
     IpAddressState,
@@ -54,6 +60,10 @@ async def _clear(app: FastAPI) -> None:
         await session.execute(text("SET LOCAL app.audit_retention = 'on'"))
         for model in (
             AuditLog,
+            WorkloadChangeEvent,
+            ReconciliationFinding,
+            InventoryNode,
+            InventoryStorage,
             PveTask,
             OperationOutbox,
             BackupRun,
@@ -374,6 +384,11 @@ async def test_scheduled_inventory_sync_uses_cluster_lease_and_records_generatio
                 "discovered": 1,
                 "created": 1,
                 "updated": 0,
+                "missing": 0,
+                "findings": 0,
+                "nodes": 0,
+                "storages": 0,
+                "partial_errors": [],
             }
             workload = await session.scalar(
                 select(Workload).where(

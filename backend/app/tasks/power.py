@@ -22,8 +22,14 @@ def execute_power_operation(operation_id: str) -> None:
     from asyncio import run
 
     from app.services.power_runner import run_power_operation
+    from app.tasks.inventory import request_operation_target_sync
 
-    run(run_power_operation(UUID(operation_id)))
+    async def execute() -> None:
+        parsed_id = UUID(operation_id)
+        await run_power_operation(parsed_id)
+        await request_operation_target_sync(parsed_id)
+
+    run(execute())
 
 
 async def recover_power_operations() -> int:

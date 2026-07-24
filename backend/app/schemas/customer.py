@@ -37,6 +37,8 @@ class CustomerVmSummary(BaseModel):
     disk_bytes: int | None
     assigned_ip_addresses: list[str]
     observed_at: datetime
+    is_stale: bool
+    stale_reason: str | None
 
 
 class CustomerVmListResponse(BaseModel):

@@ -24,6 +24,7 @@ class ClusterCreate(BaseModel):
     token_identifier: TokenIdentifier
     token_secret: SecretStr = Field(min_length=1, max_length=1024)
     ca_bundle_pem: str | None = Field(default=None, max_length=262_144)
+    sync_interval_seconds: int = Field(default=60, ge=15, le=86_400)
 
     @field_validator("api_base_url")
     @classmethod
@@ -43,6 +44,7 @@ class ClusterUpdate(BaseModel):
     ca_bundle_pem: str | None = Field(default=None, max_length=262_144)
     clear_ca_bundle: bool = False
     version: int | None = Field(default=None, ge=1)
+    sync_interval_seconds: int | None = Field(default=None, ge=15, le=86_400)
 
     @field_validator("api_base_url")
     @classmethod
@@ -68,6 +70,9 @@ class ClusterResponse(BaseModel):
     ca_configured: bool
     last_connection_error_code: str | None
     last_connected_at: datetime | None
+    last_sync_succeeded_at: datetime | None
+    sync_interval_seconds: int
+    inventory_stale: bool
     credential: CredentialSummary
     created_at: datetime
     updated_at: datetime

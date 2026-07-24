@@ -22,7 +22,9 @@ from app.services.maintenance import (
     run_maintenance_job,
 )
 from app.services.outbox import BACKUP_EVENT, POWER_EVENT, RESTORE_EVENT
+from app.services.reconciliation import create_sync_run
 from app.tasks.backup import enqueue_backup_operation, enqueue_restore_operation
+from app.tasks.inventory import enqueue_inventory_sync
 from app.tasks.power import enqueue_power_operation
 from app.tasks.provisioning import enqueue_provisioning_request
 from app.worker import celery_app
@@ -109,16 +111,31 @@ def dispatch_inventory_sync() -> int:
 
 
 async def _dispatch_inventory_sync(session: AsyncSession) -> int:
-    cluster_ids = (
-        await session.scalars(select(Cluster.id).where(Cluster.is_active.is_(True)))
+    now = datetime.now(UTC)
+    queued_ids = (
+        await session.scalars(select(SyncRun.id).where(SyncRun.status == RunStatus.QUEUED.value))
     ).all()
-    for cluster_id in cluster_ids:
-        celery_app.send_task(
-            "app.tasks.inventory.sync_cluster_inventory",
-            args=[str(cluster_id)],
-            queue="inventory",
+    for run_id in queued_ids:
+        enqueue_inventory_sync(run_id)
+    clusters = (await session.scalars(select(Cluster).where(Cluster.is_active.is_(True)))).all()
+    dispatched = len(queued_ids)
+    for cluster in clusters:
+        due = (
+            cluster.last_sync_succeeded_at is None
+            or cluster.last_sync_succeeded_at
+            <= now - timedelta(seconds=cluster.sync_interval_seconds)
         )
-    return len(cluster_ids)
+        if not due:
+            continue
+        run, created = await create_sync_run(
+            session,
+            cluster_id=cluster.id,
+            triggered_by="scheduler",
+        )
+        if created and run.id not in queued_ids:
+            enqueue_inventory_sync(run.id)
+            dispatched += 1
+    return dispatched
 
 
 @celery_app.task(name="app.tasks.scheduler.release_ip_quarantine")  # type: ignore[untyped-decorator]

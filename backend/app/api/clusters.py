@@ -22,9 +22,11 @@ from app.schemas.cluster import (
     NodeMetricSeriesResponse,
     StorageListResponse,
 )
+from app.schemas.inventory import SyncRequestResponse
 from app.schemas.workload import WorkloadImportResponse
 from app.security.credentials import CredentialCipher
 from app.services.clusters import ClusterService
+from app.services.reconciliation import InventoryPublisher, ReconciliationService
 
 router = APIRouter(prefix="/api/v1/admin/clusters", tags=["admin-clusters"])
 SessionDependency = Annotated[AsyncSession, Depends(get_db_session)]
@@ -152,3 +154,22 @@ async def import_workloads(
     service: ServiceDependency,
 ) -> WorkloadImportResponse:
     return await service.import_workloads(cluster_id)
+
+
+@router.post("/{cluster_id}/sync", response_model=SyncRequestResponse)
+async def sync_cluster_inventory(
+    cluster_id: UUID,
+    request: Request,
+    session: SessionDependency,
+    principal: PrincipalDependency,
+    workload_id: UUID | None = None,
+) -> SyncRequestResponse:
+    service = ReconciliationService(
+        session=session,
+        settings=cast(Settings, request.app.state.settings),
+        principal=principal,
+        publisher=cast(InventoryPublisher, request.app.state.inventory_publisher),
+        request_id=request.state.request_id,
+    )
+    run = await service.request_sync(cluster_id, target_workload_id=workload_id)
+    return SyncRequestResponse(operation_id=run.id, status=run.status)

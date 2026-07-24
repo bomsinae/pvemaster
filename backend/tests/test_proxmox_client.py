@@ -36,6 +36,7 @@ def make_client(handler: Handler, *, secret: str | None = None) -> ProxmoxClient
     [
         (401, "PVE_AUTH_FAILED", 401),
         (403, "PVE_PERMISSION_DENIED", 403),
+        (429, "PVE_RATE_LIMITED", 503),
         (503, "PVE_UPSTREAM_ERROR", 502),
     ],
 )

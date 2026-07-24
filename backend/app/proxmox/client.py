@@ -517,6 +517,12 @@ class ProxmoxClient:
                 code="PVE_PERMISSION_DENIED",
                 message="The Proxmox API token lacks a required permission.",
             )
+        if response.status_code == 429:
+            raise AppError(
+                status_code=503,
+                code="PVE_RATE_LIMITED",
+                message="The Proxmox API rate limit was reached.",
+            )
         if response.status_code >= 500:
             raise AppError(
                 status_code=502,

@@ -8,7 +8,8 @@
   목적별 큐 길이, scheduler 작업의 최근 실행·성공·실패, 클러스터 연결 상태,
   VM/CT 할당 현황, 활성·전체 사용자와 조직 수, 활성 경보를 조회한다.
 - `GET /metrics`: Prometheus text exposition endpoint. worker, Celery 큐, scheduler 최근
-  성공 시각·실패 여부, 클러스터 연결, 작업 상태, IP 풀 가용 주소 지표를 제공한다.
+  성공 시각·실패 여부, 클러스터 연결, 작업 상태, IP 풀 가용 주소,
+  stale inventory cluster와 reconciliation finding 지표를 제공한다.
   운영에서는 reverse proxy 또는 네트워크 정책으로 Prometheus만 접근하도록 제한한다.
 
 Worker는 Redis의 TTL heartbeat를 갱신한다. heartbeat가 없으면 `WORKER_DOWN`, 대기 작업 합계가 `QUEUE_BACKLOG_ALERT_THRESHOLD` 이상이면 `JOB_QUEUE_BACKLOG` 경보가 발생한다. 다음 조건도 운영 상태 응답에 포함된다.
@@ -18,6 +19,8 @@ Worker는 Redis의 TTL heartbeat를 갱신한다. heartbeat가 없으면 `WORKER
 - IP 풀 가용 주소 부족. CIDR 크기에서 네트워크 주소, IPv4 broadcast, gateway,
   제외 범위와 `RESERVED`/`ASSIGNED`/`QUARANTINED`/`DISABLED` 주소를 중복 없이
   차감하며, sparse IPv6 풀도 주소를 열거하지 않고 계산한다.
+- 마지막 전체 inventory 성공이 stale 기준을 넘긴 클러스터
+- 해결되지 않은 critical reconciliation finding
 
 조직 미할당 VM/CT는 정상적인 관리 인벤토리일 수 있으므로 운영 경보가 아니라 상태 응답의 할당 현황(`assigned`, `unassigned`, `total`)으로 제공한다. 이 집계에는 활성 클러스터에서 현재 관측되는 비템플릿 VM/CT만 포함한다.
 

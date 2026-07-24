@@ -17,6 +17,8 @@ export type CustomerVm = {
   disk_bytes: number | null;
   assigned_ip_addresses: string[];
   observed_at: string;
+  is_stale?: boolean;
+  stale_reason?: string | null;
 };
 
 export type CustomerJob = {

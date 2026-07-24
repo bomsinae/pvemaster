@@ -56,6 +56,7 @@
 | 조직 생성·구성원 추가·제거 | 허용 | 조회만 허용 | 금지 |
 | 클러스터/자격 증명 CRUD와 연결 시험 | 허용 | 허용 | 금지 |
 | 전체 노드/VM/CT/스토리지 조회 | 허용 | 허용 | 금지 |
+| inventory sync·freshness·reconciliation finding 관리 | 허용 | 허용 | 금지 |
 | 워크로드 할당/회수 | 허용 | 허용 | 금지 |
 | 템플릿/프로비저닝/IPAM 정책 변경 | 허용 | 금지 | 금지 |
 | 자신의 활성 할당 워크로드 조회 | 허용 | 허용 | 허용 |
@@ -97,6 +98,9 @@ AND organization.is_active = true
 - 콘솔은 REST 인증 후 발급되는 30초 TTL 일회용 token을 WebSocket subprotocol로 전달한다. PVE 단기 콘솔 ticket은 RFB 인증을 위해 `no-store` 응답으로만 전달하며 브라우저 메모리 밖에 보존하지 않는다. access token, PVE ticket과 PVE endpoint를 URL에 넣지 않는다.
 - WebSocket 연결 시 허용 Origin, 역할, 사용자 활성/session epoch, workload 실행 상태를 다시 검사한다. 고객 역할은 조직 활성 상태, 멤버십과 현재 할당도 재검증한다. 사용자·workload 조합별 한 연결과 최대 세션 시간을 강제한다.
 - 대상의 현재 상태를 PVE에서 확인하고 무의미하거나 위험한 전이는 `409`로 거부한다.
+- 마지막 관측이 stale 기준을 넘은 고객 워크로드의 전원 작업은 서버에서
+  `503 INVENTORY_STALE`로 거부한다. 고객 응답에는 관측 시각과 stale 여부만
+  제공하고 cluster, node, sync generation, finding 상세는 노출하지 않는다.
 
 ## 4. PVE 자격 증명 보호
 
@@ -163,6 +167,9 @@ PVE API token은 일반적으로 token ID와 secret으로 나뉜다.
 - 작업 인자/결과의 기본 영속화를 최소화하고 만료 시간을 둔다. 업무 결과는 DB에 저장한다.
 - `acks_late`와 재시도를 사용하더라도 DB 상태 전이와 멱등성 제약이 중복 실행을 막아야 한다.
 - 클러스터/워크로드 단위 잠금은 TTL Redis 락만 신뢰하지 않고 DB advisory/row lock과 상태 compare-and-set을 사용한다.
+- inventory 큐에는 `sync_runs.id`만 전달하고 PVE endpoint, token, 원시 응답은 넣지
+  않는다. 전체 응답이 완전한 경우에만 누락 tombstone을 적용하며, 외부 삭제가
+  감지되어도 조직 할당과 IP를 자동 해제하지 않는다.
 - PVE UPID는 로그 주입을 막도록 구조화 필드로 저장하고 UI에서는 필요한 범위만 표시한다.
 
 ## 7. Cloud-Init과 고객 데이터
