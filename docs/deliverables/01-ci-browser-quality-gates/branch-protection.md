@@ -30,14 +30,14 @@ GitHub repository settings에서 `main`에 다음 ruleset 또는 branch protecti
 | Quality gates | `Browser / Playwright (Chromium, Firefox, WebKit)` |
 | Security and supply chain | `Security / committed secrets` |
 | Security and supply chain | `Security / dependency vulnerabilities` |
-| Security and supply chain | `Security / dependency review` |
 | Security and supply chain | `Supply chain / SBOM` |
 | Security and supply chain | `Security / container images` |
 
-`Security / dependency review`는 pull request에서만 실행한다. private repository라면
-GitHub Dependency Review 사용 자격과 dependency graph 활성화 여부를 먼저 확인한다.
-이를 사용할 수 없는 요금제에서는 이 check를 조용히 제외하지 말고, 동일한
-high-severity 신규 dependency 차단 수단을 정한 뒤 이 문서를 갱신한다.
+`Security / dependency review`는 pull request에서 보조 검사로 실행하지만, 현재
+repository는 Dependency graph가 비활성화되어 있어 required check에 포함하지
+않는다. Dependency graph를 활성화한 뒤 action의 성공을 확인하고 required check로
+승격한다. 그 전까지 Python `pip-audit`과 production Node `npm audit`가
+high-severity dependency를 병합 차단한다.
 
 ## 실패 처리
 

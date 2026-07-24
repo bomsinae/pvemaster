@@ -85,14 +85,17 @@ required check가 이를 병합 차단 범위에 포함한다.
 
 ## 남은 적용 확인
 
-1. GitHub에 workflow를 push한 뒤 최초 실행 결과를 확인한다.
-2. dependency audit와 image scan에서 발견되는 실제 취약점을 triage한다.
+1. GitHub dependency graph를 활성화하고 dependency review를 required check로
+   승격한다.
+2. dependency audit와 image scan에서 새로 발견되는 실제 취약점을 triage한다.
 3. [branch protection 운영 기준](branch-protection.md)을 repository settings에
    적용하고 실패 check의 병합 차단을 확인한다.
 4. staging에서 실제 PVE/PBS와 console WebSocket을 포함한 smoke test를 수행한다.
 5. 수동 200% zoom, Windows High Contrast, VoiceOver/NVDA keyboard 검증을 수행한다.
 
-로컬 `npm install`은 audit 요약으로 high severity 항목 3개가 있음을 알렸지만,
-현재 환경에서는 상세 audit 조회가 허용되지 않았다. 취약점을 무시한 완료 판정을
-하지 않으며, 원격 `Security / dependency vulnerabilities` 결과를 triage한 뒤
-보안 gate 적용을 최종 확인한다.
+최초 원격 Python audit에서 `cryptography 46.0.7`의
+`GHSA-537c-gmf6-5ccf`가 발견되어 최소 버전을 `48.0.1`로 상향했다. 로컬
+`npm install`은 audit 요약으로 high severity 항목 3개가 있음을 알렸지만, 현재
+환경에서는 상세 audit 조회가 허용되지 않았다. 취약점을 무시한 완료 판정을 하지
+않으며, 원격 production Node audit 결과를 triage한 뒤 보안 gate 적용을 최종
+확인한다.

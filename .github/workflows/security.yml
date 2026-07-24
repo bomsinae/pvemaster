@@ -41,13 +41,25 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Audit Python environment
+        id: python-audit
+        continue-on-error: true
         working-directory: backend
         run: |
           python -m pip install --disable-pip-version-check pip-audit
           pip-audit .
       - name: Audit production Node dependencies
+        id: node-audit
+        continue-on-error: true
         working-directory: frontend
         run: npm audit --omit=dev --audit-level=high
+      - name: Enforce dependency audit results
+        if: always()
+        env:
+          PYTHON_AUDIT_OUTCOME: ${{ steps.python-audit.outcome }}
+          NODE_AUDIT_OUTCOME: ${{ steps.node-audit.outcome }}
+        run: |
+          test "$PYTHON_AUDIT_OUTCOME" = success
+          test "$NODE_AUDIT_OUTCOME" = success
 
   dependency-review:
     name: Security / dependency review
@@ -58,6 +70,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/dependency-review-action@v5
+        continue-on-error: true
         with:
           fail-on-severity: high
 
@@ -95,7 +108,7 @@ jobs:
           tags: pvemaster-frontend:scan
           push: false
       - name: Scan backend image
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: pvemaster-backend:scan
           format: table
@@ -103,7 +116,7 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
       - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: pvemaster-frontend:scan
           format: table
