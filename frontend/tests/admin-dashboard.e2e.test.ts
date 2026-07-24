@@ -130,7 +130,7 @@ test("admin login, operations, cluster registration and inventory flow", async (
     if (url.endsWith(`/admin/clusters/${cluster.id}/test`)) return response({ reachable: true, tls_valid: true, authenticated: true, version: "9.0", release: "1", capabilities: {} });
     if (url.endsWith(`/admin/clusters/${cluster.id}/nodes/pve-a/metrics?range=hour`)) return response({ cluster_id: cluster.id, node: "pve-a", range: "hour", observed_at: "2026-07-14T12:00:00Z", items: [{ time: 1720000000, cpu_usage: 0.25, server_load: 1.1, memory_used_bytes: 1024, memory_total_bytes: 2048, network_receive_bps: 4096, network_transmit_bps: 2048, cpu_pressure_some: null, io_pressure_some: null, io_pressure_full: null, memory_pressure_some: null, memory_pressure_full: null }] });
     if (url.endsWith(`/admin/clusters/${cluster.id}/nodes`)) return response({ items: [{ node: "pve-a", status: "online", maxcpu: 16, mem: 1024, maxmem: 2048 }] });
-    if (url.endsWith(`/admin/clusters/${cluster.id}/guests`)) return response({ items: [{ vmid: 101, node: "pve-a", type: "qemu", name: "vm-101", status: "running", maxcpu: 4, maxmem: 8_589_934_592, maxdisk: 107_374_182_400 }] });
+    if (url.endsWith(`/admin/clusters/${cluster.id}/guests`)) return response({ items: [{ vmid: 101, node: "pve-a", type: "qemu", name: "vm-101", status: "running", cpu: 0.125, maxcpu: 4, mem: 2_147_483_648, maxmem: 8_589_934_592, disk: 26_843_545_600, maxdisk: 107_374_182_400, uptime: 90_061 }] });
     if (url.endsWith(`/admin/clusters/${cluster.id}/storages`)) return response({ items: [{ storage: "local-lvm", node: "pve-a", type: "lvmthin", status: "available" }] });
     if (url.endsWith(`/admin/clusters/${cluster.id}/workloads/import`)) return response({ cluster_id: cluster.id, discovered: 1, created: 1, updated: 0 });
     if (url.endsWith(`/admin/organizations/${organizationId}/members`) && init?.method === "POST") return response({ id: "membership-id" }, 201);
@@ -235,6 +235,10 @@ test("admin login, operations, cluster registration and inventory flow", async (
   assert.equal(probe.authenticated, true);
   assert.equal(inventory.nodes[0].node, "pve-a");
   assert.equal(inventory.guests[0].vmid, 101);
+  assert.equal(inventory.guests[0].cpu, 0.125);
+  assert.equal(inventory.guests[0].mem, 2_147_483_648);
+  assert.equal(inventory.guests[0].disk, 26_843_545_600);
+  assert.equal(inventory.guests[0].uptime, 90_061);
   assert.equal(inventory.guests[0].maxcpu, 4);
   assert.equal(inventory.storages[0].storage, "local-lvm");
   assert.equal(imported.created, 1);

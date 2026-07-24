@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { getMe, CurrentUser } from "@/lib/admin-api";
+import { resetAccessTokenState } from "@/lib/authenticated-fetch";
 import { AuthSession } from "@/lib/customer-api";
 import { persistBrowserSession, restoreBrowserSession } from "@/lib/browser-session";
 
@@ -29,7 +30,14 @@ export function PortalRouter({ apiBaseUrl }: { apiBaseUrl: string }) {
       .finally(() => setRestoring(false));
   }, [apiBaseUrl]);
 
+  useEffect(() => {
+    const handleSessionExpired = () => clearSession();
+    window.addEventListener("pvemaster:session-expired", handleSessionExpired);
+    return () => window.removeEventListener("pvemaster:session-expired", handleSessionExpired);
+  }, []);
+
   async function routeSession(nextSession: AuthSession) {
+    resetAccessTokenState();
     const current = await getMe(apiBaseUrl, nextSession.accessToken);
     await persistBrowserSession(nextSession.refreshToken);
     setSession({ accessToken: nextSession.accessToken, refreshToken: "" });
@@ -37,6 +45,7 @@ export function PortalRouter({ apiBaseUrl }: { apiBaseUrl: string }) {
   }
 
   function clearSession() {
+    resetAccessTokenState();
     setSession(null);
     setUser(null);
   }

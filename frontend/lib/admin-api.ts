@@ -1,3 +1,5 @@
+import { fetchWithAccessToken } from "./authenticated-fetch.ts";
+
 type Fetcher = typeof fetch;
 
 type SessionLike = { accessToken: string; refreshToken: string };
@@ -233,9 +235,13 @@ export type ClusterGuest = {
   type: string;
   name: string | null;
   status: string | null;
+  cpu: number | null;
   maxcpu: number | null;
+  mem: number | null;
   maxmem: number | null;
+  disk: number | null;
   maxdisk: number | null;
+  uptime: number | null;
   template: number | boolean | null;
 };
 
@@ -448,9 +454,13 @@ async function api<T>(
   fetcher: Fetcher = fetch,
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${accessToken}`);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const response = await fetcher(`${apiBaseUrl}${path}`, { ...init, headers });
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}${path}`,
+    accessToken,
+    { ...init, headers },
+    fetcher,
+  );
   if (response.status === 204) return undefined as T;
   const body = (await response.json()) as T & { error?: { code?: string; message?: string } };
   if (!response.ok) {

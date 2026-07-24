@@ -227,18 +227,14 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
         )
         session.add_all([admin, customer_a, customer_b, removed, inactive])
         await session.flush()
+        session.add_all([organization_a, organization_b, organization_c, cluster])
+        await session.flush()
         session.add_all(
             [
-                organization_a,
-                organization_b,
-                organization_c,
-                cluster,
                 vm_a,
                 vm_b,
                 vm_c,
                 ip_pool,
-                ip_address,
-                ip_allocation,
                 removed_membership,
                 OrganizationMember(
                     organization_id=organization_a.id,
@@ -257,6 +253,10 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
                 ),
             ]
         )
+        await session.flush()
+        session.add(ip_address)
+        await session.flush()
+        session.add(ip_allocation)
         await session.flush()
         await session.delete(removed_membership)
         await session.commit()

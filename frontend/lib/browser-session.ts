@@ -1,9 +1,18 @@
-import type { AuthSession } from "./customer-api";
+import type { AuthSession } from "./customer-api.ts";
 
 type Fetcher = typeof fetch;
 
+export class BrowserSessionError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super("Browser session request failed");
+    this.status = status;
+  }
+}
+
 async function requireSuccess(response: Response): Promise<Response> {
-  if (!response.ok) throw new Error("Browser session request failed");
+  if (!response.ok) throw new BrowserSessionError(response.status);
   return response;
 }
 

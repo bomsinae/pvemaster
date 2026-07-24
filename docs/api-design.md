@@ -189,7 +189,7 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 | POST | `/admin/clusters/{cluster_id}/test` | 동기/짧은 timeout | TLS, 인증, 노드/게스트/스토리지 최소 권한 probe (`test-connection` 호환 alias 제공) |
 | GET | `/admin/clusters/{cluster_id}/nodes` | 동기 | 해당 PVE 클러스터의 실시간 노드 목록 |
 | GET | `/admin/clusters/{cluster_id}/nodes/{node}/metrics?range=hour\|six_hours\|day\|week` | 동기/짧은 timeout | Proxmox RRD 기반 CPU, load, 메모리, 네트워크, CPU·IO·메모리 PSI 시계열. 지원하지 않는 PSI 값은 `null` |
-| GET | `/admin/clusters/{cluster_id}/guests` | 동기 | 해당 PVE 클러스터의 실시간 QEMU/LXC 목록 |
+| GET | `/admin/clusters/{cluster_id}/guests` | 동기 | 해당 PVE 클러스터의 실시간 QEMU/LXC 목록. 실행 중 게스트는 `cpu`, `maxcpu`, `mem`, `maxmem`, `disk`, `maxdisk`, `uptime` 현재 사용량과 한도를 포함 |
 | GET | `/admin/clusters/{cluster_id}/storages` | 동기 | 해당 PVE 클러스터의 실시간 스토리지 목록 |
 | POST | `/admin/clusters/{cluster_id}/sync` | 비동기 | 전체 인벤토리 동기화 operation 생성 |
 | POST | `/admin/clusters/{cluster_id}/rotate-credential` | 동기 | 새 token 시험 후 활성 전환 |

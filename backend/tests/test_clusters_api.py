@@ -23,6 +23,7 @@ from app.schemas.cluster import (
     ClusterResponse,
     ClusterUpdate,
     CredentialSummary,
+    GuestResponse,
     NodeMetricRange,
     NodeMetricSeriesResponse,
     NodeResponse,
@@ -346,6 +347,30 @@ def test_storage_response_normalizes_cluster_resource_capacity() -> None:
     assert storage.total == 100 * 1024**3
     assert storage.used == 25 * 1024**3
     assert storage.avail == 75 * 1024**3
+
+
+def test_guest_response_preserves_live_resource_usage() -> None:
+    guest = GuestResponse.model_validate(
+        {
+            "vmid": 101,
+            "node": "pve-a",
+            "type": "qemu",
+            "name": "web-01",
+            "status": "running",
+            "cpu": 0.125,
+            "maxcpu": 4,
+            "mem": 2 * 1024**3,
+            "maxmem": 8 * 1024**3,
+            "disk": 25 * 1024**3,
+            "maxdisk": 100 * 1024**3,
+            "uptime": 90_061,
+        }
+    )
+
+    assert guest.cpu == 0.125
+    assert guest.mem == 2 * 1024**3
+    assert guest.disk == 25 * 1024**3
+    assert guest.uptime == 90_061
 
 
 def test_vm_storage_capacity_excludes_node_and_backup_only_storage() -> None:

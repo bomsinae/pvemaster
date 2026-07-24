@@ -184,9 +184,13 @@ class GuestResponse(BaseModel):
     type: str
     name: str | None = None
     status: str | None = None
+    cpu: float | None = Field(default=None, ge=0)
     maxcpu: int | None = Field(default=None, ge=0, le=65_535)
+    mem: int | None = Field(default=None, ge=0, le=9_223_372_036_854_775_807)
     maxmem: int | None = Field(default=None, ge=0, le=9_223_372_036_854_775_807)
+    disk: int | None = Field(default=None, ge=0, le=9_223_372_036_854_775_807)
     maxdisk: int | None = Field(default=None, ge=0, le=9_223_372_036_854_775_807)
+    uptime: int | None = Field(default=None, ge=0, le=9_223_372_036_854_775_807)
     template: int | bool | None = None
 
 

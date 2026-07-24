@@ -1,3 +1,5 @@
+import { fetchWithAccessToken } from "./authenticated-fetch.ts";
+
 export type AuthSession = {
   accessToken: string;
   refreshToken: string;
@@ -84,9 +86,9 @@ export async function listCustomerVms(
   accessToken: string,
   fetcher: Fetcher = fetch,
 ): Promise<CustomerVm[]> {
-  const response = await fetcher(`${apiBaseUrl}/api/v1/customer/vms`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/vms`, accessToken, {}, fetcher,
+  );
   return (await parseResponse<{ items: CustomerVm[] }>(response)).items;
 }
 
@@ -96,9 +98,11 @@ export async function getCustomerVm(
   vmId: string,
   fetcher: Fetcher = fetch,
 ): Promise<CustomerVmDetail> {
-  const response = await fetcher(
+  const response = await fetchWithAccessToken(
     `${apiBaseUrl}/api/v1/customer/vms/${encodeURIComponent(vmId)}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
+    accessToken,
+    {},
+    fetcher,
   );
   return parseResponse<CustomerVmDetail>(response);
 }
@@ -116,17 +120,18 @@ export async function requestPowerAction(
       ? { fetcher: optionsOrFetcher, confirmForced: false }
       : optionsOrFetcher;
   const fetcher = options.fetcher ?? fetch;
-  const response = await fetcher(
+  const response = await fetchWithAccessToken(
     `${apiBaseUrl}/api/v1/customer/vms/${encodeURIComponent(vmId)}/actions/${action}`,
+    accessToken,
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
         "Idempotency-Key": idempotencyKey,
       },
       body: JSON.stringify({ confirm_forced: action === "stop" && options.confirmForced === true }),
     },
+    fetcher,
   );
   return parseResponse<CustomerJob>(response);
 }
@@ -137,9 +142,11 @@ export async function getCustomerJob(
   jobId: string,
   fetcher: Fetcher = fetch,
 ): Promise<CustomerJob> {
-  const response = await fetcher(
+  const response = await fetchWithAccessToken(
     `${apiBaseUrl}/api/v1/customer/jobs/${encodeURIComponent(jobId)}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
+    accessToken,
+    {},
+    fetcher,
   );
   return parseResponse<CustomerJob>(response);
 }
@@ -151,17 +158,16 @@ export async function changePassword(
   newPassword: string,
   fetcher: Fetcher = fetch,
 ): Promise<void> {
-  const response = await fetcher(`${apiBaseUrl}/api/v1/auth/change-password`, {
+  const response = await fetchWithAccessToken(`${apiBaseUrl}/api/v1/auth/change-password`, accessToken, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
       current_password: currentPassword,
       new_password: newPassword,
     }),
-  });
+  }, fetcher);
   if (response.ok) return;
   const body = (await response.json()) as {
     error?: { code?: string; message?: string };

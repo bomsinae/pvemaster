@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   AuthSession,
@@ -18,6 +18,7 @@ import type { CustomerJobsByVmId, CustomerPowerFilter } from "@/lib/customer-por
 
 import { LoginPanel } from "./login-panel";
 import { PasswordChangeDialog } from "./password-change-dialog";
+import { useDialogFocus } from "./use-dialog-focus";
 import { VmConsoleModal } from "./vm-console-modal";
 
 const actionLabels: Record<CustomerPowerAction, string> = {
@@ -116,8 +117,9 @@ export function CustomerPortal({
   const [jobsByVmId, setJobsByVmId] = useState<CustomerJobsByVmId>({});
   const [consoleVm, setConsoleVm] = useState<CustomerVm | null>(null);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(initialSession));
   const [error, setError] = useState("");
+  const actionDialogRef = useRef<HTMLElement>(null);
 
   const refreshList = useCallback(async (activeSession: AuthSession) => {
     const items = await listCustomerVms(apiBaseUrl, activeSession.accessToken);
@@ -206,6 +208,8 @@ export function CustomerPortal({
     setPendingVm(vm);
     setPendingAction(action);
   }
+
+  useDialogFocus(Boolean(pendingAction && pendingVm), actionDialogRef, closeActionDialog);
 
   function openConsole(vm: CustomerVm) {
     if (!openConsoleWindow(vm.id)) setConsoleVm(vm);
@@ -321,7 +325,7 @@ export function CustomerPortal({
                         <button className="customer-danger-action" disabled={!running || jobPending} onClick={() => openActionDialog(vm, "stop")}>강제 중지</button>
                       </span>
                       {vmJob && (
-                        <small className={`customer-row-job ${vmJob.status.toLowerCase()}`}>
+                        <small className={`customer-row-job ${vmJob.status.toLowerCase()}`} role="status" aria-live="polite">
                           <span className={!terminalStatuses.has(vmJob.status) ? "progress-pulse" : "status-pip"} aria-hidden="true" />
                           {actionLabels[vmJob.action]} · {vmJob.status}
                         </small>
@@ -330,6 +334,7 @@ export function CustomerPortal({
                   </div>
                 );
               })}
+              {loading && vms.length === 0 && <p className="empty-state customer-table-empty" role="status" aria-live="polite">가상 머신을 불러오는 중입니다…</p>}
               {!loading && vms.length === 0 && <p className="empty-state customer-table-empty">조직에 할당된 VM이 없습니다.</p>}
               {vms.length > 0 && visibleVms.length === 0 && <p className="empty-state customer-table-empty">검색 조건에 맞는 VM이 없습니다.</p>}
             </div>
@@ -340,7 +345,7 @@ export function CustomerPortal({
 
       {pendingAction && pendingVm && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={closeActionDialog}>
-          <section className={`confirm-dialog${pendingAction === "stop" ? " forced-confirm-dialog" : ""}`} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()}>
+          <section ref={actionDialogRef} tabIndex={-1} className={`confirm-dialog${pendingAction === "stop" ? " forced-confirm-dialog" : ""}`} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onMouseDown={(event) => event.stopPropagation()}>
             <p className="eyebrow">Confirm operation</p>
             <h2 id="confirm-title">{pendingVm.name} {actionLabels[pendingAction]}</h2>
             {pendingAction === "stop" ? <><p>게스트 운영체제의 종료 절차를 건너뛰고 전원을 즉시 차단합니다. 저장되지 않은 데이터나 파일시스템이 손상될 수 있습니다.</p><label className="forced-confirm-check"><input type="checkbox" checked={forcedAcknowledged} onChange={(event) => setForcedAcknowledged(event.target.checked)} /><span>위험을 이해했으며 강제 중지를 요청합니다.</span></label></> : <p>이 전원 작업을 요청하시겠습니까? 진행 상태는 VM 목록의 전원 제어 영역에서 확인할 수 있습니다.</p>}

@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { supportsAdminPowerAction } from "@/lib/admin-vm-state";
+import { fetchWithAccessToken } from "@/lib/authenticated-fetch";
 
 type PowerAction = "start" | "shutdown" | "stop" | "reboot" | "reset";
 
@@ -40,12 +41,12 @@ export function VmPowerActions({
     setPending(action);
     setMessage("");
     try {
-      const response = await fetch(
+      const response = await fetchWithAccessToken(
         `${apiBaseUrl}/api/v1/admin/workloads/${encodeURIComponent(vmId)}/actions/${action}`,
+        accessToken,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json",
             "Idempotency-Key": crypto.randomUUID(),
           },

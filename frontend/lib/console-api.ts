@@ -1,3 +1,5 @@
+import { fetchWithAccessToken } from "./authenticated-fetch.ts";
+
 export type ConsoleSession = {
   session_id: string;
   websocket_path: string;
@@ -33,13 +35,14 @@ export async function createConsoleSession(
   const resourcePath = scope === "customer"
     ? `/api/v1/customer/vms/${encodeURIComponent(workloadId)}/console-sessions`
     : `/api/v1/admin/workloads/${encodeURIComponent(workloadId)}/console-sessions`;
-  const response = await fetcher(
+  const response = await fetchWithAccessToken(
     `${apiBaseUrl}${resourcePath}`,
+    accessToken,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}` },
       cache: "no-store",
     },
+    fetcher,
   );
   const body = (await response.json()) as ConsoleSession & {
     error?: { code?: string; message?: string };

@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 
 import { changePassword, CustomerApiError } from "@/lib/customer-api";
+import { useDialogFocus } from "./use-dialog-focus";
 
 function passwordError(error: unknown): string {
   if (!(error instanceof CustomerApiError)) {
@@ -30,6 +31,9 @@ export function PasswordChangeDialog({
 }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const dialogRef = useRef<HTMLElement>(null);
+
+  useDialogFocus(true, dialogRef, saving ? undefined : onClose);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -70,6 +74,8 @@ export function PasswordChangeDialog({
       onMouseDown={() => { if (!saving) onClose(); }}
     >
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         className="confirm-dialog password-change-dialog"
         role="dialog"
         aria-modal="true"

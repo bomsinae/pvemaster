@@ -109,12 +109,14 @@ import { validateSshPublicKeys } from "@/lib/ssh-public-key";
 import { generateSshRsaKeyPair } from "@/lib/ssh-keypair";
 import { VmConsoleModal } from "./vm-console-modal";
 import { ClusterMetricsPanel } from "./cluster-metrics";
+import { useDialogFocus } from "./use-dialog-focus";
 
 type Section = AdminSection;
 
 const DEFAULT_AUDIT_PAGE_SIZE = 25;
 const AUDIT_PAGE_SIZES = [25, 50, 100] as const;
 const OVERVIEW_REFRESH_INTERVAL_MS = 10_000;
+const CLUSTER_INVENTORY_REFRESH_INTERVAL_MS = 10_000;
 
 const sectionLabels: Record<Section, string> = {
   overview: "운영 개요",
@@ -178,8 +180,15 @@ function formatUptime(value: number | null) {
   if (value === null) return "—";
   const days = Math.floor(value / 86400);
   const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
   if (days > 0) return `${days}일 ${hours}시간`;
-  return `${hours}시간`;
+  if (hours > 0) return `${hours}시간 ${minutes}분`;
+  return `${minutes}분`;
+}
+
+function formatGuestCapacity(used: number | null, total: number | null) {
+  if (used === null || !total) return "—";
+  return `${formatPercent(used / total)} · ${formatBytes(used)} / ${formatBytes(total)}`;
 }
 
 function wholeGib(value: number) {
@@ -199,8 +208,9 @@ function availableStorageBytes(storages: ClusterStorage[], nodeName: string) {
     }, 0);
 }
 
-function StatusMark({ ok, label }: { ok: boolean; label: string }) {
-  return <span className={ok ? "admin-status ok" : "admin-status failed"}><i />{label}</span>;
+function StatusMark({ ok, label }: { ok: boolean | null; label: string }) {
+  const tone = ok === null ? "neutral" : ok ? "ok" : "failed";
+  return <span className={`admin-status ${tone}`}><i />{label}</span>;
 }
 
 export function AdminDashboard({
@@ -225,6 +235,9 @@ export function AdminDashboard({
   const overviewRequestRef = useRef<AbortController | null>(null);
   const overviewRefreshInFlightRef = useRef(false);
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
+  const selectedClusterRef = useRef<string | null>(null);
+  const inventoryRequestIdRef = useRef(0);
+  const inventoryLoadingRequestIdRef = useRef(0);
   const [clusterRemovalCheck, setClusterRemovalCheck] = useState<ClusterRemovalCheck | null>(null);
   const [checkingClusterRemoval, setCheckingClusterRemoval] = useState(false);
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
@@ -269,6 +282,9 @@ export function AdminDashboard({
   const [notice, setNotice] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [form, setForm] = useState<"cluster" | "cluster-delete" | "user" | "user-password-reset" | "user-status" | "user-delete" | "organization-user" | "organization" | "organization-delete" | "pool" | "pool-delete" | "product" | "product-delete" | "template" | "template-delete" | "node" | "vm" | "vm-spec" | "vm-delete" | null>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+
+  useDialogFocus(Boolean(form), drawerRef, () => setForm(null));
 
   const isSuperAdmin = user.role === "SUPER_ADMIN";
   const navigation = useMemo<Section[]>(
@@ -279,6 +295,10 @@ export function AdminDashboard({
   );
 
   const token = session.accessToken;
+
+  useEffect(() => {
+    selectedClusterRef.current = selectedCluster;
+  }, [selectedCluster]);
 
   function navigateToSection(next: Section) {
     setForm(null);
@@ -574,32 +594,97 @@ export function AdminDashboard({
     return () => window.clearTimeout(timer);
   }, [loadSection, section]);
 
-  async function loadInventory(clusterId: string) {
-    setLoading(true);
+  const loadInventory = useCallback(async (clusterId: string, background = false) => {
+    const requestId = inventoryRequestIdRef.current + 1;
+    inventoryRequestIdRef.current = requestId;
+    if (!background) {
+      inventoryLoadingRequestIdRef.current = requestId;
+      setLoading(true);
+      setNodes([]);
+      setGuests([]);
+      setStorages([]);
+    }
     setError("");
     try {
       const inventory = await getClusterInventory(apiBaseUrl, token, clusterId);
+      if (
+        requestId !== inventoryRequestIdRef.current
+        || clusterId !== selectedClusterRef.current
+      ) return;
       setNodes(inventory.nodes);
       setGuests(inventory.guests);
       setStorages(inventory.storages);
     } catch (caught) {
+      if (
+        requestId !== inventoryRequestIdRef.current
+        || clusterId !== selectedClusterRef.current
+      ) return;
       setError(readableError(caught));
-      setNodes([]);
-      setGuests([]);
-      setStorages([]);
+      if (!background) {
+        setNodes([]);
+        setGuests([]);
+        setStorages([]);
+      }
     } finally {
-      setLoading(false);
+      if (!background && requestId === inventoryLoadingRequestIdRef.current) {
+        setLoading(false);
+      }
     }
-  }
+  }, [apiBaseUrl, token]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (section === "clusters" && selectedCluster) void loadInventory(selectedCluster);
-    }, 0);
-    return () => window.clearTimeout(timer);
-    // selectedCluster changes are intentionally the trigger; loadInventory is request-scoped.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section, selectedCluster]);
+    if (section !== "clusters" || !selectedCluster) return;
+
+    const clusterId = selectedCluster;
+    let stopped = false;
+    let refreshing = false;
+    let refreshTimer: number | undefined;
+
+    const schedule = () => {
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      if (stopped || document.visibilityState === "hidden") return;
+      refreshTimer = window.setTimeout(async () => {
+        if (!refreshing) {
+          refreshing = true;
+          await loadInventory(clusterId, true);
+          refreshing = false;
+        }
+        schedule();
+      }, CLUSTER_INVENTORY_REFRESH_INTERVAL_MS);
+    };
+
+    const start = async () => {
+      refreshing = true;
+      await loadInventory(clusterId);
+      refreshing = false;
+      schedule();
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+        refreshTimer = undefined;
+        return;
+      }
+      if (!refreshing) {
+        refreshing = true;
+        void loadInventory(clusterId, true).finally(() => {
+          refreshing = false;
+          schedule();
+        });
+      } else {
+        schedule();
+      }
+    };
+
+    void start();
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      stopped = true;
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [loadInventory, section, selectedCluster]);
 
   const loadOrganizationMembers = useCallback(async (organizationId: string) => {
     try {
@@ -1226,16 +1311,16 @@ export function AdminDashboard({
       <section className="admin-workspace">
         <header className="admin-topbar">
           <div><p className="eyebrow">{section}</p><h1>{sectionLabels[section]}</h1></div>
-          <div className="admin-top-actions"><span>{section === "overview" ? (loading || overviewRefreshing ? "자원 갱신 중" : overviewStale ? "이전 데이터 표시 중" : overviewSecondsUntilRefresh === null ? "자동 갱신 일시 중지" : `자동 갱신 ${overviewSecondsUntilRefresh}초`) : loading ? "동기화 중" : "방금 갱신됨"}</span><button onClick={() => loadSection(section)} disabled={loading || (section === "overview" && overviewRefreshing)}>새로고침</button></div>
+          <div className="admin-top-actions"><span>{section === "overview" ? (loading || overviewRefreshing ? "자원 갱신 중" : overviewStale ? "이전 데이터 표시 중" : overviewSecondsUntilRefresh === null ? "자동 갱신 일시 중지" : `자동 갱신 ${overviewSecondsUntilRefresh}초`) : section === "clusters" ? (loading ? "인벤토리 갱신 중" : "10초 자동 갱신") : loading ? "동기화 중" : "방금 갱신됨"}</span><button onClick={() => loadSection(section)} disabled={loading || (section === "overview" && overviewRefreshing)}>새로고침</button></div>
         </header>
 
         {error && !form && <div className="admin-message error" role="alert"><span>{error}</span><button onClick={() => setError("")}>×</button></div>}
-        {notice && <div className="admin-message notice"><span>{notice}</span><button onClick={() => setNotice("")}>×</button></div>}
+        {notice && <div className="admin-message notice" role="status" aria-live="polite"><span>{notice}</span><button onClick={() => setNotice("")} aria-label="알림 닫기">×</button></div>}
 
         {section === "overview" && <Overview apiBaseUrl={apiBaseUrl} token={token} status={status} clusters={clusters} resources={clusterResources} loading={loading} refreshing={overviewRefreshing} stale={overviewStale} lastUpdatedAt={overviewLastUpdatedAt} secondsUntilRefresh={overviewSecondsUntilRefresh} />}
         {section === "clusters" && (
           <ClustersView clusters={clusters} current={currentCluster} nodes={nodes} guests={guests} storages={storages}
-            selectedId={selectedCluster} onSelect={setSelectedCluster} onTest={runClusterTest} onImport={runWorkloadImport} onCreate={() => setForm("cluster")} onDelete={openClusterRemoval} saving={saving} canDelete={isSuperAdmin} />
+            selectedId={selectedCluster} onSelect={setSelectedCluster} onTest={runClusterTest} onImport={runWorkloadImport} onCreate={() => setForm("cluster")} onDelete={openClusterRemoval} saving={saving || loading} canDelete={isSuperAdmin} />
         )}
         {section === "vms" && <VmOperationsView workloads={workloads} backupRuns={backupRuns} onSelect={setSelectedWorkload} onCreate={() => setForm("vm")} onEdit={() => setForm("vm-spec")} onDelete={() => setForm("vm-delete")} onBackup={openBackupForWorkload} onAction={runVmAction} onConsole={openConsole} activeJob={activeVmJob} saving={saving} canManage={isSuperAdmin} />}
         {section === "backups" && <BackupsView clusters={clusters} workloads={workloads} targets={backupTargets} candidates={backupCandidates} runs={backupRuns} preferredWorkloadId={backupFocusWorkload} activeRun={activeBackupRun} activeRestore={activeRestoreRun} saving={saving} canConfigure={isSuperAdmin} onClearPreferredWorkload={() => setBackupFocusWorkload(null)} onDiscover={discoverClusterBackups} onRegister={registerBackupTarget} onToggle={toggleBackupTarget} onBackup={runBackup} onRestore={runRestore} />}
@@ -1247,8 +1332,8 @@ export function AdminDashboard({
 
       {form && (
         <div className="admin-drawer-backdrop" onMouseDown={() => setForm(null)}>
-          <aside className="admin-drawer" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="drawer-close" onClick={() => setForm(null)}>×</button>
+          <aside ref={drawerRef} tabIndex={-1} className="admin-drawer" role="dialog" aria-modal="true" aria-label="관리 작업" onMouseDown={(event) => event.stopPropagation()}>
+            <button className="drawer-close" onClick={() => setForm(null)} aria-label="관리 작업 닫기">×</button>
             {error && <div className="drawer-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError("")} aria-label="오류 메시지 닫기">×</button></div>}
             {form === "cluster" && <ClusterForm onSubmit={submitCluster} saving={saving} />}
             {form === "cluster-delete" && currentCluster && <ClusterDeleteForm cluster={currentCluster} check={clusterRemovalCheck} checking={checkingClusterRemoval} onSubmit={submitClusterDelete} saving={saving} />}
@@ -1373,25 +1458,70 @@ function ClustersView({ clusters, current, nodes, guests, storages, selectedId, 
   selectedId: string | null; onSelect: (id: string) => void; onTest: (id: string) => void; onImport: (id: string) => void; onCreate: () => void; onDelete: () => void; saving: boolean; canDelete: boolean;
 }) {
   return <div className="admin-content cluster-layout enter-admin">
-    <aside className="resource-index"><div className="admin-section-title"><div><p className="eyebrow">Registered</p><h2>클러스터</h2></div><button className="accent-button" onClick={onCreate}>등록</button></div>
-      {clusters.map((cluster) => {
-        const selected = selectedId === cluster.id;
-        return <button key={cluster.id} className={selected ? "resource-row active" : "resource-row"} aria-pressed={selected} onClick={() => onSelect(cluster.id)}><StatusMark ok={!cluster.last_connection_error_code && cluster.is_active} label="" /><span><strong>{cluster.name}</strong><small>{cluster.api_base_url}</small></span><em>{selected && <span className="resource-selected-label">선택됨</span>}<b aria-hidden="true">›</b></em></button>;
-      })}
-      {!clusters.length && <p className="empty-state">등록된 클러스터가 없습니다.</p>}
-    </aside>
-    <section className="resource-detail">{current ? <>
+    <section className="cluster-switcher">
+      <div className="cluster-switcher-head">
+        <div><p className="eyebrow">Cluster scope</p><h2>운영 대상</h2><span>{clusters.length} registered</span></div>
+        <button className="accent-button" onClick={onCreate}>클러스터 등록</button>
+      </div>
+      {clusters.length ? <div className="cluster-switcher-track" role="group" aria-label="관리할 클러스터 선택">
+        {clusters.map((cluster) => {
+          const selected = selectedId === cluster.id;
+          const connected = !cluster.last_connection_error_code && cluster.is_active;
+          return <button
+            key={cluster.id}
+            type="button"
+            aria-pressed={selected}
+            className={selected ? "cluster-switch active" : "cluster-switch"}
+            onClick={() => onSelect(cluster.id)}
+          >
+            <i className={connected ? "connected" : "failed"} aria-hidden="true" />
+            <span><strong>{cluster.name}</strong><small>{cluster.api_base_url}</small></span>
+            <em>{connected ? "연결됨" : "확인 필요"}</em>
+          </button>;
+        })}
+      </div> : <p className="cluster-switcher-empty">등록된 클러스터가 없습니다. 첫 연결을 등록해 인벤토리를 불러오세요.</p>}
+    </section>
+    <section
+      id="cluster-inventory-panel"
+      className="resource-detail cluster-inventory-panel"
+    >{current ? <>
       <div className="resource-title"><div><p className="eyebrow">Live inventory</p><h2>{current.name}</h2><p>{current.api_base_url}</p></div><div className="resource-actions"><button onClick={() => onTest(current.id)} disabled={saving}>연결 시험</button><button className="accent-button" onClick={() => onImport(current.id)} disabled={saving}>VM/CT 가져오기</button>{canDelete && <button className="danger" onClick={onDelete} disabled={saving}>등록 해제</button>}</div></div>
       <div className="inventory-totals"><span><strong>{nodes.length}</strong> Nodes</span><span><strong>{guests.length}</strong> VM / CT</span><span><strong>{storages.length}</strong> Storages</span></div>
       <InventoryTable title="노드" columns={["이름", "상태", "CPU", "메모리"]} rows={nodes.map((node) => [node.node, node.status ?? "—", node.maxcpu ? `${node.maxcpu} cores` : "—", node.mem && node.maxmem ? `${formatBytes(node.mem)} / ${formatBytes(node.maxmem)}` : "—"])} />
-      <InventoryTable className="guest-inventory-table" title="VM과 CT" columns={["VMID", "이름", "종류", "노드", "vCPU", "메모리", "디스크", "상태"]} rows={guests.map((guest) => [String(guest.vmid), guest.name ?? "Unnamed", guest.type.toUpperCase(), guest.node ?? "—", guest.maxcpu === null ? "—" : String(guest.maxcpu), formatBytes(guest.maxmem), formatBytes(guest.maxdisk), guest.status ?? "—"])} />
+      <InventoryTable
+        className="guest-inventory-table"
+        title="VM과 CT"
+        columns={["VMID", "이름", "종류", "노드", "CPU 사용량", "메모리 사용량", "디스크 사용량", "가동시간", "상태"]}
+        rows={guests.map((guest) => {
+          const powerState = guest.status?.toLowerCase() ?? "unknown";
+          const running = powerState === "running";
+          const stopped = powerState === "stopped";
+          return [
+            String(guest.vmid),
+            guest.name ?? "Unnamed",
+            guest.type.toUpperCase(),
+            guest.node ?? "—",
+            running && guest.cpu !== null
+              ? `${formatPercent(guest.cpu)}${guest.maxcpu === null ? "" : ` · ${guest.maxcpu} vCPU`}`
+              : "—",
+            running ? formatGuestCapacity(guest.mem, guest.maxmem) : "—",
+            running ? formatGuestCapacity(guest.disk, guest.maxdisk) : "—",
+            running ? formatUptime(guest.uptime) : "—",
+            <StatusMark
+              key={`${guest.vmid}-power-state`}
+              ok={running ? true : stopped ? false : null}
+              label={powerState.toUpperCase()}
+            />,
+          ];
+        })}
+      />
       <InventoryTable title="스토리지" columns={["이름", "노드", "종류", "사용량"]} rows={storages.map((storage) => [storage.storage, storage.node ?? "shared", storage.type ?? "—", storage.used !== null && storage.total ? `${formatBytes(storage.used)} / ${formatBytes(storage.total)}` : "—"])} />
-    </> : <p className="empty-state">클러스터를 선택하세요.</p>}</section>
+    </> : <p className="empty-state">클러스터를 등록하거나 운영 대상을 선택하세요.</p>}</section>
   </div>;
 }
 
-function InventoryTable({ title, columns, rows, className = "" }: { title: string; columns: string[]; rows: string[][]; className?: string }) {
-  return <section className={`inventory-block ${className}`.trim()}><div><h3>{title}</h3><span>{rows.length}</span></div><div className="dynamic-table" style={{ "--columns": columns.length } as React.CSSProperties}><div className="table-head">{columns.map((column) => <span key={column}>{column}</span>)}</div>{rows.map((row, index) => <div className="table-row" key={`${row[0]}-${index}`}>{row.map((value, cell) => <span key={`${cell}-${value}`} data-label={columns[cell]}>{value}</span>)}</div>)}</div>{!rows.length && <p className="empty-state">조회된 항목이 없습니다.</p>}</section>;
+function InventoryTable({ title, columns, rows, className = "" }: { title: string; columns: string[]; rows: React.ReactNode[][]; className?: string }) {
+  return <section className={`inventory-block ${className}`.trim()}><div><h3>{title}</h3><span>{rows.length}</span></div><div className="dynamic-table" style={{ "--columns": columns.length } as React.CSSProperties}><div className="table-head">{columns.map((column) => <span key={column}>{column}</span>)}</div>{rows.map((row, index) => <div className="table-row" key={`${String(row[0] ?? "row")}-${index}`}>{row.map((value, cell) => <span key={cell} data-label={columns[cell]}>{value}</span>)}</div>)}</div>{!rows.length && <p className="empty-state">조회된 항목이 없습니다.</p>}</section>;
 }
 
 function BackupsView({
