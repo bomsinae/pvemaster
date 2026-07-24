@@ -2,7 +2,7 @@
 
 ## 문서 상태
 
-- 상태: 로컬 구현·검증 완료, 원격 CI 및 branch protection 적용 확인 대기
+- 상태: 로컬 구현·검증 및 원격 CI 통과, branch protection 적용 확인 대기
 - 기준일: 2026-07-24
 - 범위: `docs/tasks/01-ci-browser-quality-gates.md`
 
@@ -66,6 +66,7 @@ Playwright는 세 browser project와 개발 서버를 한 설정에서 관리한
 | Node dependency audit | `npm install` audit 기준 취약점 없음 |
 | secret scan | 통과 |
 | workflow YAML parse | 통과 |
+| 원격 GitHub Actions | 2 workflows, 9 jobs 통과 |
 
 CI backend job은 먼저 Alembic schema를 적용하고 PostgreSQL·Redis service와
 `AUTH_TEST_DATABASE_URL`, `AUTH_TEST_REDIS_URL`을 제공해 opt-in integration 검사까지
