@@ -135,6 +135,8 @@ class BackupOperationRunner:
             OperationStatus.SUCCEEDED.value,
             OperationStatus.FAILED.value,
             OperationStatus.TIMEOUT.value,
+            OperationStatus.CANCELLED.value,
+            OperationStatus.NEEDS_ATTENTION.value,
         }:
             return
         run = await self._session.scalar(
@@ -198,9 +200,10 @@ class BackupOperationRunner:
                 operation,
                 run,
                 actor,
-                status=OperationStatus.FAILED,
+                status=OperationStatus.NEEDS_ATTENTION,
                 error_code="BACKUP_SUBMISSION_STATE_UNKNOWN",
                 retryable=False,
+                run_status=OperationStatus.FAILED,
             )
             return
 
@@ -230,12 +233,15 @@ class BackupOperationRunner:
                             run,
                             actor,
                             status=(
-                                OperationStatus.TIMEOUT
+                                OperationStatus.NEEDS_ATTENTION
                                 if exc.code == "PVE_TIMEOUT"
                                 else OperationStatus.FAILED
                             ),
                             error_code=exc.code,
                             retryable=False,
+                            run_status=(
+                                OperationStatus.TIMEOUT if exc.code == "PVE_TIMEOUT" else None
+                            ),
                         )
                         return
                     pve_task = PveTask(
@@ -388,6 +394,7 @@ class BackupOperationRunner:
         retryable: bool,
         error_code: str | None = None,
         pve_task: PveTask | None = None,
+        run_status: OperationStatus | None = None,
     ) -> None:
         now = datetime.now(UTC)
         operation.status = status.value
@@ -400,7 +407,7 @@ class BackupOperationRunner:
         operation.retryable = retryable
         operation.version += 1
         if run is not None:
-            run.status = status.value
+            run.status = (run_status or status).value
             run.finished_at = now
         add_audit_event(
             self._session,

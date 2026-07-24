@@ -42,7 +42,7 @@ docs/
 | 1 — CI와 실제 사용자 여정 품질 게이트 | 원격 적용 확인 대기 | [검증 보고서](01-ci-browser-quality-gates/verification-report.md), [branch protection 기준](01-ci-browser-quality-gates/branch-protection.md) |
 | 2 — Scheduler, Outbox와 정기 유지보수 기반 | 구현·검증 완료 | [설계 결정](02-scheduler-outbox-maintenance/design.md), [운영 runbook](02-scheduler-outbox-maintenance/runbook.md), [검증 보고서](02-scheduler-outbox-maintenance/verification-report.md) |
 | 3 — 자동 Inventory Sync와 Reconciliation | 구현·검증 완료 | [설계 결정](03-inventory-sync-reconciliation/design.md), [운영 runbook](03-inventory-sync-reconciliation/runbook.md), [검증 보고서](03-inventory-sync-reconciliation/verification-report.md) |
-| 4 — 관리자 Operation 센터와 복구 흐름 | 예정 | — |
+| 4 — 관리자 Operation 센터와 복구 흐름 | 구현·로컬 검증 완료 | [설계 결정](04-operation-center-recovery/design.md), [운영 runbook](04-operation-center-recovery/runbook.md), [검증 보고서](04-operation-center-recovery/verification-report.md) |
 | 5 — MFA, Session과 고위험 작업 보호 | 예정 | — |
 | 6 — 경보, Incident와 Notification | 예정 | — |
 | 7 — PBS 백업 자동화와 복구 검증 | 예정 | — |

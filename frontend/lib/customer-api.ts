@@ -27,7 +27,15 @@ export type CustomerJob = {
   vm_id: string;
   action: CustomerPowerAction;
   action_mode: "STANDARD" | "GRACEFUL" | "FORCED";
-  status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "TIMEOUT";
+  status:
+    | "QUEUED"
+    | "RUNNING"
+    | "CANCEL_REQUESTED"
+    | "SUCCEEDED"
+    | "FAILED"
+    | "TIMEOUT"
+    | "CANCELLED"
+    | "NEEDS_ATTENTION";
   result: Record<string, unknown>;
   error_code: string | null;
   error_summary: string | null;
@@ -151,6 +159,20 @@ export async function getCustomerJob(
     fetcher,
   );
   return parseResponse<CustomerJob>(response);
+}
+
+export async function listCustomerJobs(
+  apiBaseUrl: string,
+  accessToken: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerJob[]> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/jobs`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return (await parseResponse<{ items: CustomerJob[] }>(response)).items;
 }
 
 export async function changePassword(

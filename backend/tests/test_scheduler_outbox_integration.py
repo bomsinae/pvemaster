@@ -27,7 +27,14 @@ from app.models.ipam import (
     IpAllocationStatus,
     IpPool,
 )
-from app.models.operation import Operation, PowerAction, PveTask, Workload, WorkloadAssignment
+from app.models.operation import (
+    Operation,
+    OperationEvent,
+    PowerAction,
+    PveTask,
+    Workload,
+    WorkloadAssignment,
+)
 from app.models.scheduling import (
     MaintenanceRun,
     OperationOutbox,
@@ -257,6 +264,14 @@ async def test_watchdog_rearms_stale_operation_without_creating_a_second_intent(
             assert event.status == OutboxStatus.PENDING.value
             assert event.published_at is None
             assert event.last_error_code == "WATCHDOG_REDELIVERY"
+            stuck_event = await session.scalar(
+                select(OperationEvent).where(
+                    OperationEvent.operation_id == operation.id,
+                    OperationEvent.event_type == "STUCK_DETECTED",
+                )
+            )
+            assert stuck_event is not None
+            assert stuck_event.details == {"watchdog_redelivery": True}
             operation_count = await session.scalar(
                 select(Operation).where(Operation.id == operation.id)
             )

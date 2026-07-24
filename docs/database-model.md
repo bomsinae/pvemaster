@@ -279,6 +279,7 @@ Cloud-Init SSH 공개키는 public 정보지만 별도 정규화 테이블 또�
 - `result JSONB NOT NULL DEFAULT '{}'`: 식별자/비민감 요약만.
 - `requested_at`, `queued_at`, `started_at`, `finished_at`, `heartbeat_at`.
 - `cancel_requested_at`, `version`.
+- `retry_of_id UUID FK UNIQUE NULL`: 안전한 재시도가 참조하는 원본 operation.
 
 인덱스: `(requested_by_id, requested_at DESC)`, `(cluster_id, status)`, `(workload_id, status)`, stuck 탐지용 `(status, heartbeat_at)`.
 
@@ -295,6 +296,19 @@ Cloud-Init SSH 공개키는 public 정보지만 별도 정규화 테이블 또�
 - `raw_result JSONB`: 크기/키 allowlist와 보존 기간 적용.
 
 제약: `UNIQUE(cluster_id, upid)`, `UNIQUE(operation_id, step_name, upid)`. UPID는 클러스터 범위에서 해석한다.
+
+### `operation_events`
+
+- operation 또는 provisioning request 중 정확히 하나를 참조한다.
+- `event_type`, `status`, `step`, 안전한 `message`, 제한된 `details`, `actor_user_id`,
+  `occurred_at`을 저장한다.
+- 대상별 `(target_id, occurred_at)` 인덱스로 timeline을 조회한다.
+
+### `operation_assignments`
+
+- operation 또는 provisioning request 중 정확히 하나를 유일하게 참조한다.
+- 담당/확인/해결 사용자와 시각, 해결 메모, optimistic concurrency용 `version`을
+  저장한다.
 
 ### `operation_outbox`
 

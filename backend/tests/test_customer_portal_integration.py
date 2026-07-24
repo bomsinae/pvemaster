@@ -369,6 +369,11 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
             )
             assert own_job.status_code == 200
             assert foreign_job.status_code == 404
+            own_jobs = await client.get("/api/v1/customer/jobs", headers=headers_a)
+            assert own_jobs.status_code == 200
+            assert own_jobs.json()["items"][0]["id"] == accepted.json()["id"]
+            assert "cluster_id" not in own_jobs.text
+            assert "node" not in own_jobs.text
 
             updated_detail = await client.get(f"/api/v1/customer/vms/{vm_a.id}", headers=headers_a)
             assert updated_detail.json()["recent_jobs"][0]["id"] == accepted.json()["id"]
@@ -397,6 +402,26 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
             assert accepted_stop.json()["action"] == "stop"
             assert accepted_stop.json()["action_mode"] == "FORCED"
             assert len(published) == 2
+
+            async with app.state.db_session_factory() as session:
+                reassigned = await session.get(Workload, vm_a.id, with_for_update=True)
+                assert reassigned is not None
+                reassigned.organization_id = organization_b.id
+                reassigned.version += 1
+                await session.commit()
+
+            past_owner_job = await client.get(
+                f"/api/v1/customer/jobs/{accepted.json()['id']}",
+                headers=headers_a,
+            )
+            jobs_after_reassignment = await client.get(
+                "/api/v1/customer/jobs",
+                headers=headers_a,
+            )
+            assert past_owner_job.status_code == 404
+            assert accepted.json()["id"] not in {
+                item["id"] for item in jobs_after_reassignment.json()["items"]
+            }
     finally:
         await _clear(app)
         await app.state.db_engine.dispose()

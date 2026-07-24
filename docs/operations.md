@@ -89,6 +89,8 @@ npm run build
 - PVE Master의 `백업` 화면에서 storage 검색 후 대상으로 등록한다.
 - 실패 내역의 `error_code`와 연결된 operation/PVE task를 확인하되 UPID와 credential을 외부에 공유하지 않는다.
 - 제출 단계 timeout은 결과가 불명확하므로 수동 재실행 전에 PVE task와 PBS snapshot 존재 여부를 확인한다.
+- `NEEDS_ATTENTION` 또는 `MANUAL_REVIEW` 작업은 Operation 센터에서 담당자를 지정하고
+  안전한 reference와 대상 실제 상태를 대조한 뒤 해결 근거를 기록한다.
 - 보존 정책과 prune은 PBS에서 관리한다. PVE Master MVP는 snapshot을 삭제하지 않는다.
 - 복구는 성공 백업 상세에서 새 VMID로만 실행한다. 요청 전에 대상 node의 용량과 VMID가 비어 있는지 확인한다.
 - 복구 작업은 전원을 켜지 않은 상태로 완료된다. inventory를 갱신한 뒤 NIC, IP와 조직 할당을 검토하고 수동으로 기동한다.

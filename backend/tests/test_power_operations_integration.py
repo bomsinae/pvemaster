@@ -329,6 +329,31 @@ async def test_power_job_lifecycle_failures_recovery_and_access_control() -> Non
             assert failed.json()["retryable"] is False
             assert failure_client.submit_count == 1
 
+            ambiguous = await http.post(
+                f"/api/v1/admin/vms/{workload.id}/actions/reboot",
+                headers={
+                    "Authorization": f"Bearer {admin_token}",
+                    "Idempotency-Key": token_urlsafe(18),
+                },
+                json={},
+            )
+            ambiguous_client = FakePowerApi(
+                vm_states=["running"],
+                submit_error=AppError(
+                    status_code=504,
+                    code="PVE_TIMEOUT",
+                    message="submission result is unknown",
+                ),
+            )
+            await _run(app, settings, ambiguous.json()["id"], ambiguous_client)
+            needs_attention = await http.get(
+                f"/api/v1/jobs/{ambiguous.json()['id']}",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert needs_attention.json()["status"] == "NEEDS_ATTENTION"
+            assert needs_attention.json()["retryable"] is False
+            assert ambiguous_client.submit_count == 1
+
             timeout = await http.post(
                 f"/api/v1/admin/vms/{workload.id}/actions/reset",
                 headers={

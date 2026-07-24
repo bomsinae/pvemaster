@@ -28,6 +28,7 @@ class ProvisioningStatus(StrEnum):
     RUNNING = "RUNNING"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
     MANUAL_REVIEW = "MANUAL_REVIEW"
 
 
@@ -121,12 +122,15 @@ class ProvisioningRequest(Base):
         ),
         Index("ix_provisioning_requests_recovery_lease", "status", "lease_expires_at"),
         CheckConstraint(
-            "status IN ('QUEUED','RUNNING','SUCCEEDED','FAILED','MANUAL_REVIEW')",
+            "status IN ('QUEUED','RUNNING','SUCCEEDED','FAILED','CANCELLED','MANUAL_REVIEW')",
             name="ck_provisioning_requests_status",
         ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    retry_of_request_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provisioning_requests.id", ondelete="SET NULL"), unique=True
+    )
     requested_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     idempotency_key_hash: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
     request_fingerprint: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)

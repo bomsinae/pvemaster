@@ -5,6 +5,7 @@ import {
   changePassword,
   getCustomerJob,
   getCustomerVm,
+  listCustomerJobs,
   listCustomerVms,
   login,
   requestPowerAction,
@@ -45,6 +46,7 @@ test("mock login to customer power operation flow", async () => {
       return response({ access_token: "mock-access-token", refresh_token: "mock-refresh-token" });
     }
     if (url.endsWith("/customer/vms")) return response({ items: [vm] });
+    if (url.endsWith("/customer/jobs")) return response({ items: [] });
     if (url.endsWith(`/customer/vms/${vm.id}`)) {
       return response({ ...vm, recent_jobs: [] });
     }
@@ -90,6 +92,11 @@ test("mock login to customer power operation flow", async () => {
 
   const session = await login("http://api.test", "customer@example.test", "test-password", fetcher);
   const listing = await listCustomerVms("http://api.test", session.accessToken, fetcher);
+  const persistedJobs = await listCustomerJobs(
+    "http://api.test",
+    session.accessToken,
+    fetcher,
+  );
   const detail = await getCustomerVm("http://api.test", session.accessToken, listing[0].id, fetcher);
   const accepted = await requestPowerAction(
     "http://api.test",
@@ -104,6 +111,7 @@ test("mock login to customer power operation flow", async () => {
 
   assert.equal(session.refreshToken, "mock-refresh-token");
   assert.deepEqual(listing, [vm]);
+  assert.deepEqual(persistedJobs, []);
   assert.equal(detail.id, vm.id);
   assert.equal(detail.cpu_cores, 4);
   assert.equal(detail.memory_bytes, 8_589_934_592);
@@ -112,7 +120,7 @@ test("mock login to customer power operation flow", async () => {
   assert.equal(running.status, "RUNNING");
   assert.equal(finished.status, "SUCCEEDED");
   assert.equal(finished.result.final_power_state, "RUNNING");
-  assert.equal(requests.length, 6);
+  assert.equal(requests.length, 7);
 });
 
 test("customer VM inventory searches names and IP addresses and filters power state", () => {

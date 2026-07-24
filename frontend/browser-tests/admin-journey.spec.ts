@@ -94,3 +94,23 @@ test("admin reviews inventory freshness, requests sync, and acknowledges drift",
     path: `/api/v1/admin/inventory/reconciliation/findings/${ids.finding}/acknowledge`,
   });
 });
+
+test("admin triages a failed operation from the persisted recovery center", async ({ page }) => {
+  const state = await installApiMock(page);
+  await loginAs(page, "admin");
+
+  await page.getByRole("button", { name: "Operation 센터", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Operation 센터" })).toBeVisible();
+  await expect(page.getByText("customer-web-01", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("CLUSTER_UNREACHABLE", { exact: false })).toBeVisible();
+  await expect(page.getByText("STATUS_CHANGED", { exact: true })).toBeVisible();
+  await expect(page.getByText(/UPID:/)).toHaveCount(0);
+
+  await page.getByRole("button", { name: "확인", exact: true }).click();
+  await expect.poll(() =>
+    state.requests.some((request) =>
+      request.method === "POST"
+      && request.path === `/api/v1/admin/operations/${ids.operation}/acknowledge`
+    ),
+  ).toBe(true);
+});

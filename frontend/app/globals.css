@@ -450,6 +450,270 @@ body,
   border-bottom: 1px solid var(--line);
 }
 
+/* Operation recovery is intentionally dense: queue triage on the left,
+   evidence and safe actions on the right. */
+.operation-center {
+  display: grid;
+  gap: 1rem;
+}
+
+.operation-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  background: var(--admin-panel);
+}
+
+.operation-toolbar label,
+.operation-actions label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 10rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+}
+
+.operation-toolbar input,
+.operation-toolbar select,
+.operation-actions select,
+.operation-actions textarea {
+  min-height: 2.35rem;
+  padding: 0.55rem 0.65rem;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--admin-raised);
+  font: inherit;
+}
+
+.operation-total {
+  margin-left: auto;
+  padding-bottom: 0.65rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.operation-layout {
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.72fr) minmax(30rem, 1.5fr);
+  min-height: 34rem;
+  border: 1px solid var(--line);
+  background: var(--admin-panel);
+}
+
+.operation-queue {
+  overflow-y: auto;
+  max-height: calc(100svh - 14rem);
+  border-right: 1px solid var(--line);
+}
+
+.operation-queue > button {
+  position: relative;
+  display: grid;
+  width: 100%;
+  gap: 0.35rem;
+  padding: 1rem;
+  color: var(--ink);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.operation-queue > button:hover,
+.operation-queue > button.selected {
+  background: color-mix(in srgb, var(--admin-raised) 88%, var(--accent) 12%);
+}
+
+.operation-queue > button.selected::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--accent);
+  content: "";
+}
+
+.operation-queue strong {
+  font-size: 0.86rem;
+}
+
+.operation-queue small,
+.operation-queue time,
+.operation-queue b {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  font-weight: 500;
+}
+
+.operation-queue b {
+  color: #ff8b79;
+}
+
+.operation-detail {
+  min-width: 0;
+  padding: 1.2rem;
+}
+
+.operation-detail > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.operation-detail h2 {
+  margin: 0.2rem 0 0;
+  font-size: clamp(1.2rem, 2vw, 1.8rem);
+}
+
+.operation-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+
+.operation-facts dl {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 1rem;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.operation-facts dt,
+.operation-timeline h3 {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  text-transform: uppercase;
+}
+
+.operation-facts dd {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.operation-actions {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.operation-actions .resolution-field {
+  width: 100%;
+}
+
+.operation-actions textarea {
+  min-height: 4.5rem;
+  resize: vertical;
+  text-transform: none;
+}
+
+.operation-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.operation-actions button,
+.operation-related a {
+  padding: 0.55rem 0.75rem;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  background: var(--admin-raised);
+  font-size: 0.72rem;
+  text-decoration: none;
+}
+
+.operation-actions button:hover,
+.operation-related a:hover {
+  border-color: var(--accent);
+}
+
+.operation-actions button.danger-quiet {
+  color: #ff9b8d;
+}
+
+.operation-related {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 1rem 0;
+}
+
+.operation-timeline {
+  display: grid;
+}
+
+.operation-timeline > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.75rem;
+  padding: 0.72rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.operation-timeline > div > span {
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-top: 0.28rem;
+  border: 1px solid var(--accent);
+  background: var(--admin-panel);
+}
+
+.operation-timeline p {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.operation-timeline small,
+.operation-timeline time {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+}
+
+@media (max-width: 900px) {
+  .operation-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .operation-total {
+    margin-left: 0;
+  }
+
+  .operation-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .operation-queue {
+    max-height: 18rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .operation-facts {
+    grid-template-columns: 1fr;
+  }
+}
+
 .dynamic-table .table-head,
 .dynamic-table .table-row {
   grid-template-columns: repeat(var(--columns), minmax(7rem, 1fr));

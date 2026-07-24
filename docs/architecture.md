@@ -117,6 +117,10 @@ PENDING -> QUEUED -> RUNNING -> SUCCEEDED
 - PVE가 UPID를 반환한 뒤 워커가 죽어도 maintenance worker가 미완료 `pve_tasks`를 다시 폴링한다.
 - PVE 호출 결과가 불명확한 네트워크 오류에서는 같은 생성 명령을 즉시 반복하지 않는다. 먼저 VMID/UPID/대상 상태를 조회해 결과를 판별한다.
 - 취소는 best effort다. PVE가 이미 완료했거나 취소를 지원하지 않으면 최종 실제 상태를 보고한다.
+- 제출 결과가 불명확하고 안전한 대상 재조회로 판별할 수 없으면 자동 재제출하지 않고
+  `NEEDS_ATTENTION`으로 전환한다.
+- `operation_events`는 상태·단계 timeline, `operation_assignments`는 담당·확인·수동
+  해결을 보존한다. 재시도는 terminal 원본을 변경하지 않고 새 operation을 연결한다.
 
 ### 프로비저닝 사가
 

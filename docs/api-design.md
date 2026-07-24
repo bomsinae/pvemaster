@@ -501,6 +501,12 @@ workload와 같은 cluster여야 하며 초기 지원 option은 `mode=snapshot`,
 |---|---|---|---|
 | GET | `/admin/operations` | ADMIN | type/status/cluster/workload/requester/기간 필터 |
 | GET | `/admin/operations/{operation_id}` | ADMIN | 단계와 PVE task 포함 상세 |
+| POST | `/admin/operations/{operation_id}/cancel` | ADMIN | version 일치와 queued 상태에서만 취소 |
+| POST | `/admin/operations/{operation_id}/retry` | ADMIN | 안전 판정 후 원본과 연결된 새 작업 생성 |
+| POST | `/admin/operations/{operation_id}/assign` | ADMIN | 활성 관리자 담당자 지정 |
+| POST | `/admin/operations/{operation_id}/acknowledge` | ADMIN | 운영자 확인 시각 기록 |
+| POST | `/admin/operations/{operation_id}/resolve-manually` | ADMIN | 검증한 해결 근거 기록 |
+| GET | `/customer/jobs` | 요청 CUSTOMER + 대상 현재 소유 | 새로고침 복구용 최근 작업 목록 |
 | GET | `/customer/jobs/{job_id}` | 요청 CUSTOMER + 대상 현재 소유 | 자신의 허용 작업 상태 |
 
 operation은 immutable request identity를 가지며 terminal status를 되돌리지 않는다. `Retry-After`는 poll 권고 간격이다. 기본 polling은 실행 중 2초에서 시작해 backoff하고 terminal에서 중단한다.
@@ -511,7 +517,11 @@ operation은 immutable request identity를 가지며 terminal status를 되돌�
 - 대상 워크로드 조직의 현재 멤버이며 사용자와 조직이 모두 활성 상태임.
 - operation type이 고객 허용 목록에 있음.
 
-조건 실패는 `404`다. VM 상세의 최근 작업은 현재 사용자가 해당 VM에 요청한 최근 10개만 포함하며, 조직에서 제거되는 즉시 VM과 작업 모두 조회할 수 없다. 고객 응답에는 PVE UPID, cluster/node, API endpoint와 token 정보를 포함하지 않는다.
+조건 실패는 `404`다. operation에 저장된 요청 당시 조직과 workload의 현재 조직도
+일치해야 한다. VM 상세의 최근 작업은 현재 사용자가 해당 VM에 요청한 최근 10개만
+포함하며, 조직에서 제거되거나 workload가 재할당되는 즉시 VM과 작업 모두 조회할 수
+없다. 고객 응답에는 PVE UPID, cluster/node, API endpoint와 token 정보를 포함하지
+않는다.
 
 ## 13. 감사 API
 

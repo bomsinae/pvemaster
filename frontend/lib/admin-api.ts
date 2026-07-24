@@ -28,6 +28,98 @@ export type CurrentUser = {
   organization_names?: string[];
 };
 
+export type OperationCenterAssignment = {
+  assigned_to_id: string | null;
+  assigned_to_name: string | null;
+  assigned_at: string | null;
+  acknowledged_by_id: string | null;
+  acknowledged_at: string | null;
+  resolved_by_id: string | null;
+  resolved_at: string | null;
+  resolution_note: string | null;
+  version: number;
+};
+
+export type OperationCenterAction =
+  | "CANCEL"
+  | "RETRY"
+  | "ACKNOWLEDGE"
+  | "ASSIGN"
+  | "RESOLVE_MANUALLY";
+
+export type OperationCenterItem = {
+  id: string;
+  resource_type: "OPERATION" | "PROVISIONING";
+  operation_type: string;
+  action: string;
+  status: string;
+  cluster_id: string;
+  cluster_name: string;
+  organization_id: string | null;
+  organization_name: string | null;
+  requested_by_id: string;
+  requested_by_name: string;
+  workload_id: string | null;
+  workload_name: string | null;
+  current_step: string | null;
+  error_code: string | null;
+  error_summary: string | null;
+  retryable: boolean;
+  retry_of_id: string | null;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  heartbeat_at: string | null;
+  is_stuck: boolean;
+  available_actions: OperationCenterAction[];
+  impact_summary: string;
+  recommended_action: string;
+  assignment: OperationCenterAssignment | null;
+  version: number;
+};
+
+export type OperationCenterDetail = OperationCenterItem & {
+  events: {
+    id: number;
+    event_type: string;
+    status: string | null;
+    step: string | null;
+    message: string;
+    details: Record<string, unknown>;
+    actor_user_id: string | null;
+    occurred_at: string;
+  }[];
+  pve_tasks: {
+    step_name: string;
+    status: string;
+    upid_reference: string;
+    pve_exit_status: string | null;
+    poll_attempts: number;
+    error_code: string | null;
+    submitted_at: string;
+    last_polled_at: string | null;
+    completed_at: string | null;
+  }[];
+  provisioning_steps: {
+    order: number;
+    name: string;
+    status: string;
+    attempt_count: number;
+    upid_reference: string | null;
+    error_code: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+  }[];
+  related_audit_count: number;
+  related_backup_ids: string[];
+};
+
+export type OperationCenterFilters = {
+  status?: string;
+  operationType?: string;
+  errorCode?: string;
+};
+
 export type UserCreateInput = {
   email: string;
   display_name: string;
@@ -1098,6 +1190,69 @@ export const createProvisionRequest = (
 
 export async function listProvisionRequests(base: string, token: string, fetcher?: Fetcher) {
   return (await api<{ items: ProvisionRequest[] }>(base, "/api/v1/admin/provision-requests", token, {}, fetcher)).items;
+}
+
+export async function listOperationCenter(
+  base: string,
+  token: string,
+  filters: OperationCenterFilters = {},
+  fetcher?: Fetcher,
+) {
+  const query = new URLSearchParams();
+  if (filters.status) query.set("status", filters.status);
+  if (filters.operationType) query.set("operation_type", filters.operationType);
+  if (filters.errorCode) query.set("error_code", filters.errorCode);
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return api<{ items: OperationCenterItem[]; total: number; limit: number; offset: number }>(
+    base,
+    `/api/v1/admin/operations${suffix}`,
+    token,
+    {},
+    fetcher,
+  );
+}
+
+export const getOperationCenterDetail = (
+  base: string,
+  token: string,
+  operationId: string,
+  fetcher?: Fetcher,
+) => api<OperationCenterDetail>(
+  base,
+  `/api/v1/admin/operations/${encodeURIComponent(operationId)}`,
+  token,
+  {},
+  fetcher,
+);
+
+export async function runOperationCenterAction(
+  base: string,
+  token: string,
+  operation: OperationCenterItem,
+  action: OperationCenterAction,
+  options: { assignedToId?: string; resolutionNote?: string } = {},
+  fetcher?: Fetcher,
+) {
+  const paths: Record<OperationCenterAction, string> = {
+    CANCEL: "cancel",
+    RETRY: "retry",
+    ACKNOWLEDGE: "acknowledge",
+    ASSIGN: "assign",
+    RESOLVE_MANUALLY: "resolve-manually",
+  };
+  const payload: Record<string, unknown> = { version: operation.version };
+  if (options.assignedToId) payload.assigned_to_id = options.assignedToId;
+  if (options.resolutionNote) payload.resolution_note = options.resolutionNote;
+  return api<OperationCenterItem | {
+    operation: OperationCenterItem;
+    created_operation_id: string;
+  }>(
+    base,
+    `/api/v1/admin/operations/${encodeURIComponent(operation.id)}/${paths[action]}`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+    fetcher,
+  );
 }
 
 export const requestAdminWorkloadAction = (

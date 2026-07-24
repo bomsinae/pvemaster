@@ -8,6 +8,7 @@ import {
   CustomerApiError,
   CustomerVm,
   getCustomerJob,
+  listCustomerJobs,
   listCustomerVms,
   requestPowerAction,
 } from "@/lib/customer-api";
@@ -28,7 +29,13 @@ const actionLabels: Record<CustomerPowerAction, string> = {
   reboot: "재부팅",
 };
 
-const terminalStatuses = new Set(["SUCCEEDED", "FAILED", "TIMEOUT"]);
+const terminalStatuses = new Set([
+  "SUCCEEDED",
+  "FAILED",
+  "TIMEOUT",
+  "CANCELLED",
+  "NEEDS_ATTENTION",
+]);
 
 function errorMessage(error: unknown): string {
   return error instanceof CustomerApiError
@@ -122,8 +129,17 @@ export function CustomerPortal({
   const actionDialogRef = useRef<HTMLElement>(null);
 
   const refreshList = useCallback(async (activeSession: AuthSession) => {
-    const items = await listCustomerVms(apiBaseUrl, activeSession.accessToken);
+    const [items, jobs] = await Promise.all([
+      listCustomerVms(apiBaseUrl, activeSession.accessToken),
+      listCustomerJobs(apiBaseUrl, activeSession.accessToken),
+    ]);
     setVms(items);
+    setJobsByVmId(() =>
+      jobs.reduce<CustomerJobsByVmId>(
+        (current, job) => current[job.vm_id] ? current : upsertCustomerJob(current, job),
+        {},
+      ),
+    );
   }, [apiBaseUrl]);
 
   useEffect(() => {
@@ -333,6 +349,11 @@ export function CustomerPortal({
                         <small className={`customer-row-job ${vmJob.status.toLowerCase()}`} role="status" aria-live="polite">
                           <span className={!terminalStatuses.has(vmJob.status) ? "progress-pulse" : "status-pip"} aria-hidden="true" />
                           {actionLabels[vmJob.action]} · {vmJob.status}
+                          {vmJob.status === "NEEDS_ATTENTION" || vmJob.retryable === false && vmJob.status === "FAILED"
+                            ? " · 지원팀 문의 필요"
+                            : vmJob.retryable && terminalStatuses.has(vmJob.status)
+                              ? " · 잠시 후 다시 시도 가능"
+                              : ""}
                         </small>
                       )}
                     </span>

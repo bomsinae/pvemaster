@@ -27,6 +27,10 @@ class CustomerJobResponse(BaseModel):
     finished_at: datetime | None
 
 
+class CustomerJobListResponse(BaseModel):
+    items: list[CustomerJobResponse]
+
+
 class CustomerVmSummary(BaseModel):
     id: UUID
     name: str

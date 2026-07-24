@@ -1,13 +1,14 @@
 from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.dependencies import PrincipalDependency, get_db_session
 from app.models.operation import PowerAction
 from app.schemas.customer import (
+    CustomerJobListResponse,
     CustomerJobResponse,
     CustomerPowerActionRequest,
     CustomerVmDetailResponse,
@@ -179,6 +180,20 @@ async def stop_customer_vm(
         response=response,
         session=session,
         principal=principal,
+    )
+
+
+@router.get("/jobs", response_model=CustomerJobListResponse)
+async def list_customer_jobs(
+    request: Request,
+    response: Response,
+    session: SessionDependency,
+    principal: PrincipalDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> CustomerJobListResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return CustomerJobListResponse(
+        items=await _service(request, session, principal).list_jobs(limit=limit)
     )
 
 

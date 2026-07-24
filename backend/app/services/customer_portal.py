@@ -231,6 +231,12 @@ class CustomerPortalService:
         return "STANDARD"
 
     async def get_job(self, job_id: UUID) -> CustomerJobResponse:
+        current_owner = exists(
+            select(Workload.id).where(
+                Workload.id == Operation.workload_id,
+                Workload.organization_id == Operation.organization_id,
+            )
+        )
         membership = exists(
             select(OrganizationMember.id).where(
                 OrganizationMember.user_id == self._principal.user_id,
@@ -247,6 +253,7 @@ class CustomerPortalService:
             select(Operation).where(
                 Operation.id == job_id,
                 Operation.requested_by_id == self._principal.user_id,
+                current_owner,
                 membership,
                 active_organization,
             )
@@ -254,6 +261,39 @@ class CustomerPortalService:
         if operation is None:
             raise AppError(status_code=404, code="JOB_NOT_FOUND", message="The job was not found.")
         return self._job_response(operation)
+
+    async def list_jobs(self, *, limit: int) -> list[CustomerJobResponse]:
+        current_owner = exists(
+            select(Workload.id).where(
+                Workload.id == Operation.workload_id,
+                Workload.organization_id == Operation.organization_id,
+            )
+        )
+        membership = exists(
+            select(OrganizationMember.id).where(
+                OrganizationMember.user_id == self._principal.user_id,
+                OrganizationMember.organization_id == Operation.organization_id,
+            )
+        )
+        active_organization = exists(
+            select(Organization.id).where(
+                Organization.id == Operation.organization_id,
+                Organization.is_active.is_(True),
+            )
+        )
+        operations = await self._session.scalars(
+            select(Operation)
+            .where(
+                Operation.requested_by_id == self._principal.user_id,
+                Operation.operation_type.like("POWER_%"),
+                current_owner,
+                membership,
+                active_organization,
+            )
+            .order_by(Operation.requested_at.desc(), Operation.id.desc())
+            .limit(limit)
+        )
+        return [self._job_response(item) for item in operations.all()]
 
     def _owned_workloads_query(self) -> Select[tuple[Workload]]:
         membership = exists(

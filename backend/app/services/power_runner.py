@@ -112,6 +112,8 @@ class PowerOperationRunner:
             OperationStatus.SUCCEEDED.value,
             OperationStatus.FAILED.value,
             OperationStatus.TIMEOUT.value,
+            OperationStatus.CANCELLED.value,
+            OperationStatus.NEEDS_ATTENTION.value,
         }:
             return
         if operation.action in {item.value for item in AdminVmAction}:
@@ -220,7 +222,7 @@ class PowerOperationRunner:
                     await self._finish(
                         operation,
                         actor,
-                        status=OperationStatus.FAILED,
+                        status=OperationStatus.NEEDS_ATTENTION,
                         error_code="OPERATION_STATE_UNKNOWN",
                         retryable=False,
                     )
@@ -569,10 +571,13 @@ class PowerOperationRunner:
         pve_task: PveTask | None = None,
     ) -> None:
         is_timeout = error.code == "PVE_TIMEOUT"
+        status = OperationStatus.TIMEOUT if is_timeout else OperationStatus.FAILED
+        if submission and is_timeout:
+            status = OperationStatus.NEEDS_ATTENTION
         await self._finish(
             operation,
             actor,
-            status=OperationStatus.TIMEOUT if is_timeout else OperationStatus.FAILED,
+            status=status,
             error_code=error.code,
             retryable=error.code in RETRYABLE_ERROR_CODES and not (submission and is_timeout),
             pve_task=pve_task,

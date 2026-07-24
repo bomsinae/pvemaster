@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.models.auth import AuditLog, RefreshToken
 from app.models.ipam import IpAddress, IpAddressState, IpAllocation, IpAllocationStatus
-from app.models.operation import Operation, OperationStatus
+from app.models.operation import Operation, OperationEvent, OperationStatus
 from app.models.scheduling import (
     MaintenanceRun,
     OperationOutbox,
@@ -209,6 +209,23 @@ def operation_watchdog_callback(settings: Settings) -> MaintenanceCallback:
             )
         ).all()
         for operation in operations:
+            already_detected = await session.scalar(
+                select(OperationEvent.id).where(
+                    OperationEvent.operation_id == operation.id,
+                    OperationEvent.event_type == "STUCK_DETECTED",
+                )
+            )
+            if already_detected is None:
+                session.add(
+                    OperationEvent(
+                        operation_id=operation.id,
+                        event_type="STUCK_DETECTED",
+                        status=operation.status,
+                        message="Worker heartbeat expired; work was queued for safe redelivery",
+                        details={"watchdog_redelivery": True},
+                        occurred_at=now,
+                    )
+                )
             event_type = _operation_event_type(operation)
             event = await session.scalar(
                 select(OperationOutbox)

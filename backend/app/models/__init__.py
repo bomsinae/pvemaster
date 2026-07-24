@@ -1,3 +1,4 @@
+from app.models import event_capture as _event_capture  # noqa: E402,F401
 from app.models.auth import (
     AuditLog,
     LoginThrottle,
@@ -29,6 +30,8 @@ from app.models.ipam import (
 )
 from app.models.operation import (
     Operation,
+    OperationAssignment,
+    OperationEvent,
     OperationStatus,
     PowerAction,
     PveTask,
@@ -79,6 +82,8 @@ __all__ = [
     "Organization",
     "OrganizationMember",
     "Operation",
+    "OperationAssignment",
+    "OperationEvent",
     "OperationOutbox",
     "OperationStatus",
     "OutboxStatus",

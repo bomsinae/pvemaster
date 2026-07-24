@@ -10,6 +10,7 @@ export const ids = {
   job: "57aec936-c0c3-4e39-b262-733512911f65",
   syncRun: "8d8c145f-c7f5-4b65-a85c-aa6c32360271",
   finding: "66c1d306-e05f-4890-8e1e-c30fa3137f9c",
+  operation: "2ab92d25-95ed-4af4-aefe-d86902305795",
 } as const;
 
 type MockOptions = {
@@ -104,6 +105,39 @@ function customerVm(state: MockState, stale = false) {
     observed_at: item.observed_at,
     is_stale: stale,
     stale_reason: stale ? "마지막 전체 동기화가 최신성 기준을 초과했습니다." : null,
+  };
+}
+
+function operationCenterItem() {
+  return {
+    id: ids.operation,
+    resource_type: "OPERATION",
+    operation_type: "POWER_REBOOT",
+    action: "reboot",
+    status: "FAILED",
+    cluster_id: ids.cluster,
+    cluster_name: "staging-pve",
+    organization_id: ids.organization,
+    organization_name: "Acme Korea",
+    requested_by_id: "admin-id",
+    requested_by_name: "Admin",
+    workload_id: ids.workload,
+    workload_name: "customer-web-01",
+    current_step: null,
+    error_code: "CLUSTER_UNREACHABLE",
+    error_summary: "Cluster temporarily unavailable.",
+    retryable: true,
+    retry_of_id: null,
+    requested_at: observedAt,
+    started_at: observedAt,
+    finished_at: observedAt,
+    heartbeat_at: observedAt,
+    is_stuck: false,
+    available_actions: ["ASSIGN", "ACKNOWLEDGE", "RETRY", "RESOLVE_MANUALLY"],
+    impact_summary: "customer-web-01 assigned to Acme Korea is affected.",
+    recommended_action: "Verify cluster health and use the safe retry action.",
+    assignment: null,
+    version: 1,
   };
 }
 
@@ -390,6 +424,48 @@ export async function installApiMock(
       });
       return;
     }
+    if (path === "/api/v1/admin/operations") {
+      await json(route, { items: [operationCenterItem()], total: 1, limit: 50, offset: 0 });
+      return;
+    }
+    if (path === `/api/v1/admin/operations/${ids.operation}`) {
+      await json(route, {
+        ...operationCenterItem(),
+        events: [{
+          id: 1,
+          event_type: "STATUS_CHANGED",
+          status: "FAILED",
+          step: null,
+          message: "Operation failed",
+          details: { error_code: "CLUSTER_UNREACHABLE" },
+          actor_user_id: null,
+          occurred_at: observedAt,
+        }],
+        pve_tasks: [],
+        provisioning_steps: [],
+        related_audit_count: 1,
+        related_backup_ids: [],
+      });
+      return;
+    }
+    if (path === `/api/v1/admin/operations/${ids.operation}/acknowledge`) {
+      await json(route, {
+        ...operationCenterItem(),
+        version: 2,
+        assignment: {
+          assigned_to_id: null,
+          assigned_to_name: null,
+          assigned_at: null,
+          acknowledged_by_id: "admin-id",
+          acknowledged_at: observedAt,
+          resolved_by_id: null,
+          resolved_at: null,
+          resolution_note: null,
+          version: 2,
+        },
+      });
+      return;
+    }
     if (path === "/api/v1/admin/organizations") {
       const item = organization();
       await json(route, url.search ? {
@@ -415,6 +491,26 @@ export async function installApiMock(
         return;
       }
       await json(route, { items: [customerVm(state, options.staleCustomerInventory)] });
+      return;
+    }
+    if (path === "/api/v1/customer/jobs") {
+      await json(route, {
+        items: state.jobPolls > 0 ? [{
+          id: ids.job,
+          job_id: ids.job,
+          vm_id: ids.workload,
+          action: "start",
+          action_mode: "STANDARD",
+          status: "SUCCEEDED",
+          result: { final_power_state: "RUNNING" },
+          error_code: null,
+          error_summary: null,
+          retryable: false,
+          requested_at: observedAt,
+          started_at: observedAt,
+          finished_at: observedAt,
+        }] : [],
+      });
       return;
     }
     if (

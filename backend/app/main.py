@@ -17,6 +17,7 @@ from app.api.health import router as health_router
 from app.api.inventory import router as inventory_router
 from app.api.ipam import router as ipam_router
 from app.api.observability import router as observability_router
+from app.api.operation_center import router as operation_center_router
 from app.api.operations import router as operations_router
 from app.api.provisioning import router as provisioning_router
 from app.api.workloads import router as workloads_router
@@ -118,6 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(customer_router)
     app.include_router(operations_router)
     app.include_router(observability_router)
+    app.include_router(operation_center_router)
     app.include_router(ipam_router)
     app.include_router(inventory_router)
     app.include_router(provisioning_router)
