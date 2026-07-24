@@ -10,6 +10,8 @@ PVE Master는 여러 Proxmox VE(PVE) 클러스터의 인벤토리와 VM 수명�
 - [보안 모델](docs/security-model.md)
 - [데이터베이스 모델](docs/database-model.md)
 - [API 설계](docs/api-design.md)
+- [제품 정책과 운영 기준](docs/deliverables/00-product-policy/product-policy.md)
+- [관리자·고객 기능 확장 작업 인덱스](docs/tasks/README.md)
 
 ## 2. 설계 원칙
 
@@ -29,7 +31,7 @@ PVE Master는 여러 Proxmox VE(PVE) 클러스터의 인벤토리와 VM 수명�
 요구사항에서 정하지 않은 부분은 초기 버전에서 다음과 같이 가정한다.
 
 - 단일 서비스 운영 조직이 여러 고객을 관리하는 모델이다. 고객별 조직/하위 관리자 기능은 1차 범위에서 제외한다.
-- 사용자 역할은 `ADMIN`과 `CUSTOMER` 두 종류다. 최소 한 명의 활성 관리자가 항상 존재해야 한다.
+- 사용자 역할은 `SUPER_ADMIN`, `OPERATOR`, `CUSTOMER` 세 종류다. 최소 한 명의 활성 `SUPER_ADMIN`이 항상 존재해야 한다.
 - 인증은 서버 세션 기반의 HttpOnly/Secure/SameSite 쿠키를 기본으로 한다. 향후 외부 IdP(OIDC)를 붙일 수 있도록 인증과 사용자 도메인을 분리한다.
 - 관리자 MFA는 운영 출시 전에 필수, 고객 MFA는 권장 및 정책 설정 가능으로 한다.
 - 초기에는 PVE API 토큰 인증만 지원한다. 토큰에는 필요한 최소 권한만 부여하고 가능하면 권한 분리를 활성화한다.
