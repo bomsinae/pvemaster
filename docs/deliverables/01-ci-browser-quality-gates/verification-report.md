@@ -104,3 +104,8 @@ required check가 이를 병합 차단 범위에 포함한다.
 `sharp 0.34.5`에 high severity 취약점 3건이 발견됐다. Next.js와 ESLint 구성을
 `16.2.11`, PostCSS를 `8.5.12`, Sharp를 `0.35.0`으로 상향했다. 갱신 후
 `npm install` audit은 355 packages에서 취약점 0건을 보고했다.
+
+최초 frontend image scan은 앱 실행에 사용하지 않는 runtime image 내 npm CLI의
+전이 의존성에서 high 4건과 critical 1건을 발견했다. standalone 서버에는 npm이
+필요하지 않으므로 최종 runtime stage에서 npm만 제거했다. 로컬 production image
+재빌드와 Node 실행 확인은 통과했으며, builder stage의 npm은 유지한다.
