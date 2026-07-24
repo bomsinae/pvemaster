@@ -39,7 +39,7 @@ docs/
 | 단계 | 상태 | 대표 산출물 |
 |---|---|---|
 | 0 — 제품 정책과 운영 기준 | 완료 | [제품 정책과 운영 기준](00-product-policy/product-policy.md) |
-| 1 — CI와 실제 사용자 여정 품질 게이트 | 예정 | — |
+| 1 — CI와 실제 사용자 여정 품질 게이트 | 원격 적용 확인 대기 | [검증 보고서](01-ci-browser-quality-gates/verification-report.md), [branch protection 기준](01-ci-browser-quality-gates/branch-protection.md) |
 | 2 — Scheduler, Outbox와 정기 유지보수 기반 | 예정 | — |
 | 3 — 자동 Inventory Sync와 Reconciliation | 예정 | — |
 | 4 — 관리자 Operation 센터와 복구 흐름 | 예정 | — |

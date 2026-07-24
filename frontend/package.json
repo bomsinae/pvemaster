@@ -8,7 +8,11 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "node --experimental-strip-types --test tests/*.e2e.test.ts"
+    "test:e2e": "node --experimental-strip-types --test tests/*.e2e.test.ts",
+    "test:mock": "node --experimental-strip-types --test tests/*.e2e.test.ts",
+    "test:browser": "playwright test",
+    "test:browser:chromium": "playwright test --project=chromium",
+    "test:browser:report": "playwright show-report output/playwright/report"
   },
   "dependencies": {
     "@novnc/novnc": "^1.7.0",
@@ -19,6 +23,8 @@
     "react-dom": "19.2.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

@@ -1,0 +1,68 @@
+import { expect, test } from "@playwright/test";
+
+import { ids, installApiMock, loginAs } from "./support/api-mock";
+
+test("SUPER_ADMIN registers, tests, imports, and assigns cluster inventory", async ({ page }) => {
+  const state = await installApiMock(page, { initialClusters: false });
+  state.imported = false;
+  state.assigned = false;
+
+  await loginAs(page, "admin");
+  await expect(page.getByRole("heading", { name: "운영 개요" })).toBeVisible();
+
+  await page.getByRole("button", { name: "클러스터", exact: true }).click();
+  await page.getByRole("button", { name: "클러스터 등록" }).click();
+
+  const drawer = page.getByRole("dialog", { name: "관리 작업" });
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByLabel("관리 작업 닫기")).toBeFocused();
+  await drawer.getByLabel("표시 이름").fill("staging-pve");
+  await drawer.getByLabel("API endpoint").fill("https://pve.example.test:8006");
+  await drawer.getByLabel("Token identifier").fill("svc@pve!portal");
+  await drawer.getByLabel("Token secret").fill("write-only-browser-secret");
+  await drawer.getByRole("button", { name: "검증 후 등록" }).click();
+
+  await expect(page.getByText("클러스터를 등록하고 최소 권한 연결 시험을 완료했습니다.")).toBeVisible();
+  await expect(page.getByText("staging-pve", { exact: true }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "연결 시험" }).click();
+  await expect(page.getByText(/연결 확인 완료 · PVE 9\.0/)).toBeVisible();
+
+  await page.getByRole("button", { name: "VM/CT 가져오기" }).click();
+  await expect(page.getByText(/VM\/CT 1개 확인 · 1개 가져옴/)).toBeVisible();
+
+  await page.getByRole("button", { name: "사용자와 조직", exact: true }).click();
+  await page.getByRole("button", { name: /리소스 할당/ }).click();
+  await expect(page.getByText("customer-web-01", { exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "할당 대상 조직" }).click();
+  await page.getByRole("option", { name: /Acme Korea/ }).click();
+  await page.getByRole("button", { name: "조직에 할당" }).click();
+  await expect(page.getByText("워크로드를 조직에 할당했습니다.")).toBeVisible();
+
+  expect(state.requests).toContainEqual({
+    method: "POST",
+    path: `/api/v1/admin/clusters/${ids.cluster}/workloads/import`,
+  });
+  expect(state.requests).toContainEqual({
+    method: "POST",
+    path: `/api/v1/admin/workloads/${ids.workload}/assign`,
+  });
+});
+
+test("admin drawer traps focus, closes with Escape, and restores trigger focus", async ({ page }) => {
+  await installApiMock(page);
+  await loginAs(page, "admin");
+  await page.getByRole("button", { name: "클러스터", exact: true }).click();
+
+  const trigger = page.getByRole("button", { name: "클러스터 등록" });
+  await trigger.focus();
+  await trigger.press("Enter");
+  const drawer = page.getByRole("dialog", { name: "관리 작업" });
+  await expect(drawer.getByLabel("관리 작업 닫기")).toBeFocused();
+
+  await page.keyboard.press("Shift+Tab");
+  await expect(drawer.getByRole("button", { name: "검증 후 등록" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+});

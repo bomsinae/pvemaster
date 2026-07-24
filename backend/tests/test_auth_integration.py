@@ -89,9 +89,7 @@ async def test_authentication_rotation_and_role_matrix() -> None:
     settings = Settings(
         _env_file=None,
         database_url=SecretStr(os.environ["AUTH_TEST_DATABASE_URL"]),
-        redis_url=SecretStr(
-            os.environ.get("AUTH_TEST_REDIS_URL", "redis://localhost:6379/15")
-        ),
+        redis_url=SecretStr(os.environ.get("AUTH_TEST_REDIS_URL", "redis://localhost:6379/15")),
         app_secret_key=SecretStr(token_urlsafe(32)),
     )
     app = create_app(settings)
@@ -334,9 +332,7 @@ async def test_authentication_rotation_and_role_matrix() -> None:
                 params={"version": deactivated.json()["version"]},
             )
             assert deleted_customer.status_code == 204
-            users_after_delete = await client.get(
-                "/api/v1/admin/users", headers=super_headers
-            )
+            users_after_delete = await client.get("/api/v1/admin/users", headers=super_headers)
             assert super_create.json()["id"] not in {
                 item["id"] for item in users_after_delete.json()["items"]
             }
