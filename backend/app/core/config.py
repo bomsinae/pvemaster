@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     provisioning_failure_alert_count: int = Field(default=3, ge=1, le=1000)
     provisioning_failure_window_minutes: int = Field(default=30, ge=1, le=10080)
     audit_retention_days: int = Field(default=365, ge=30, le=3650)
+    refresh_token_retention_days: int = Field(default=30, ge=1, le=365)
+    completed_run_retention_days: int = Field(default=7, ge=1, le=365)
+    sync_run_retention_days: int = Field(default=30, ge=1, le=365)
+    scheduler_lease_seconds: int = Field(default=55, ge=10, le=600)
+    operation_watchdog_seconds: int = Field(default=120, ge=30, le=3600)
+    outbox_dispatch_batch_size: int = Field(default=100, ge=1, le=1000)
+    outbox_max_backoff_seconds: int = Field(default=300, ge=5, le=3600)
 
 
 @lru_cache

@@ -162,7 +162,7 @@ Docker Compose의 논리 서비스:
 
 - `web`: Next.js, 외부 진입점 또는 reverse proxy 뒤에서 실행.
 - `api`: FastAPI ASGI 서버, 수평 확장 가능.
-- `worker-operations`, `worker-inventory`: 큐와 동시성 분리.
+- `worker-operations`, `worker-inventory`, `worker-maintenance`: 큐와 동시성 분리.
 - `scheduler`: Celery beat 단일 인스턴스.
 - `postgres`: 영속 볼륨, 운영에서는 관리형 DB도 가능.
 - `redis`: 인증/TLS가 가능한 전용 인스턴스.
@@ -199,6 +199,11 @@ Docker Compose의 논리 서비스:
 - 동기화 부분 실패: absent 표시를 수행하지 않고 실패 범위를 기록한다.
 
 DB commit과 Celery publish 사이 유실을 막기 위해 초기 구현부터 `operation_outbox` 테이블을 두거나 Celery publish 실패를 재전송하는 DB dispatcher를 사용한다.
+
+현재 구현은 `operation_outbox`를 사용한다. operation과 publish intent를 같은
+transaction에 저장하고 maintenance dispatcher가 5초 주기로 미발행 행을 재전송한다.
+Scheduler 메시지 중복은 `scheduler_leases`의 PostgreSQL advisory lock, 만료 시각과
+fencing token으로 제어한다.
 
 ## 10. 확장 결정
 

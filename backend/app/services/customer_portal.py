@@ -20,6 +20,12 @@ from app.schemas.customer import (
 )
 from app.security.access import Principal, require_service_role
 from app.services.audit import add_audit_event
+from app.services.outbox import (
+    POWER_EVENT,
+    add_operation_event,
+    record_publish_failure,
+    record_publish_success,
+)
 
 CustomerOperationPublisher = Callable[[UUID, str], None]
 logger = logging.getLogger(__name__)
@@ -172,6 +178,7 @@ class CustomerPortalService:
                 code="OPERATION_CONFLICT",
                 message="A duplicate or conflicting operation already exists.",
             ) from exc
+        outbox = add_operation_event(self._session, operation, POWER_EVENT)
         add_audit_event(
             self._session,
             action=operation.operation_type,
@@ -191,10 +198,13 @@ class CustomerPortalService:
         try:
             self._publisher(operation.id, operation.celery_task_id)
         except Exception:
+            await record_publish_failure(self._session, outbox, self._settings)
             logger.exception(
                 "Customer power operation enqueue failed; worker recovery will retry",
                 extra={"operation_id": str(operation.id)},
             )
+        else:
+            await record_publish_success(self._session, outbox)
         return self._job_response(operation)
 
     @staticmethod

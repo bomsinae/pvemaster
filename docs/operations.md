@@ -4,8 +4,12 @@
 
 - `GET /api/v1/health/live`: 프로세스 liveness. 외부 의존성을 확인하지 않는다.
 - `GET /api/v1/health/ready`: PostgreSQL과 Redis readiness. 의존성 장애 시 `503`이다.
-- `GET /api/v1/admin/operations/status`: `SUPER_ADMIN`과 `OPERATOR`가 worker heartbeat, 큐 길이, 클러스터 연결 상태, VM/CT 할당 현황, 활성·전체 사용자와 조직 수, 활성 경보를 조회한다.
-- `GET /metrics`: Prometheus text exposition endpoint. worker, Celery 큐, 클러스터 연결, 작업 상태, IP 풀 가용 주소 지표를 제공한다. 운영에서는 reverse proxy 또는 네트워크 정책으로 Prometheus만 접근하도록 제한한다.
+- `GET /api/v1/admin/operations/status`: `SUPER_ADMIN`과 `OPERATOR`가 worker heartbeat,
+  목적별 큐 길이, scheduler 작업의 최근 실행·성공·실패, 클러스터 연결 상태,
+  VM/CT 할당 현황, 활성·전체 사용자와 조직 수, 활성 경보를 조회한다.
+- `GET /metrics`: Prometheus text exposition endpoint. worker, Celery 큐, scheduler 최근
+  성공 시각·실패 여부, 클러스터 연결, 작업 상태, IP 풀 가용 주소 지표를 제공한다.
+  운영에서는 reverse proxy 또는 네트워크 정책으로 Prometheus만 접근하도록 제한한다.
 
 Worker는 Redis의 TTL heartbeat를 갱신한다. heartbeat가 없으면 `WORKER_DOWN`, 대기 작업 합계가 `QUEUE_BACKLOG_ALERT_THRESHOLD` 이상이면 `JOB_QUEUE_BACKLOG` 경보가 발생한다. 다음 조건도 운영 상태 응답에 포함된다.
 
@@ -23,7 +27,11 @@ Worker는 Redis의 TTL heartbeat를 갱신한다. heartbeat가 없으면 `WORKER
 
 `SUPER_ADMIN`만 `GET /api/v1/admin/audit-logs`와 상세 endpoint를 조회할 수 있다. action, actor, organization, result 필터와 limit/offset을 지원한다. 변경·삭제 API는 없다.
 
-감사 행은 DB trigger로 UPDATE/DELETE가 차단된다. 비밀번호, refresh/access/PVE token, Authorization, 쿠키, private key, CA bundle 키는 중첩된 before/after에서도 `[REDACTED]`로 저장된다. 온라인 보존 기간의 기본값은 365일이다. 삭제는 maintenance queue의 `app.tasks.maintenance.purge_expired_audit_logs` 작업만 수행하며, 운영 스케줄러에서 하루 한 번 실행한다. 장기 보존은 별도 WORM/SIEM으로 전송한다.
+감사 행은 DB trigger로 UPDATE/DELETE가 차단된다. 비밀번호, refresh/access/PVE token,
+Authorization, 쿠키, private key, CA bundle 키는 중첩된 before/after에서도
+`[REDACTED]`로 저장된다. 온라인 보존 기간의 기본값은 365일이다. 삭제는
+maintenance queue의 `app.tasks.scheduler.run_retention`이 하루 한 번 실행한다.
+장기 보존은 별도 WORM/SIEM으로 전송한다.
 
 ## 배포 및 점검 명령
 
@@ -36,8 +44,12 @@ curl --fail http://localhost:8000/api/v1/health/live
 curl --fail http://localhost:8000/api/v1/health/ready
 curl --fail http://localhost:8000/metrics
 docker compose exec backend alembic current
-docker compose exec worker celery -A app.worker:celery_app inspect ping --timeout 5
+docker compose exec worker-operations celery -A app.worker:celery_app inspect ping --timeout 5
+docker compose exec worker-inventory celery -A app.worker:celery_app inspect ping --timeout 5
+docker compose exec worker-maintenance celery -A app.worker:celery_app inspect ping --timeout 5
 docker compose exec redis redis-cli --no-auth-warning LLEN operations
+docker compose exec redis redis-cli --no-auth-warning LLEN inventory
+docker compose exec redis redis-cli --no-auth-warning LLEN maintenance
 ```
 
 인증이 필요한 운영 상태는 access token을 shell history에 직접 쓰지 말고 안전한 비밀 주입 방식으로 전달한다. 로그 수집 설정에서 Authorization, Cookie, request body를 제외한다.

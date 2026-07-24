@@ -35,6 +35,14 @@ from app.models.provisioning import (
     ProvisioningStepStatus,
     Template,
 )
+from app.models.scheduling import (
+    MaintenanceRun,
+    OperationOutbox,
+    OutboxStatus,
+    RunStatus,
+    SchedulerLease,
+    SyncRun,
+)
 
 __all__ = [
     "AuditLog",
@@ -51,10 +59,13 @@ __all__ = [
     "IpPool",
     "IpPoolExclusion",
     "LoginThrottle",
+    "MaintenanceRun",
     "Organization",
     "OrganizationMember",
     "Operation",
+    "OperationOutbox",
     "OperationStatus",
+    "OutboxStatus",
     "PowerAction",
     "Product",
     "ProvisioningNode",
@@ -64,9 +75,12 @@ __all__ = [
     "ProvisioningStepStatus",
     "PveTask",
     "RefreshToken",
+    "RunStatus",
+    "SchedulerLease",
     "User",
     "UserRole",
     "Template",
+    "SyncRun",
     "Workload",
     "WorkloadAssignment",
 ]

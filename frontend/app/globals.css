@@ -532,6 +532,43 @@ body,
   border-bottom: 1px solid var(--line);
 }
 
+.scheduler-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.scheduler-status-grid article {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+
+.scheduler-status-grid header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.scheduler-status-grid code {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.scheduler-status-grid strong {
+  font-size: 0.86rem;
+}
+
+.scheduler-status-grid small {
+  color: var(--muted);
+}
+
 .calm-state > span {
   display: grid;
   width: 2.7rem;

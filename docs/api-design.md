@@ -523,8 +523,8 @@ operation은 immutable request identity를 가지며 terminal status를 되돌�
 |---|---|---|---|
 | GET | `/health/live` | 내부/프록시 | 프로세스 event loop 생존 여부만 |
 | GET | `/health/ready` | 내부/오케스트레이터 | DB, 필수 migration, queue publish 가능 여부 |
-| GET | `/admin/operations/status` | SUPER_ADMIN/OPERATOR | worker, queue, VM/CT 할당, 활성·전체 사용자와 조직 수, cluster 연결과 활성 경보 |
-| GET | `/metrics` | 내부/Prometheus | worker, queue, cluster, operation, IP pool 지표 |
+| GET | `/admin/operations/status` | SUPER_ADMIN/OPERATOR | worker, 목적별 queue, scheduler 최근 실행·성공·실패, VM/CT 할당, 활성·전체 사용자와 조직 수, cluster 연결과 활성 경보 |
+| GET | `/metrics` | 내부/Prometheus | worker, queue, scheduler 성공 시각·실패, cluster, operation, IP pool 지표 |
 
 PVE 개별 클러스터 장애는 전체 API readiness를 실패시키지 않고 관리자 상태/지표로 표시한다. 응답에 DSN, host 상세, version fingerprint 같은 공격 유용 정보를 노출하지 않는다.
 

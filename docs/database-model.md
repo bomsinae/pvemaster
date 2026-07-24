@@ -281,10 +281,28 @@ Cloud-Init SSH 공개키는 public 정보지만 별도 정규화 테이블 또�
 ### `operation_outbox`
 
 - `id BIGSERIAL PK`, `operation_id UUID FK`, `event_type`, `payload JSONB`(ID만).
-- `created_at`, `published_at`, `attempt_count`, `next_attempt_at`, `last_error_code`.
+- `status`는 `PENDING|PUBLISHED`이며 `created_at`, `published_at`, `attempt_count`,
+  `next_attempt_at`, `last_error_code`를 함께 저장한다.
 - `UNIQUE(operation_id, event_type)`로 중복 publish를 제어한다.
 
 API 트랜잭션에서 operation과 outbox를 함께 commit하고 별도 dispatcher가 Celery에 발행한다. 발행 중복은 정상으로 간주하고 워커 멱등성으로 흡수한다.
+
+### `scheduler_leases`
+
+- `name VARCHAR(120) PK`, `owner_id UUID`, `fencing_token BIGINT`.
+- `acquired_at`, `lease_expires_at`, `updated_at`.
+- lease 획득은 PostgreSQL transaction advisory lock과 행 잠금으로 직렬화한다.
+- 만료 후 소유권 이전마다 fencing token을 증가시키며 오래된 실행은 최종 쓰기 전에
+  현재 owner/token을 다시 확인한다.
+
+### `maintenance_runs`
+
+- `id UUID PK`, `job_name`, `status`, `owner_id`, `fencing_token`.
+- `started_at`, `finished_at`, `processed_count`, `error_code`.
+- 최근 성공 시각과 실패는 관리자 운영 상태 API 및 Prometheus 지표의 기준이다.
+
+완료·skip 행은 기본 7일 보존하고 실패 행은 incident 연결을 위해 별도 정책으로
+보존한다.
 
 ## 9.1 PBS 워크로드 백업
 

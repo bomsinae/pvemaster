@@ -330,6 +330,15 @@ export type OperationsStatus = {
     last_connected_at: string | null;
     error_code: string | null;
   }>;
+  scheduler?: Array<{
+    job_name: string;
+    status: string;
+    last_started_at: string;
+    last_finished_at: string | null;
+    last_success_at: string | null;
+    processed_count: number;
+    error_code: string | null;
+  }>;
   alerts: Array<{
     code: string;
     severity: string;

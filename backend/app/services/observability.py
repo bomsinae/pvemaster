@@ -16,6 +16,7 @@ from app.models.cluster import Cluster
 from app.models.ipam import IpAddress, IpAddressState, IpPool, IpPoolExclusion
 from app.models.operation import Operation, Workload
 from app.models.provisioning import ProvisioningRequest, ProvisioningStatus
+from app.models.scheduling import MaintenanceRun, RunStatus
 from app.schemas.observability import (
     AuditLogListResponse,
     AuditLogResponse,
@@ -25,6 +26,7 @@ from app.schemas.observability import (
     OperationalAlert,
     OperationsStatusResponse,
     QueueStatus,
+    SchedulerJobStatus,
     WorkerStatus,
     WorkloadInventoryStatus,
 )
@@ -189,7 +191,8 @@ class ObservabilityService:
         workloads = await self._workload_inventory()
         directory = await self._directory_inventory()
         clusters = await self._cluster_statuses()
-        alerts = await self._alerts(worker, queue, clusters)
+        scheduler = await self._scheduler_status()
+        alerts = await self._alerts(worker, queue, clusters, scheduler)
         return OperationsStatusResponse(
             status="degraded" if alerts else "ok",
             worker=worker,
@@ -197,6 +200,7 @@ class ObservabilityService:
             workloads=workloads,
             directory=directory,
             clusters=clusters,
+            scheduler=scheduler,
             alerts=alerts,
         )
 
@@ -234,6 +238,29 @@ class ObservabilityService:
         )
         for status, count in operation_counts:
             lines.append(f'pvemaster_operations{{status="{status}"}} {count}')
+        scheduler = await self._scheduler_status()
+        lines.extend(
+            [
+                "# HELP pvemaster_scheduler_job_last_success_timestamp_seconds "
+                "Unix timestamp of the last successful scheduled job run.",
+                "# TYPE pvemaster_scheduler_job_last_success_timestamp_seconds gauge",
+                "# HELP pvemaster_scheduler_job_failed Whether the latest scheduled job failed.",
+                "# TYPE pvemaster_scheduler_job_failed gauge",
+            ]
+        )
+        for job in scheduler:
+            name = job.job_name.replace("\\", "\\\\").replace('"', '\\"')
+            success_timestamp = (
+                int(job.last_success_at.timestamp()) if job.last_success_at is not None else 0
+            )
+            lines.append(
+                "pvemaster_scheduler_job_last_success_timestamp_seconds"
+                f'{{job="{name}"}} {success_timestamp}'
+            )
+            lines.append(
+                f'pvemaster_scheduler_job_failed{{job="{name}"}} '
+                f"{int(job.status == RunStatus.FAILED.value)}"
+            )
         pool_counts = await self._ip_pool_counts()
         lines.extend(
             [
@@ -268,6 +295,8 @@ class ObservabilityService:
         try:
             queues = {
                 "operations": int(await cast(Awaitable[int], self._redis.llen("operations"))),
+                "inventory": int(await cast(Awaitable[int], self._redis.llen("inventory"))),
+                "maintenance": int(await cast(Awaitable[int], self._redis.llen("maintenance"))),
                 "celery": int(await cast(Awaitable[int], self._redis.llen("celery"))),
             }
         except Exception:
@@ -361,6 +390,7 @@ class ObservabilityService:
         worker: WorkerStatus,
         queue: QueueStatus,
         clusters: list[ClusterConnectionStatus],
+        scheduler: list[SchedulerJobStatus] | None = None,
     ) -> list[OperationalAlert]:
         alerts: list[OperationalAlert] = []
         if not worker.available or not queue.available:
@@ -403,6 +433,17 @@ class ObservabilityService:
                         message="The Proxmox cluster is not connected.",
                     )
                 )
+        for job in scheduler or []:
+            if job.status == RunStatus.FAILED.value:
+                alerts.append(
+                    OperationalAlert(
+                        code="SCHEDULER_JOB_FAILED",
+                        severity="critical",
+                        resource_type="scheduler",
+                        resource_id=job.job_name,
+                        message="A scheduled maintenance job failed.",
+                    )
+                )
         cutoff = datetime.now(UTC) - timedelta(
             minutes=self._settings.provisioning_failure_window_minutes
         )
@@ -441,6 +482,38 @@ class ObservabilityService:
                     )
                 )
         return alerts
+
+    async def _scheduler_status(self) -> list[SchedulerJobStatus]:
+        rows = (
+            await self._session.scalars(
+                select(MaintenanceRun).order_by(
+                    MaintenanceRun.started_at.desc(),
+                    MaintenanceRun.id.desc(),
+                )
+            )
+        ).all()
+        latest: dict[str, MaintenanceRun] = {}
+        last_success: dict[str, datetime] = {}
+        for item in rows:
+            latest.setdefault(item.job_name, item)
+            if (
+                item.status == RunStatus.SUCCEEDED.value
+                and item.finished_at is not None
+                and item.job_name not in last_success
+            ):
+                last_success[item.job_name] = item.finished_at
+        return [
+            SchedulerJobStatus(
+                job_name=name,
+                status=item.status,
+                last_started_at=item.started_at,
+                last_finished_at=item.finished_at,
+                last_success_at=last_success.get(name),
+                processed_count=item.processed_count,
+                error_code=item.error_code,
+            )
+            for name, item in sorted(latest.items())
+        ]
 
     async def _ip_pool_counts(self) -> list[tuple[UUID, str, int]]:
         pools = list(

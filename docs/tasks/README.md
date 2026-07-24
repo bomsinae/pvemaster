@@ -51,7 +51,7 @@
 
 1. [단계 0 — 제품 정책과 운영 기준 확정](00-product-policy.md) — 완료
 2. [단계 1 — CI와 실제 사용자 여정 품질 게이트](01-ci-browser-quality-gates.md) — 원격 적용 확인 대기
-3. [단계 2 — Scheduler, Outbox와 정기 유지보수 기반](02-scheduler-outbox-maintenance.md)
+3. [단계 2 — Scheduler, Outbox와 정기 유지보수 기반](02-scheduler-outbox-maintenance.md) — 완료
 4. [단계 3 — 자동 Inventory Sync와 Reconciliation](03-inventory-sync-reconciliation.md)
 5. [단계 4 — 관리자 Operation 센터와 복구 흐름](04-operation-center-recovery.md)
 6. [단계 5 — MFA, Session과 고위험 작업 보호](05-mfa-session-security.md)

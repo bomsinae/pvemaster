@@ -40,7 +40,7 @@ docs/
 |---|---|---|
 | 0 — 제품 정책과 운영 기준 | 완료 | [제품 정책과 운영 기준](00-product-policy/product-policy.md) |
 | 1 — CI와 실제 사용자 여정 품질 게이트 | 원격 적용 확인 대기 | [검증 보고서](01-ci-browser-quality-gates/verification-report.md), [branch protection 기준](01-ci-browser-quality-gates/branch-protection.md) |
-| 2 — Scheduler, Outbox와 정기 유지보수 기반 | 예정 | — |
+| 2 — Scheduler, Outbox와 정기 유지보수 기반 | 구현·검증 완료 | [설계 결정](02-scheduler-outbox-maintenance/design.md), [운영 runbook](02-scheduler-outbox-maintenance/runbook.md), [검증 보고서](02-scheduler-outbox-maintenance/verification-report.md) |
 | 3 — 자동 Inventory Sync와 Reconciliation | 예정 | — |
 | 4 — 관리자 Operation 센터와 복구 흐름 | 예정 | — |
 | 5 — MFA, Session과 고위험 작업 보호 | 예정 | — |

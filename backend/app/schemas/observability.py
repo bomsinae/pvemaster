@@ -87,6 +87,16 @@ class OperationalAlert(BaseModel):
     threshold: int | None = None
 
 
+class SchedulerJobStatus(BaseModel):
+    job_name: str
+    status: str
+    last_started_at: datetime
+    last_finished_at: datetime | None
+    last_success_at: datetime | None
+    processed_count: int = Field(ge=0)
+    error_code: str | None
+
+
 class OperationsStatusResponse(BaseModel):
     status: str
     worker: WorkerStatus
@@ -94,4 +104,5 @@ class OperationsStatusResponse(BaseModel):
     workloads: WorkloadInventoryStatus
     directory: DirectoryInventoryStatus
     clusters: list[ClusterConnectionStatus]
+    scheduler: list[SchedulerJobStatus] = Field(default_factory=list)
     alerts: list[OperationalAlert] = Field(default_factory=list)
