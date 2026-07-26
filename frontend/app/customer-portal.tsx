@@ -19,6 +19,8 @@ import type { CustomerJobsByVmId, CustomerPowerFilter } from "@/lib/customer-por
 
 import { LoginPanel } from "./login-panel";
 import { PasswordChangeDialog } from "./password-change-dialog";
+import { SecurityCenterDialog } from "./security-center-dialog";
+import { StepUpDialog } from "./step-up-dialog";
 import { useDialogFocus } from "./use-dialog-focus";
 import { VmConsoleModal } from "./vm-console-modal";
 
@@ -124,6 +126,7 @@ export function CustomerPortal({
   const [jobsByVmId, setJobsByVmId] = useState<CustomerJobsByVmId>({});
   const [consoleVm, setConsoleVm] = useState<CustomerVm | null>(null);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
   const [loading, setLoading] = useState(Boolean(initialSession));
   const [error, setError] = useState("");
   const actionDialogRef = useRef<HTMLElement>(null);
@@ -269,7 +272,7 @@ export function CustomerPortal({
     <main className="portal-shell">
       <header className="portal-header">
         <div className="brand"><span className="brand-mark" aria-hidden="true">PM</span><span>PVE Master</span></div>
-        <div className="portal-session"><span className="state-dot" aria-hidden="true" /><span className="portal-workspace-label">고객 워크스페이스</span>{userEmail && <span className="portal-account" title={userEmail}><small>로그인 계정</small><strong>{userEmail}</strong></span>}<button onClick={() => setPasswordDialogOpen(true)}>비밀번호 변경</button><button onClick={endSession}>로그아웃</button></div>
+        <div className="portal-session"><span className="state-dot" aria-hidden="true" /><span className="portal-workspace-label">고객 워크스페이스</span>{userEmail && <span className="portal-account" title={userEmail}><small>로그인 계정</small><strong>{userEmail}</strong></span>}<button onClick={() => setSecurityDialogOpen(true)}>보안 설정</button><button onClick={() => setPasswordDialogOpen(true)}>비밀번호 변경</button><button onClick={endSession}>로그아웃</button></div>
       </header>
 
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="오류 닫기">×</button></div>}
@@ -398,6 +401,15 @@ export function CustomerPortal({
           onChanged={endSession}
         />
       )}
+      {securityDialogOpen && (
+        <SecurityCenterDialog
+          apiBaseUrl={apiBaseUrl}
+          accessToken={session.accessToken}
+          onClose={() => setSecurityDialogOpen(false)}
+          onCurrentSessionRevoked={endSession}
+        />
+      )}
+      <StepUpDialog apiBaseUrl={apiBaseUrl} accessToken={session.accessToken} />
     </main>
   );
 }

@@ -36,6 +36,14 @@
 - 우선 WebAuthn 또는 TOTP를 지원하고 복구 코드는 일방향 해시로 저장한다.
 - MFA 등록/해제와 복구 코드 사용은 재인증 및 감사 대상이다.
 - 클러스터 등록, 자격 증명 회전, 사용자 권한 변경, 강제 stop 같은 고위험 작업에 최근 MFA 인증(step-up)을 요구할 수 있다.
+- TOTP secret은 MFA 전용 HKDF context로 파생한 AES-GCM 키와 사용자/method AAD로
+  암호화하고, 복구 코드는 keyed hash만 저장한다.
+- WebAuthn은 고정 RP ID, HTTPS origin과 user verification을 검증한다.
+- access token의 session family ID를 매 요청의 활성 refresh family와 대조해 개별
+  session revoke를 즉시 반영한다.
+- step-up token은 사용자, session epoch와 action에 묶고 다른 action 재사용을
+  거부한다.
+- `production` 환경의 SUPER_ADMIN/OPERATOR MFA는 비활성화할 수 없다.
 
 ### CSRF와 브라우저 보호
 

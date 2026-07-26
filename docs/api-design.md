@@ -578,3 +578,22 @@ PVE 개별 클러스터 장애는 전체 API readiness를 실패시키지 않고
 - 동일 VMID가 다른 cluster에 있을 때 UUID 기반 route가 정확한 대상을 선택한다.
 - stale 인벤토리와 PVE 연결 실패가 성공 상태처럼 표현되지 않는다.
 - 모든 상태 변경의 접수/거부/최종 결과가 감사 로그와 request/operation ID로 연결된다.
+
+## 18. MFA, Session과 step-up API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| POST | `/auth/mfa/challenges/verify` | 로그인 challenge | TOTP/WebAuthn/복구 코드 검증 후 token 발급 |
+| GET | `/auth/mfa/methods` | 인증 사용자 | method, 복구 코드 잔여량, 정책 준수 조회 |
+| POST | `/auth/mfa/totp/start`, `/auth/mfa/totp/verify` | 인증 사용자 | TOTP 등록 시작·검증 |
+| POST | `/auth/mfa/webauthn/start`, `/auth/mfa/webauthn/finish` | 인증 사용자 | WebAuthn 등록 |
+| POST | `/auth/mfa/recovery-codes` | 인증 사용자 + 재인증 | 복구 코드 재발급 |
+| POST | `/auth/step-up/start`, `/auth/step-up/verify` | 인증 사용자 | action-bound step-up token 발급 |
+| GET/DELETE | `/auth/sessions`, `/auth/sessions/{family_id}` | 본인 | 활성 session 조회·폐기 |
+| DELETE | `/auth/sessions/others` | 본인 | 현재를 제외한 session 폐기 |
+| GET | `/auth/login-events` | 본인 | 최근 로그인 성공·실패 |
+| GET/PUT | `/auth/mfa/policy` | SUPER_ADMIN | 관리자 MFA 정책 조회·변경 |
+
+보호 API는 `403 STEP_UP_REQUIRED`의 `details.action`을 반환한다. 클라이언트는
+해당 action으로 발급한 token을 `X-Step-Up-Token`에 넣어 원 요청을 한 번만
+재시도한다. 다른 action, 사용자, epoch 또는 만료된 token은 동일하게 거부한다.

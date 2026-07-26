@@ -1,4 +1,5 @@
 import { BrowserSessionError, restoreBrowserSession } from "./browser-session.ts";
+import { hasStepUpHandler, requestStepUp } from "./step-up.ts";
 
 type Fetcher = typeof fetch;
 
@@ -30,6 +31,40 @@ async function isExpiredAccessToken(response: Response): Promise<boolean> {
     return body.error?.code === "INVALID_ACCESS_TOKEN";
   } catch {
     return false;
+  }
+}
+
+async function stepUpAction(response: Response): Promise<string | null> {
+  if (response.status !== 403 || !hasStepUpHandler()) return null;
+  try {
+    const body = (await response.clone().json()) as {
+      error?: { code?: unknown; details?: { action?: unknown } };
+    };
+    return body.error?.code === "STEP_UP_REQUIRED"
+      && typeof body.error.details?.action === "string"
+      ? body.error.details.action
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function retryWithStepUp(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  accessToken: string,
+  response: Response,
+  fetcher: Fetcher,
+): Promise<Response> {
+  const action = await stepUpAction(response);
+  if (!action) return response;
+  try {
+    const proof = await requestStepUp(action);
+    const headers = new Headers(init.headers);
+    headers.set("X-Step-Up-Token", proof);
+    return await fetcher(input, withBearer({ ...init, headers }, accessToken));
+  } catch {
+    return response;
   }
 }
 
@@ -67,13 +102,16 @@ export async function fetchWithAccessToken(
   const requestGeneration = tokenStateGeneration;
   const attemptedToken = currentToken(accessToken);
   const response = await fetcher(input, withBearer(init, attemptedToken));
-  if (!(await isExpiredAccessToken(response))) return response;
+  if (!(await isExpiredAccessToken(response))) {
+    return retryWithStepUp(input, init, attemptedToken, response, fetcher);
+  }
 
   try {
     const refreshedToken = await refreshAccessToken(fetcher);
     if (requestGeneration !== tokenStateGeneration) return response;
     tokenReplacements.set(attemptedToken, refreshedToken);
-    return await fetcher(input, withBearer(init, refreshedToken));
+    const retried = await fetcher(input, withBearer(init, refreshedToken));
+    return retryWithStepUp(input, init, refreshedToken, retried, fetcher);
   } catch {
     return response;
   }

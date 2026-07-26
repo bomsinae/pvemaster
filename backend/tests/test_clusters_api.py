@@ -70,14 +70,26 @@ class FakeClusterService:
         )
 
 
-async def test_cluster_create_response_does_not_expose_token_secret(app: FastAPI) -> None:
+async def test_cluster_create_response_does_not_expose_token_secret(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
     secret = token_urlsafe(32)
     fake_service = FakeClusterService()
 
     async def override_service() -> ClusterService:
         return cast(ClusterService, fake_service)
 
+    async def override_principal() -> Principal:
+        return Principal(
+            user_id=uuid4(),
+            email="admin@example.test",
+            role=UserRole.SUPER_ADMIN,
+            session_epoch=0,
+        )
+
+    monkeypatch.setattr("app.api.clusters.require_step_up", AsyncMock())
     app.dependency_overrides[get_cluster_service] = override_service
+    app.dependency_overrides[get_current_principal] = override_principal
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(

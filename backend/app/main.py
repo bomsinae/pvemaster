@@ -28,6 +28,7 @@ from app.core.middleware import RequestIdMiddleware
 from app.db import create_engine, create_session_factory
 from app.health import check_readiness
 from app.security.credentials import CredentialCipher
+from app.security.mfa import MfaSecretCipher
 from app.security.passwords import PasswordManager
 from app.security.tokens import TokenManager
 
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.readiness_check = check_readiness
     app.state.credential_cipher = CredentialCipher(app_settings.app_secret_key.get_secret_value())
+    app.state.mfa_cipher = MfaSecretCipher(app_settings.app_secret_key.get_secret_value())
     app.state.password_manager = PasswordManager()
     app.state.token_manager = TokenManager(app_settings)
     app.state.proxmox_transport = None
@@ -103,6 +105,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "Idempotency-Key",
             "X-CSRF-Token",
             "X-Request-ID",
+            "X-Step-Up-Token",
         ],
     )
     app.add_exception_handler(AppError, app_error_handler)  # type: ignore[arg-type]

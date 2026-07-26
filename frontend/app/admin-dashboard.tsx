@@ -119,6 +119,8 @@ import { generateSshRsaKeyPair } from "@/lib/ssh-keypair";
 import { VmConsoleModal } from "./vm-console-modal";
 import { ClusterMetricsPanel } from "./cluster-metrics";
 import { OperationCenterView } from "./operation-center-view";
+import { SecurityCenterDialog } from "./security-center-dialog";
+import { StepUpDialog } from "./step-up-dialog";
 import { useDialogFocus } from "./use-dialog-focus";
 
 type Section = AdminSection;
@@ -237,6 +239,7 @@ export function AdminDashboard({
   onSessionEnded: () => void;
 }) {
   const [section, setSection] = useState<Section>("overview");
+  const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
   const [status, setStatus] = useState<OperationsStatus | null>(null);
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [clusterResources, setClusterResources] = useState<ClusterResourceOverview[]>([]);
@@ -1399,6 +1402,7 @@ export function AdminDashboard({
         <div className="admin-identity">
           <span>{user.display_name.slice(0, 1).toUpperCase()}</span>
           <div><strong>{user.display_name}</strong><small>{user.role}</small></div>
+          <button onClick={() => setSecurityDialogOpen(true)} aria-label="보안 설정">⚿</button>
           <button onClick={logout} aria-label="로그아웃">↗</button>
         </div>
       </aside>
@@ -1474,6 +1478,15 @@ export function AdminDashboard({
           onClose={() => setConsoleWorkload(null)}
         />
       )}
+      {securityDialogOpen && (
+        <SecurityCenterDialog
+          apiBaseUrl={apiBaseUrl}
+          accessToken={token}
+          onClose={() => setSecurityDialogOpen(false)}
+          onCurrentSessionRevoked={logout}
+        />
+      )}
+      <StepUpDialog apiBaseUrl={apiBaseUrl} accessToken={token} />
     </main>
   );
 }

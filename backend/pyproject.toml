@@ -17,6 +17,7 @@ dependencies = [
   "httpx>=0.28,<1",
   "PyJWT>=2.9,<3",
   "pydantic-settings>=2.7,<3",
+  "webauthn>=2.7,<3",
   "redis>=5.2,<6",
   "sqlalchemy[asyncio]>=2.0.36,<3",
   "uvicorn[standard]>=0.34,<1",

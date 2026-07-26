@@ -40,6 +40,10 @@ services:
       DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CORS_ORIGINS: '["${FRONTEND_ORIGIN:-http://localhost:3000}"]'
+      ADMIN_MFA_REQUIRED: '${ADMIN_MFA_REQUIRED:-false}'
+      WEBAUTHN_RP_ID: '${WEBAUTHN_RP_ID:-localhost}'
+      WEBAUTHN_RP_NAME: '${WEBAUTHN_RP_NAME:-PVE Master}'
+      WEBAUTHN_ORIGIN: '${WEBAUTHN_ORIGIN:-http://localhost:3000}'
       PVE_ALLOWED_HOSTS: '${PVE_ALLOWED_HOSTS:-[]}'
       PVE_ALLOWED_NETWORKS: '${PVE_ALLOWED_NETWORKS:-[]}'
     ports:

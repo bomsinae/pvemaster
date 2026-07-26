@@ -13,6 +13,7 @@ from app.schemas.operation import (
     VmDeleteRequest,
     VmSpecUpdateRequest,
 )
+from app.security.step_up import require_step_up
 from app.services.operations import OperationPublisher, OperationService
 
 router = APIRouter(tags=["workload-power-operations"])
@@ -157,7 +158,15 @@ async def stop_vm(
     response: Response,
     session: SessionDependency,
     principal: PrincipalDependency,
+    x_step_up_token: Annotated[str | None, Header(alias="X-Step-Up-Token")] = None,
 ) -> JobResponse:
+    await require_step_up(
+        request=request,
+        session=session,
+        principal=principal,
+        action="FORCED_STOP",
+        step_up_token=x_step_up_token,
+    )
     return await _request_action(
         workload_id=vm_id,
         action=PowerAction.STOP,

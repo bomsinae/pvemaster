@@ -43,7 +43,7 @@ docs/
 | 2 — Scheduler, Outbox와 정기 유지보수 기반 | 구현·검증 완료 | [설계 결정](02-scheduler-outbox-maintenance/design.md), [운영 runbook](02-scheduler-outbox-maintenance/runbook.md), [검증 보고서](02-scheduler-outbox-maintenance/verification-report.md) |
 | 3 — 자동 Inventory Sync와 Reconciliation | 구현·검증 완료 | [설계 결정](03-inventory-sync-reconciliation/design.md), [운영 runbook](03-inventory-sync-reconciliation/runbook.md), [검증 보고서](03-inventory-sync-reconciliation/verification-report.md) |
 | 4 — 관리자 Operation 센터와 복구 흐름 | 구현·로컬 검증 완료 | [설계 결정](04-operation-center-recovery/design.md), [운영 runbook](04-operation-center-recovery/runbook.md), [검증 보고서](04-operation-center-recovery/verification-report.md) |
-| 5 — MFA, Session과 고위험 작업 보호 | 예정 | — |
+| 5 — MFA, Session과 고위험 작업 보호 | 구현·로컬 검증 완료 | [설계 결정](05-mfa-session-security/design.md), [운영 runbook](05-mfa-session-security/runbook.md), [검증 보고서](05-mfa-session-security/verification-report.md) |
 | 6 — 경보, Incident와 Notification | 예정 | — |
 | 7 — PBS 백업 자동화와 복구 검증 | 예정 | — |
 | 8 — 고객 작업 이력, VM 상세와 성능 지표 | 예정 | — |

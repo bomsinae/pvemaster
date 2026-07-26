@@ -2,7 +2,7 @@ from typing import Annotated, cast
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Path, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -25,6 +25,7 @@ from app.schemas.cluster import (
 from app.schemas.inventory import SyncRequestResponse
 from app.schemas.workload import WorkloadImportResponse
 from app.security.credentials import CredentialCipher
+from app.security.step_up import require_step_up
 from app.services.clusters import ClusterService
 from app.services.reconciliation import InventoryPublisher, ReconciliationService
 
@@ -67,8 +68,22 @@ MetricRangeQuery = Annotated[NodeMetricRange, Query()]
         502: {"model": ErrorResponse},
     },
 )
-async def create_cluster(request: ClusterCreate, service: ServiceDependency) -> ClusterResponse:
-    return await service.create(request)
+async def create_cluster(
+    payload: ClusterCreate,
+    http_request: Request,
+    service: ServiceDependency,
+    session: SessionDependency,
+    principal: PrincipalDependency,
+    x_step_up_token: Annotated[str | None, Header(alias="X-Step-Up-Token")] = None,
+) -> ClusterResponse:
+    await require_step_up(
+        request=http_request,
+        session=session,
+        principal=principal,
+        action="CLUSTER_CREDENTIAL_WRITE",
+        step_up_token=x_step_up_token,
+    )
+    return await service.create(payload)
 
 
 @router.get("", response_model=ClusterListResponse)
@@ -91,14 +106,39 @@ async def get_cluster(cluster_id: UUID, service: ServiceDependency) -> ClusterRe
 @router.patch("/{cluster_id}", response_model=ClusterResponse)
 async def update_cluster(
     cluster_id: UUID,
-    request: ClusterUpdate,
+    payload: ClusterUpdate,
+    http_request: Request,
     service: ServiceDependency,
+    session: SessionDependency,
+    principal: PrincipalDependency,
+    x_step_up_token: Annotated[str | None, Header(alias="X-Step-Up-Token")] = None,
 ) -> ClusterResponse:
-    return await service.update(cluster_id, request)
+    await require_step_up(
+        request=http_request,
+        session=session,
+        principal=principal,
+        action="CLUSTER_CREDENTIAL_WRITE",
+        step_up_token=x_step_up_token,
+    )
+    return await service.update(cluster_id, payload)
 
 
 @router.delete("/{cluster_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_cluster(cluster_id: UUID, service: ServiceDependency) -> Response:
+async def delete_cluster(
+    cluster_id: UUID,
+    request: Request,
+    service: ServiceDependency,
+    session: SessionDependency,
+    principal: PrincipalDependency,
+    x_step_up_token: Annotated[str | None, Header(alias="X-Step-Up-Token")] = None,
+) -> Response:
+    await require_step_up(
+        request=request,
+        session=session,
+        principal=principal,
+        action="CLUSTER_CREDENTIAL_WRITE",
+        step_up_token=x_step_up_token,
+    )
     await service.delete(cluster_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

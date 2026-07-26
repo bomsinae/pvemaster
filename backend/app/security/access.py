@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from app.core.errors import AppError
@@ -11,6 +12,9 @@ class Principal:
     email: str
     role: UserRole
     session_epoch: int
+    session_id: UUID | None = None
+    assurance_level: str = "PASSWORD"
+    mfa_authenticated_at: datetime | None = None
 
 
 def require_service_role(principal: Principal, *roles: UserRole) -> None:

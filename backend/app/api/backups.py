@@ -19,6 +19,7 @@ from app.schemas.backup import (
     RestoreRunResponse,
 )
 from app.security.credentials import CredentialCipher
+from app.security.step_up import require_step_up
 from app.services.backups import BackupPublisher, BackupService, RestorePublisher
 
 router = APIRouter(tags=["admin-backups"])
@@ -165,7 +166,15 @@ async def request_backup_restore(
     response: Response,
     session: SessionDependency,
     principal: PrincipalDependency,
+    x_step_up_token: Annotated[str | None, Header(alias="X-Step-Up-Token")] = None,
 ) -> RestoreRunResponse:
+    await require_step_up(
+        request=request,
+        session=session,
+        principal=principal,
+        action="BACKUP_RESTORE",
+        step_up_token=x_step_up_token,
+    )
     restore, _ = await _service(request, session, principal).request_restore(
         run_id, payload, idempotency_key
     )

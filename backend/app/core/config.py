@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     login_failure_limit: int = Field(default=5, ge=2, le=20)
     login_failure_window_seconds: int = Field(default=900, ge=60, le=86400)
     login_lockout_seconds: int = Field(default=900, ge=60, le=86400)
+    admin_mfa_required: bool = False
+    mfa_challenge_ttl_seconds: int = Field(default=300, ge=60, le=900)
+    mfa_max_attempts: int = Field(default=5, ge=3, le=10)
+    step_up_ttl_seconds: int = Field(default=300, ge=60, le=900)
+    webauthn_rp_id: str = "localhost"
+    webauthn_rp_name: str = "PVE Master"
+    webauthn_origin: str = "http://localhost:3000"
     jwt_issuer: str = "pve-master"
     jwt_audience: str = "pve-master-api"
     pve_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)

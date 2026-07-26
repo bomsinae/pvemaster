@@ -1,7 +1,7 @@
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import PrincipalDependency, get_db_session
@@ -20,6 +20,7 @@ from app.schemas.auth import (
     UserUpdate,
 )
 from app.security.passwords import PasswordManager
+from app.security.step_up import require_step_up
 from app.services.accounts import AccountService
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin-accounts"])
@@ -45,7 +46,15 @@ async def create_user(
     request: Request,
     session: SessionDependency,
     principal: PrincipalDependency,
+    x_step_up_token: Annotated[str | None, Header(alias="X-Step-Up-Token")] = None,
 ) -> UserResponse:
+    await require_step_up(
+        request=request,
+        session=session,
+        principal=principal,
+        action="USER_SECURITY_WRITE",
+        step_up_token=x_step_up_token,
+    )
     return await _service(request, session, principal).create_user(payload)
 
 
@@ -65,7 +74,15 @@ async def update_user(
     request: Request,
     session: SessionDependency,
     principal: PrincipalDependency,
+    x_step_up_token: Annotated[str | None, Header(alias="X-Step-Up-Token")] = None,
 ) -> UserResponse:
+    await require_step_up(
+        request=request,
+        session=session,
+        principal=principal,
+        action="USER_SECURITY_WRITE",
+        step_up_token=x_step_up_token,
+    )
     return await _service(request, session, principal).update_user(user_id, payload)
 
 
@@ -79,7 +96,15 @@ async def delete_user(
     session: SessionDependency,
     principal: PrincipalDependency,
     version: int = Query(ge=1),
+    x_step_up_token: Annotated[str | None, Header(alias="X-Step-Up-Token")] = None,
 ) -> Response:
+    await require_step_up(
+        request=request,
+        session=session,
+        principal=principal,
+        action="USER_SECURITY_WRITE",
+        step_up_token=x_step_up_token,
+    )
     await _service(request, session, principal).delete_user(user_id, version=version)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -94,7 +119,15 @@ async def reset_user_password(
     request: Request,
     session: SessionDependency,
     principal: PrincipalDependency,
+    x_step_up_token: Annotated[str | None, Header(alias="X-Step-Up-Token")] = None,
 ) -> Response:
+    await require_step_up(
+        request=request,
+        session=session,
+        principal=principal,
+        action="USER_SECURITY_WRITE",
+        step_up_token=x_step_up_token,
+    )
     await _service(request, session, principal).reset_password(user_id, payload)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

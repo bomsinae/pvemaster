@@ -14,6 +14,7 @@ from app.schemas.customer import (
     CustomerVmDetailResponse,
     CustomerVmListResponse,
 )
+from app.security.step_up import require_step_up
 from app.services.customer_portal import CustomerOperationPublisher, CustomerPortalService
 
 router = APIRouter(prefix="/api/v1/customer", tags=["customer-portal"])
@@ -170,7 +171,15 @@ async def stop_customer_vm(
     response: Response,
     session: SessionDependency,
     principal: PrincipalDependency,
+    x_step_up_token: Annotated[str | None, Header(alias="X-Step-Up-Token")] = None,
 ) -> CustomerJobResponse:
+    await require_step_up(
+        request=request,
+        session=session,
+        principal=principal,
+        action="FORCED_STOP",
+        step_up_token=x_step_up_token,
+    )
     return await _power_action(
         vm_id=vm_id,
         action=PowerAction.STOP,

@@ -5,6 +5,14 @@ export type AuthSession = {
   refreshToken: string;
 };
 
+export type MfaLoginChallenge = {
+  mfaRequired: true;
+  challengeId: string;
+  methods: string[];
+};
+
+export type LoginResult = AuthSession | MfaLoginChallenge;
+
 export type CustomerPowerAction = "start" | "shutdown" | "stop" | "reboot";
 
 export type CustomerVm = {
@@ -76,16 +84,127 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return body;
 }
 
+export function login(
+  apiBaseUrl: string,
+  email: string,
+  password: string,
+  fetcher?: Fetcher,
+): Promise<AuthSession>;
+export function login(
+  apiBaseUrl: string,
+  email: string,
+  password: string,
+  fetcher: Fetcher | undefined,
+  allowMfaChallenge: true,
+): Promise<LoginResult>;
 export async function login(
   apiBaseUrl: string,
   email: string,
   password: string,
   fetcher: Fetcher = fetch,
-): Promise<AuthSession> {
+  allowMfaChallenge = false,
+): Promise<LoginResult> {
   const response = await fetcher(`${apiBaseUrl}/api/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
+  });
+  const body = await parseResponse<{
+    access_token: string | null;
+    refresh_token: string | null;
+    mfa_required: boolean;
+    challenge_id: string | null;
+    methods: string[];
+  }>(response);
+  if (body.mfa_required && body.challenge_id) {
+    if (!allowMfaChallenge) {
+      throw new CustomerApiError("추가 인증이 필요합니다.", 401, "MFA_REQUIRED");
+    }
+    return { mfaRequired: true, challengeId: body.challenge_id, methods: body.methods };
+  }
+  if (!body.access_token || !body.refresh_token) {
+    throw new CustomerApiError("로그인 응답이 올바르지 않습니다.", 502, "INVALID_LOGIN_RESPONSE");
+  }
+  return { accessToken: body.access_token, refreshToken: body.refresh_token };
+}
+
+export async function verifyLoginMfa(
+  apiBaseUrl: string,
+  challengeId: string,
+  methodType: string,
+  code: string,
+  fetcher: Fetcher = fetch,
+): Promise<AuthSession> {
+  const response = await fetcher(`${apiBaseUrl}/api/v1/auth/mfa/challenges/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      challenge_id: challengeId,
+      method_type: methodType,
+      code,
+    }),
+  });
+  const body = await parseResponse<{ access_token: string; refresh_token: string }>(response);
+  return { accessToken: body.access_token, refreshToken: body.refresh_token };
+}
+
+function decodeBase64Url(value: string): ArrayBuffer {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0)).buffer;
+}
+
+function encodeBase64Url(value: ArrayBuffer): string {
+  let binary = "";
+  for (const byte of new Uint8Array(value)) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export async function verifyLoginWebAuthn(
+  apiBaseUrl: string,
+  challengeId: string,
+  fetcher: Fetcher = fetch,
+): Promise<AuthSession> {
+  if (!window.PublicKeyCredential) {
+    throw new CustomerApiError("이 브라우저는 보안 키를 지원하지 않습니다.", 400, "WEBAUTHN_UNSUPPORTED");
+  }
+  const optionsResponse = await fetcher(
+    `${apiBaseUrl}/api/v1/auth/mfa/challenges/${encodeURIComponent(challengeId)}/webauthn-options`,
+  );
+  const options = await parseResponse<PublicKeyCredentialRequestOptionsJSON>(optionsResponse);
+  const credential = await navigator.credentials.get({
+    publicKey: {
+      ...options,
+      challenge: decodeBase64Url(options.challenge),
+      allowCredentials: options.allowCredentials?.map((item) => ({
+        id: decodeBase64Url(item.id),
+        type: "public-key" as const,
+        transports: item.transports as AuthenticatorTransport[] | undefined,
+      })),
+    } as unknown as PublicKeyCredentialRequestOptions,
+  }) as PublicKeyCredential | null;
+  if (!credential) {
+    throw new CustomerApiError("보안 키 인증이 취소되었습니다.", 400, "WEBAUTHN_CANCELLED");
+  }
+  const assertion = credential.response as AuthenticatorAssertionResponse;
+  const response = await fetcher(`${apiBaseUrl}/api/v1/auth/mfa/challenges/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      challenge_id: challengeId,
+      method_type: "WEBAUTHN",
+      credential: {
+        id: credential.id,
+        rawId: encodeBase64Url(credential.rawId),
+        type: credential.type,
+        response: {
+          authenticatorData: encodeBase64Url(assertion.authenticatorData),
+          clientDataJSON: encodeBase64Url(assertion.clientDataJSON),
+          signature: encodeBase64Url(assertion.signature),
+          userHandle: assertion.userHandle ? encodeBase64Url(assertion.userHandle) : null,
+        },
+        clientExtensionResults: credential.getClientExtensionResults(),
+      },
+    }),
   });
   const body = await parseResponse<{ access_token: string; refresh_token: string }>(response);
   return { accessToken: body.access_token, refreshToken: body.refresh_token };

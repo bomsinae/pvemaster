@@ -151,6 +151,87 @@ body,
 }
 
 /* Administrator control plane */
+.security-center-dialog {
+  width: min(1040px, calc(100vw - 32px));
+  max-height: min(820px, calc(100vh - 32px));
+  overflow: auto;
+  background: var(--surface, #f7f9f6);
+  border: 1px solid var(--line, #cfd7d0);
+  box-shadow: 0 24px 80px rgb(15 32 23 / 20%);
+  padding: 28px;
+}
+
+.security-center-dialog > header,
+.security-section-title,
+.security-center-dialog .security-grid > section > p {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.security-center-dialog > header h2,
+.security-center-dialog h3 {
+  margin: 0;
+}
+
+.security-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.security-grid > section {
+  border: 1px solid var(--line, #d8dfda);
+  padding: 18px;
+  background: var(--panel, #fff);
+}
+
+.security-grid > section:last-child {
+  grid-column: 1 / -1;
+}
+
+.security-grid p span,
+.security-grid p small {
+  display: block;
+  color: var(--muted, #657169);
+  font-size: 12px;
+}
+
+.security-message,
+.security-warning {
+  padding: 12px 14px;
+  border-left: 3px solid #b34636;
+  background: #fff0ec;
+}
+
+.security-enrollment,
+.recovery-codes {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #94aa8e;
+}
+
+.security-enrollment code,
+.recovery-codes code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+@media (max-width: 720px) {
+  .security-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .security-grid > section:last-child {
+    grid-column: auto;
+  }
+}
+
 .admin-shell {
   --admin-panel: #0f1513;
   --admin-raised: #151d1a;

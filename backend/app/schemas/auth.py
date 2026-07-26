@@ -19,6 +19,7 @@ def normalize_email(value: str) -> str:
 class LoginRequest(BaseModel):
     email: str
     password: SecretStr = Field(min_length=1, max_length=1024)
+    device_label: str | None = Field(default=None, min_length=1, max_length=120)
 
     @field_validator("email")
     @classmethod
@@ -39,6 +40,131 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class LoginResponse(BaseModel):
+    access_token: str | None = None
+    refresh_token: str | None = None
+    token_type: str = "bearer"
+    expires_in: int
+    mfa_required: bool = False
+    challenge_id: UUID | None = None
+    methods: list[str] = Field(default_factory=list)
+
+
+class MfaMethodResponse(BaseModel):
+    id: UUID
+    type: str
+    name: str
+    enrolled_at: datetime
+    last_used_at: datetime | None
+
+
+class MfaMethodListResponse(BaseModel):
+    items: list[MfaMethodResponse]
+    recovery_codes_remaining: int = Field(ge=0)
+    policy_required: bool
+
+
+class TotpEnrollmentStartResponse(BaseModel):
+    method_id: UUID
+    secret: str
+    provisioning_uri: str
+
+
+class TotpEnrollmentVerifyRequest(BaseModel):
+    method_id: UUID
+    code: str = Field(min_length=6, max_length=16)
+
+
+class MfaCodeRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=64)
+
+
+class MfaEnrollmentCompleteResponse(BaseModel):
+    method: MfaMethodResponse
+    recovery_codes: list[str]
+
+
+class WebAuthnStartRequest(BaseModel):
+    name: str = Field(default="Security key", min_length=1, max_length=120)
+
+
+class WebAuthnStartResponse(BaseModel):
+    challenge_id: UUID
+    options: dict[str, object]
+
+
+class WebAuthnFinishRequest(BaseModel):
+    challenge_id: UUID
+    credential: dict[str, object]
+
+
+class MfaChallengeVerifyRequest(BaseModel):
+    challenge_id: UUID
+    method_type: str = Field(pattern="^(TOTP|WEBAUTHN|RECOVERY)$")
+    code: str | None = Field(default=None, max_length=64)
+    credential: dict[str, object] | None = None
+
+
+class RecoveryCodesResponse(BaseModel):
+    codes: list[str]
+
+
+class StepUpStartRequest(BaseModel):
+    action: str = Field(min_length=3, max_length=80, pattern=r"^[A-Z0-9_:.-]+$")
+
+
+class StepUpStartResponse(BaseModel):
+    challenge_id: UUID
+    expires_in: int
+    methods: list[str]
+
+
+class StepUpVerifyRequest(MfaChallengeVerifyRequest):
+    action: str = Field(min_length=3, max_length=80, pattern=r"^[A-Z0-9_:.-]+$")
+
+
+class StepUpTokenResponse(BaseModel):
+    step_up_token: str
+    expires_in: int
+
+
+class SessionResponse(BaseModel):
+    id: UUID
+    device_label: str | None
+    created_ip: str | None
+    user_agent: str | None
+    created_at: datetime
+    last_seen_at: datetime | None
+    expires_at: datetime
+    assurance_level: str
+    current: bool = False
+
+
+class SessionListResponse(BaseModel):
+    items: list[SessionResponse]
+
+
+class LoginEventResponse(BaseModel):
+    id: UUID
+    created_at: datetime
+    outcome: str
+    source_ip: str | None
+    user_agent: str | None
+    error_code: str | None
+
+
+class LoginEventListResponse(BaseModel):
+    items: list[LoginEventResponse]
+
+
+class MfaPolicyResponse(BaseModel):
+    admin_required: bool
+
+
+class MfaPolicyUpdateRequest(BaseModel):
+    admin_required: bool
 
 
 class UserResponse(BaseModel):
