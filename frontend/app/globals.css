@@ -5568,6 +5568,96 @@ h1 {
   }
 }
 
+.customer-notification-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: min(820px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 24px 80px rgb(8 18 13 / 28%);
+}
+
+.customer-notification-dialog > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.customer-notification-dialog > header h2,
+.customer-notification-dialog > section h3 {
+  margin: 4px 0;
+}
+
+.customer-notification-dialog > header span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.customer-notification-dialog > header > button {
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.customer-notification-dialog > section {
+  padding: 20px 0 4px;
+}
+
+.customer-notification-dialog > section > label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 15px 0;
+  border-top: 1px solid var(--line);
+}
+
+.customer-notification-dialog label > span {
+  display: grid;
+  gap: 4px;
+}
+
+.customer-notification-dialog label small {
+  color: var(--muted);
+}
+
+.customer-notification-dialog label em {
+  width: fit-content;
+  color: var(--accent);
+  font-size: 11px;
+  font-style: normal;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.customer-notification-dialog input[type="checkbox"],
+.password-session-choice input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
+.password-change-form .password-session-choice {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .customer-notification-dialog {
+    padding: 20px;
+  }
+
+  .customer-notification-dialog > section > label {
+    align-items: flex-start;
+  }
+}
+
 .customer-vm-identity button {
   display: grid;
   gap: 3px;

@@ -22,6 +22,7 @@ from app.models.auth import (
     UserRole,
 )
 from app.models.cluster import Cluster, ClusterCredential
+from app.models.customer_notifications import CustomerNotificationDelivery
 from app.models.operation import (
     Operation,
     OperationStatus,
@@ -82,6 +83,7 @@ async def _clear(app: FastAPI) -> None:
     async with app.state.db_session_factory() as session:
         await session.execute(text("SET LOCAL app.audit_retention = 'on'"))
         for model in (
+            CustomerNotificationDelivery,
             AuditLog,
             PveTask,
             Operation,

@@ -84,6 +84,10 @@ celery_app.conf.update(
             "task": "app.tasks.scheduler.retain_workload_metrics",
             "schedule": 300.0,
         },
+        "deliver-customer-notifications": {
+            "task": "app.tasks.scheduler.deliver_customer_notifications",
+            "schedule": 30.0,
+        },
         "run-data-retention": {
             "task": "app.tasks.scheduler.run_retention",
             "schedule": 86400.0,

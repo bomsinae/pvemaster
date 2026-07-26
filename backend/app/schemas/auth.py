@@ -208,6 +208,7 @@ class UserUpdate(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: SecretStr = Field(min_length=1, max_length=1024)
     new_password: Password
+    revoke_all_sessions: bool = True
 
     @model_validator(mode="after")
     def passwords_must_differ(self) -> Self:

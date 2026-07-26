@@ -104,6 +104,27 @@ export type CustomerMetricSeries = {
   items: CustomerMetricPoint[];
 };
 
+export type CustomerNotificationEvent =
+  | "VM_DOWN"
+  | "OPERATION_COMPLETED"
+  | "BACKUP_FAILED"
+  | "MAINTENANCE";
+
+export type CustomerNotificationPreference = {
+  organization_id: string;
+  organization_name: string;
+  event_type: CustomerNotificationEvent;
+  email_enabled: boolean;
+  required_by_organization: boolean;
+  version: number;
+};
+
+export type CustomerNotificationPreferences = {
+  channel: "EMAIL";
+  destination: string;
+  items: CustomerNotificationPreference[];
+};
+
 export type CustomerAlert = {
   id: string;
   type: string;
@@ -383,8 +404,12 @@ export async function changePassword(
   accessToken: string,
   currentPassword: string,
   newPassword: string,
-  fetcher: Fetcher = fetch,
+  optionsOrFetcher: Fetcher | { revokeAllSessions?: boolean; fetcher?: Fetcher } = fetch,
 ): Promise<void> {
+  const options = typeof optionsOrFetcher === "function"
+    ? { fetcher: optionsOrFetcher, revokeAllSessions: true }
+    : optionsOrFetcher;
+  const fetcher = options.fetcher ?? fetch;
   const response = await fetchWithAccessToken(`${apiBaseUrl}/api/v1/auth/change-password`, accessToken, {
     method: "POST",
     headers: {
@@ -393,6 +418,7 @@ export async function changePassword(
     body: JSON.stringify({
       current_password: currentPassword,
       new_password: newPassword,
+      revoke_all_sessions: options.revokeAllSessions ?? true,
     }),
   }, fetcher);
   if (response.ok) return;
@@ -404,6 +430,42 @@ export async function changePassword(
     response.status,
     body.error?.code ?? "PASSWORD_CHANGE_FAILED",
   );
+}
+
+export async function getCustomerNotificationPreferences(
+  apiBaseUrl: string,
+  accessToken: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerNotificationPreferences> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/notification-preferences`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return parseResponse<CustomerNotificationPreferences>(response);
+}
+
+export async function updateCustomerNotificationPreference(
+  apiBaseUrl: string,
+  accessToken: string,
+  preference: Pick<
+    CustomerNotificationPreference,
+    "organization_id" | "event_type" | "email_enabled" | "version"
+  >,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerNotificationPreference> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/notification-preferences`,
+    accessToken,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(preference),
+    },
+    fetcher,
+  );
+  return parseResponse<CustomerNotificationPreference>(response);
 }
 
 export async function logout(

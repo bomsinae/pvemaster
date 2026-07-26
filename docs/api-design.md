@@ -649,3 +649,23 @@ API는 제품 정책상 계속 제공하지 않는다.
 고객 응답에는 조직 UUID, cluster/node, VMID, PVE UPID·endpoint와 내부 오류 원문이
 없다. metric 응답은 누락 값을 `null`, 예상 구간 대비 부족 여부를 `partial`로
 표현하고 shared cache를 사용하지 않는다.
+
+## 22. 고객 계정 보안과 알림 설정 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| POST | `/auth/change-password` | 인증 사용자 + 현재 비밀번호 | 비밀번호 변경과 선택적 전체 session 종료 |
+| GET | `/customer/notification-preferences` | CUSTOMER + 현재 조직 | 조직별 이메일 알림의 유효 설정과 마스킹된 수신 주소 |
+| PUT | `/customer/notification-preferences` | CUSTOMER + 현재 조직 | version 기반 고객 알림 설정 변경 |
+
+비밀번호 변경 요청의 `revoke_all_sessions` 기본값은 `true`다. `true`이면 현재
+session을 포함한 전체 refresh family와 기존 access token을 폐기한다. `false`이면
+현재 session family만 유지하고 같은 사용자의 다른 session은 폐기한다.
+
+알림 event는 `VM_DOWN`, `OPERATION_COMPLETED`, `BACKUP_FAILED`, `MAINTENANCE`다.
+설정이 없는 event는 기본 활성화되며 조직 정책의 `email_required`가 우선한다.
+고객이 강제 알림을 끄려 하면 `409 NOTIFICATION_REQUIRED_BY_ORGANIZATION`, 오래된
+version으로 저장하면 `409 NOTIFICATION_PREFERENCE_VERSION_CONFLICT`를 반환한다.
+전달 직전에도 활성 사용자, 현재 조직 멤버십과 유효 설정을 다시 검사하므로 queue
+이후 opt-out 또는 멤버십 회수는 `CANCELLED` 처리한다. 응답에는 전체 이메일 주소,
+메일 본문, 내부 event key나 전달 오류 원문을 포함하지 않는다.

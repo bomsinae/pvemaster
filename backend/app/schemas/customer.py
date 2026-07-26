@@ -109,3 +109,33 @@ class CustomerMetricSeriesResponse(BaseModel):
     observed_at: datetime
     partial: bool
     items: list[CustomerMetricPoint]
+
+
+CustomerNotificationEvent = Literal[
+    "VM_DOWN",
+    "OPERATION_COMPLETED",
+    "BACKUP_FAILED",
+    "MAINTENANCE",
+]
+
+
+class CustomerNotificationPreferenceResponse(BaseModel):
+    organization_id: UUID
+    organization_name: str
+    event_type: CustomerNotificationEvent
+    email_enabled: bool
+    required_by_organization: bool
+    version: int = Field(ge=0)
+
+
+class CustomerNotificationPreferenceListResponse(BaseModel):
+    channel: Literal["EMAIL"] = "EMAIL"
+    destination: str
+    items: list[CustomerNotificationPreferenceResponse]
+
+
+class CustomerNotificationPreferenceUpdate(BaseModel):
+    organization_id: UUID
+    event_type: CustomerNotificationEvent
+    email_enabled: bool
+    version: int = Field(ge=0)

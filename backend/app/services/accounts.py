@@ -58,14 +58,25 @@ class AccountService:
                 message="The current password is invalid.",
             )
         user.password_hash = self._passwords.hash(request.new_password.get_secret_value())
-        user.session_epoch += 1
         user.version += 1
+        token_filters = [
+            RefreshToken.user_id == user.id,
+            RefreshToken.revoked_at.is_(None),
+        ]
+        if request.revoke_all_sessions:
+            user.session_epoch += 1
+        else:
+            token_filters.append(RefreshToken.family_id != self._principal.session_id)
         await self._session.execute(
             update(RefreshToken)
-            .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
+            .where(*token_filters)
             .values(revoked_at=datetime.now(UTC))
         )
-        self._audit("USER_PASSWORD_CHANGED", user.id)
+        self._audit(
+            "USER_PASSWORD_CHANGED",
+            user.id,
+            {"all_sessions_revoked": request.revoke_all_sessions},
+        )
         await self._session.commit()
 
     async def create_user(self, request: UserCreate) -> UserResponse:
@@ -566,7 +577,12 @@ class AccountService:
             await self._session.rollback()
             raise AppError(status_code=409, code="RESOURCE_CONFLICT", message=message) from exc
 
-    def _audit(self, action: str, target_id: UUID) -> None:
+    def _audit(
+        self,
+        action: str,
+        target_id: UUID,
+        details: dict[str, object] | None = None,
+    ) -> None:
         add_audit_event(
             self._session,
             action=action,
@@ -576,4 +592,5 @@ class AccountService:
             actor_role=self._principal.role,
             target_type="account",
             target_id=target_id,
+            details=details,
         )

@@ -25,6 +25,11 @@ from app.models.backup import (
     RestoreRun,
 )
 from app.models.cluster import Cluster, ClusterCredential
+from app.models.customer_notifications import (
+    CustomerNotificationDelivery,
+    CustomerNotificationPreference,
+    OrganizationNotificationPolicy,
+)
 from app.models.inventory import (
     FindingKind,
     FindingSeverity,
@@ -84,6 +89,8 @@ __all__ = [
     "RestoreRun",
     "Cluster",
     "ClusterCredential",
+    "CustomerNotificationDelivery",
+    "CustomerNotificationPreference",
     "IpAddress",
     "IpAddressState",
     "IpAllocation",
@@ -106,6 +113,7 @@ __all__ = [
     "NotificationRule",
     "Organization",
     "OrganizationMember",
+    "OrganizationNotificationPolicy",
     "Operation",
     "OperationAssignment",
     "OperationEvent",

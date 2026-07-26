@@ -14,11 +14,15 @@ from app.schemas.customer import (
     CustomerJobResponse,
     CustomerMetricRange,
     CustomerMetricSeriesResponse,
+    CustomerNotificationPreferenceListResponse,
+    CustomerNotificationPreferenceResponse,
+    CustomerNotificationPreferenceUpdate,
     CustomerPowerActionRequest,
     CustomerVmDetailResponse,
     CustomerVmListResponse,
 )
 from app.security.step_up import require_step_up
+from app.services.customer_notifications import CustomerNotificationPreferenceService
 from app.services.customer_portal import CustomerOperationPublisher, CustomerPortalService
 
 router = APIRouter(prefix="/api/v1/customer", tags=["customer-portal"])
@@ -38,6 +42,18 @@ def _service(
         publisher=cast(CustomerOperationPublisher, request.app.state.operation_publisher),
         request_id=request.state.request_id,
         source_ip=request.client.host if request.client is not None else "unknown",
+    )
+
+
+def _notification_service(
+    request: Request,
+    session: AsyncSession,
+    principal: PrincipalDependency,
+) -> CustomerNotificationPreferenceService:
+    return CustomerNotificationPreferenceService(
+        session=session,
+        principal=principal,
+        request_id=request.state.request_id,
     )
 
 
@@ -261,3 +277,32 @@ async def get_customer_vm_metrics(
 ) -> CustomerMetricSeriesResponse:
     response.headers["Cache-Control"] = "private, max-age=30"
     return await _service(request, session, principal).metrics(vm_id, range)
+
+
+@router.get(
+    "/notification-preferences",
+    response_model=CustomerNotificationPreferenceListResponse,
+)
+async def customer_notification_preferences(
+    request: Request,
+    response: Response,
+    session: SessionDependency,
+    principal: PrincipalDependency,
+) -> CustomerNotificationPreferenceListResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await _notification_service(request, session, principal).list()
+
+
+@router.put(
+    "/notification-preferences",
+    response_model=CustomerNotificationPreferenceResponse,
+)
+async def update_customer_notification_preference(
+    payload: CustomerNotificationPreferenceUpdate,
+    request: Request,
+    response: Response,
+    session: SessionDependency,
+    principal: PrincipalDependency,
+) -> CustomerNotificationPreferenceResponse:
+    response.headers["Cache-Control"] = "no-store"
+    return await _notification_service(request, session, principal).update(payload)

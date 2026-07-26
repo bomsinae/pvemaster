@@ -4,12 +4,14 @@ import test from "node:test";
 import {
   changePassword,
   getCustomerJob,
+  getCustomerNotificationPreferences,
   getCustomerVm,
   getCustomerVmMetrics,
   listCustomerJobs,
   listCustomerVms,
   login,
   requestPowerAction,
+  updateCustomerNotificationPreference,
 } from "../lib/customer-api.ts";
 import { filterCustomerVms, upsertCustomerJob } from "../lib/customer-portal-state.ts";
 import {
@@ -291,6 +293,59 @@ test("customer password change sends the current and new password without return
   assert.deepEqual(JSON.parse(String(request?.init?.body)), {
     current_password: "current-password",
     new_password: "new-password-at-least-12",
+    revoke_all_sessions: true,
+  });
+});
+
+test("customer notification preference uses optimistic versioning", async () => {
+  const requests: Array<{ url: string; body?: unknown }> = [];
+  const preference = {
+    organization_id: "d8c83325-968c-4cd4-a20f-17194d812d80",
+    organization_name: "Acme Korea",
+    event_type: "VM_DOWN" as const,
+    email_enabled: true,
+    required_by_organization: false,
+    version: 0,
+  };
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    if (init?.method === "PUT") {
+      return response({ ...preference, email_enabled: false, version: 1 });
+    }
+    return response({
+      channel: "EMAIL",
+      destination: "c*******@example.test",
+      items: [preference],
+    });
+  };
+
+  const listed = await getCustomerNotificationPreferences(
+    "http://api.test",
+    "customer-access",
+    fetcher,
+  );
+  const updated = await updateCustomerNotificationPreference(
+    "http://api.test",
+    "customer-access",
+    {
+      organization_id: preference.organization_id,
+      event_type: preference.event_type,
+      email_enabled: false,
+      version: preference.version,
+    },
+    fetcher,
+  );
+
+  assert.equal(listed.destination, "c*******@example.test");
+  assert.equal(updated.version, 1);
+  assert.deepEqual(requests[1].body, {
+    organization_id: preference.organization_id,
+    event_type: "VM_DOWN",
+    email_enabled: false,
+    version: 0,
   });
 });
 

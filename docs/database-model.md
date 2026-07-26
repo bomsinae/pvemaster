@@ -502,3 +502,24 @@ DB trigger가 모든 UPDATE를 차단하고 DELETE는 retention transaction flag
 `workloads.uptime_seconds`는 inventory 관측 시 갱신되는 nullable 값이다. metric
 보존 삭제는 workload와 operation 이력을 삭제하지 않으며 scheduler의 별도
 maintenance 작업으로 실행한다.
+
+## 17. 고객 알림 설정과 전달
+
+### `customer_notification_preferences`
+
+- `(user_id, organization_id, event_type)`을 유일 키로 사용한다.
+- `email_enabled`와 optimistic concurrency용 `version`을 저장한다.
+- 현재 활성 조직 멤버십이 없으면 API와 전달 단계 모두에서 사용하지 않는다.
+
+### `organization_notification_policies`
+
+- `(organization_id, event_type)`을 유일 키로 사용한다.
+- `email_required=true`는 고객 설정보다 우선하며 생성 관리자와 `version`을 보존한다.
+
+### `customer_notification_deliveries`
+
+- `(user_id, event_key)` 유일 키로 동일 수신자에게 같은 사건을 중복 enqueue하지 않는다.
+- `status`, 시도 횟수, 다음 시도, 전달 시각과 일반화된 오류 코드만 저장한다.
+- `(status, next_attempt_at)` 인덱스로 due row를 `SKIP LOCKED` 처리한다.
+- 발송 직전에 사용자 활성 상태, 현재 조직 멤버십, 조직 정책과 고객 opt-out을 다시
+  확인한다. 자격을 잃은 row는 삭제하지 않고 `CANCELLED`로 남긴다.

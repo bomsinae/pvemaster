@@ -26,6 +26,7 @@ from app.models.operation import (
 from app.proxmox.client import ProxmoxClient
 from app.security.credentials import CredentialCipher, EncryptedCredential
 from app.services.audit import add_audit_event
+from app.services.customer_notifications import queue_customer_notification
 
 Sleep = Callable[[float], Awaitable[None]]
 RETRYABLE_ERROR_CODES = {"CLUSTER_UNREACHABLE", "PVE_UPSTREAM_ERROR", "PVE_TIMEOUT"}
@@ -623,6 +624,21 @@ class PowerOperationRunner:
                 "error_code": error_code or "",
             },
         )
+        if (
+            actor is not None
+            and actor.role == UserRole.CUSTOMER.value
+            and operation.organization_id is not None
+        ):
+            outcome = "완료" if status is OperationStatus.SUCCEEDED else "실패"
+            await queue_customer_notification(
+                self._session,
+                organization_id=operation.organization_id,
+                recipient_user_id=actor.id,
+                event_type="OPERATION_COMPLETED",
+                event_key=f"power-operation:{operation.id}:{status.value}",
+                subject=f"가상 머신 작업 {outcome}",
+                message=f"요청한 전원 작업이 {status.value} 상태로 종료되었습니다.",
+            )
         await self._session.commit()
 
     @staticmethod

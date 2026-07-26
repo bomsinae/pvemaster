@@ -20,6 +20,7 @@ from app.models.alerting import (
     NotificationRule,
 )
 from app.models.auth import AuditLog, Organization, OrganizationMember, User, UserRole
+from app.models.customer_notifications import CustomerNotificationDelivery
 from app.schemas.alerting import AlertActionRequest
 from app.schemas.observability import OperationalAlert
 from app.security.access import Principal
@@ -36,6 +37,7 @@ pytestmark = pytest.mark.skipif(
 async def _clear(session) -> None:
     await session.execute(text("SET LOCAL app.audit_retention = 'on'"))
     for model in (
+        CustomerNotificationDelivery,
         NotificationDelivery,
         NotificationRule,
         AlertEvent,

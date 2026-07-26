@@ -32,6 +32,9 @@ type MockState = {
   customerListCalls: number;
   findingStatus: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
   browserSessionStored: boolean;
+  customerVmDownEmail: boolean;
+  customerNotificationVersion: number;
+  customerOtherSession: boolean;
   requests: Array<{ method: string; path: string }>;
 };
 
@@ -216,6 +219,9 @@ export async function installApiMock(
     customerListCalls: 0,
     findingStatus: "OPEN",
     browserSessionStored: false,
+    customerVmDownEmail: true,
+    customerNotificationVersion: 0,
+    customerOtherSession: true,
     requests: [],
   };
 
@@ -274,6 +280,65 @@ export async function installApiMock(
         updated_at: observedAt,
         version: 1,
       });
+      return;
+    }
+    if (path === "/api/v1/auth/mfa/methods") {
+      await json(route, {
+        items: [],
+        recovery_codes_remaining: 0,
+        policy_required: false,
+      });
+      return;
+    }
+    if (path === "/api/v1/auth/sessions" && method === "GET") {
+      await json(route, {
+        items: [
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            device_label: "Current browser",
+            created_ip: "192.0.2.10",
+            user_agent: "Browser fixture",
+            created_at: observedAt,
+            last_seen_at: observedAt,
+            expires_at: "2026-08-24T01:00:00Z",
+            assurance_level: "PASSWORD",
+            current: true,
+          },
+          ...(state.customerOtherSession ? [{
+            id: "22222222-2222-4222-8222-222222222222",
+            device_label: "Tablet",
+            created_ip: "198.51.100.20",
+            user_agent: "Redacted tablet",
+            created_at: observedAt,
+            last_seen_at: observedAt,
+            expires_at: "2026-08-24T01:00:00Z",
+            assurance_level: "MFA",
+            current: false,
+          }] : []),
+        ],
+      });
+      return;
+    }
+    if (path === "/api/v1/auth/sessions/others" && method === "DELETE") {
+      state.customerOtherSession = false;
+      await route.fulfill({ status: 204, headers: corsHeaders });
+      return;
+    }
+    if (path === "/api/v1/auth/login-events") {
+      await json(route, {
+        items: [{
+          id: "33333333-3333-4333-8333-333333333333",
+          created_at: observedAt,
+          outcome: "SUCCEEDED",
+          source_ip: "192.0.2.10",
+          user_agent: "Browser fixture",
+          error_code: null,
+        }],
+      });
+      return;
+    }
+    if (path === "/api/v1/auth/change-password" && method === "POST") {
+      await route.fulfill({ status: 204, headers: corsHeaders });
       return;
     }
 
@@ -534,6 +599,70 @@ export async function installApiMock(
         total: state.jobPolls > 0 ? 1 : 0,
         limit: Number(url.searchParams.get("limit") ?? 25),
         offset: Number(url.searchParams.get("offset") ?? 0),
+      });
+      return;
+    }
+    if (path === "/api/v1/customer/notification-preferences" && method === "GET") {
+      await json(route, {
+        channel: "EMAIL",
+        destination: "c*******@example.test",
+        items: [
+          {
+            organization_id: ids.organization,
+            organization_name: "Acme Korea",
+            event_type: "VM_DOWN",
+            email_enabled: state.customerVmDownEmail,
+            required_by_organization: false,
+            version: state.customerNotificationVersion,
+          },
+          {
+            organization_id: ids.organization,
+            organization_name: "Acme Korea",
+            event_type: "OPERATION_COMPLETED",
+            email_enabled: true,
+            required_by_organization: false,
+            version: 0,
+          },
+          {
+            organization_id: ids.organization,
+            organization_name: "Acme Korea",
+            event_type: "BACKUP_FAILED",
+            email_enabled: true,
+            required_by_organization: false,
+            version: 0,
+          },
+          {
+            organization_id: ids.organization,
+            organization_name: "Acme Korea",
+            event_type: "MAINTENANCE",
+            email_enabled: true,
+            required_by_organization: true,
+            version: 0,
+          },
+        ],
+      });
+      return;
+    }
+    if (path === "/api/v1/customer/notification-preferences" && method === "PUT") {
+      const body = request.postDataJSON() as {
+        organization_id: string;
+        event_type: string;
+        email_enabled: boolean;
+        version: number;
+      };
+      if (body.version !== state.customerNotificationVersion) {
+        await json(route, apiError("NOTIFICATION_PREFERENCE_VERSION_CONFLICT", "설정이 변경되었습니다."), 409);
+        return;
+      }
+      state.customerVmDownEmail = body.email_enabled;
+      state.customerNotificationVersion += 1;
+      await json(route, {
+        organization_id: ids.organization,
+        organization_name: "Acme Korea",
+        event_type: body.event_type,
+        email_enabled: body.email_enabled,
+        required_by_organization: false,
+        version: state.customerNotificationVersion,
       });
       return;
     }

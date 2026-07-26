@@ -21,6 +21,7 @@ from app.models.operation import Operation, OperationStatus, PveTask, Workload
 from app.proxmox.client import ProxmoxClient
 from app.security.credentials import CredentialCipher, EncryptedCredential
 from app.services.audit import add_audit_event
+from app.services.customer_notifications import queue_customer_notification
 
 Sleep = Callable[[float], Awaitable[None]]
 POLL_RETRYABLE_ERRORS = {"CLUSTER_UNREACHABLE", "PVE_UPSTREAM_ERROR", "PVE_TIMEOUT"}
@@ -430,6 +431,23 @@ class BackupOperationRunner:
             },
             error_code=error_code,
         )
+        if (
+            status
+            in {
+                OperationStatus.FAILED,
+                OperationStatus.TIMEOUT,
+                OperationStatus.NEEDS_ATTENTION,
+            }
+            and operation.organization_id is not None
+        ):
+            await queue_customer_notification(
+                self._session,
+                organization_id=operation.organization_id,
+                event_type="BACKUP_FAILED",
+                event_key=f"backup-operation:{operation.id}:{status.value}",
+                subject="가상 머신 백업 확인 필요",
+                message="가상 머신 백업을 완료하지 못했습니다. 운영팀에서 상태를 확인합니다.",
+            )
         await self._session.commit()
 
     @staticmethod

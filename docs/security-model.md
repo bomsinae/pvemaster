@@ -44,6 +44,15 @@
 - step-up token은 사용자, session epoch와 action에 묶고 다른 action 재사용을
   거부한다.
 - `production` 환경의 SUPER_ADMIN/OPERATOR MFA는 비활성화할 수 없다.
+- 비밀번호 변경은 현재 비밀번호 재검증을 요구한다. 전체 session 종료를 선택하지
+  않아도 현재 family를 제외한 다른 refresh family는 모두 폐기한다.
+- 고객 session 조회와 revoke는 token family의 사용자 소유권을 서비스 계층에서
+  검사하며 다른 사용자의 UUID는 존재 여부를 숨기는 `404`로 처리한다.
+- 고객 알림 설정은 활성 조직 멤버십을 서비스 계층에서 재검사하고 이메일 수신지는
+  마스킹한다. 조직의 필수 알림 정책은 고객 opt-out보다 우선한다.
+- 알림 enqueue와 실제 전달 사이에 설정·멤버십이 바뀔 수 있으므로 발송 직전 다시
+  권한과 유효 설정을 검사한다. 메일 오류에는 주소, 본문, SMTP 응답 원문을 기록하지
+  않는다.
 
 ### CSRF와 브라우저 보호
 

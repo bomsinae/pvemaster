@@ -18,6 +18,7 @@ from app.security.notification_config import NotificationConfigCipher
 from app.services.alerting import AlertingService
 from app.services.backup_metadata import BackupMetadataReconciler
 from app.services.backup_policies import BackupPolicyService
+from app.services.customer_notifications import CustomerNotificationDispatcher
 from app.services.maintenance import (
     operation_watchdog_callback,
     outbox_dispatch_callback,
@@ -233,6 +234,19 @@ def retain_workload_metrics() -> int:
         ).downsample_and_retain()
 
     return _run("workload_metric_retention", callback)
+
+
+@celery_app.task(name="app.tasks.scheduler.deliver_customer_notifications")  # type: ignore[untyped-decorator]
+def deliver_customer_notifications() -> int:
+    settings = get_settings()
+
+    async def callback(session: AsyncSession) -> int:
+        return await CustomerNotificationDispatcher(
+            session=session,
+            settings=settings,
+        ).deliver_due()
+
+    return _run("customer_notification_delivery", callback)
 
 
 async def _check_control_plane_state(session: AsyncSession) -> int:

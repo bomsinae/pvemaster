@@ -93,3 +93,52 @@ test("customer sees stale inventory warning and cannot request power operations"
   await expect(page.getByRole("button", { name: "시작", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "콘솔", exact: true })).toBeDisabled();
 });
+
+test("customer updates optional email notifications while required policy stays locked", async ({ page }) => {
+  await installApiMock(page);
+  await loginAs(page, "customer");
+
+  await page.getByRole("button", { name: "알림 설정" }).click();
+  const dialog = page.getByRole("dialog", { name: "이메일 알림 설정" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("c*******@example.test")).toBeVisible();
+  const vmDown = dialog.getByRole("checkbox", {
+    name: "Acme Korea VM 장기 비가용 이메일 알림",
+  });
+  const maintenance = dialog.getByRole("checkbox", {
+    name: "Acme Korea 예정된 유지보수 이메일 알림",
+  });
+  await expect(vmDown).toBeChecked();
+  await vmDown.click();
+  await expect(vmDown).not.toBeChecked();
+  await expect(dialog.getByText("알림 설정을 저장했습니다.")).toBeVisible();
+  await expect(maintenance).toBeChecked();
+  await expect(maintenance).toBeDisabled();
+  await expect(dialog.getByText("조직 필수 알림")).toBeVisible();
+});
+
+test("customer reviews sessions and changes password without ending the current session", async ({ page }) => {
+  await installApiMock(page);
+  await loginAs(page, "customer");
+
+  await page.getByRole("button", { name: "보안 설정" }).click();
+  const security = page.getByRole("dialog", { name: "보안 설정" });
+  await expect(security.getByText("Current browser · 현재")).toBeVisible();
+  await expect(security.getByText("Tablet", { exact: true })).toBeVisible();
+  await expect(security.getByRole("heading", { name: "최근 로그인" })).toBeVisible();
+  await security.getByRole("button", { name: "다른 세션 모두 종료" }).click();
+  await expect(security.getByText("Tablet", { exact: true })).toHaveCount(0);
+  await security.getByRole("button", { name: "보안 설정 닫기" }).click();
+
+  await page.getByRole("button", { name: "비밀번호 변경" }).click();
+  const password = page.getByRole("dialog", { name: "비밀번호 변경" });
+  await password.getByLabel("현재 비밀번호").fill("browser-test-password");
+  await password.locator('input[name="new_password"]').fill("new-browser-password");
+  await password.getByLabel("새 비밀번호 확인").fill("new-browser-password");
+  await password.getByRole("checkbox", { name: "현재 기기를 포함한 모든 로그인 세션 종료" }).uncheck();
+  await password.getByRole("button", { name: "비밀번호 변경" }).click();
+  await expect(page.getByRole("status").filter({
+    hasText: "현재 세션은 계속 사용할 수 있습니다.",
+  })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "가상 머신" })).toBeVisible();
+});

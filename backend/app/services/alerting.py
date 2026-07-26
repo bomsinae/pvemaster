@@ -43,6 +43,7 @@ from app.security.notification_config import (
 )
 from app.security.webhooks import WebhookEndpointPolicy
 from app.services.audit import add_audit_event
+from app.services.customer_notifications import queue_customer_notification
 
 
 class AlertingService:
@@ -121,6 +122,19 @@ class AlertingService:
             await self._session.flush()
             if not suppressed:
                 await self._queue_deliveries(alert, event, now)
+                if (
+                    event_type in {"OPEN", "REOPEN"}
+                    and alert.organization_id is not None
+                    and item.code in {"VM_DOWN", "WORKLOAD_DOWN", "WORKLOAD_UNAVAILABLE"}
+                ):
+                    await queue_customer_notification(
+                        self._session,
+                        organization_id=alert.organization_id,
+                        event_type="VM_DOWN",
+                        event_key=f"vm-down:{alert.id}:{event_type}:{alert.version}",
+                        subject="가상 머신 상태 확인 필요",
+                        message="할당된 가상 머신의 장기 비가용 상태가 감지되었습니다.",
+                    )
             changed += 1
 
         open_alerts = (
@@ -245,6 +259,8 @@ class AlertingService:
             created_by_id=principal.user_id,
         )
         self._session.add(item)
+        await self._session.flush()
+        await self._queue_maintenance_notifications(item)
         await self._session.commit()
         return item
 
@@ -265,8 +281,39 @@ class AlertingService:
             raise AppError(404, "MAINTENANCE_WINDOW_NOT_FOUND", "The window was not found.")
         for key, value in payload.model_dump().items():
             setattr(item, key, value)
+        await self._queue_maintenance_notifications(item)
         await self._session.commit()
         return item
+
+    async def _queue_maintenance_notifications(self, item: MaintenanceWindow) -> None:
+        organization_ids: list[UUID] = []
+        if item.organization_id is not None:
+            organization_ids = [item.organization_id]
+        elif item.target_type.lower() == "organization" and item.target_id:
+            try:
+                organization_ids = [UUID(item.target_id)]
+            except ValueError:
+                return
+        elif item.target_type.upper() == "ALL":
+            organization_ids = list(
+                await self._session.scalars(
+                    select(Organization.id).where(Organization.is_active.is_(True))
+                )
+            )
+        for organization_id in organization_ids:
+            await queue_customer_notification(
+                self._session,
+                organization_id=organization_id,
+                event_type="MAINTENANCE",
+                event_key=(
+                    f"maintenance:{item.id}:{item.starts_at.isoformat()}:{item.ends_at.isoformat()}"
+                ),
+                subject="예정된 서비스 유지보수",
+                message=(
+                    f"{item.starts_at.isoformat()}부터 {item.ends_at.isoformat()}까지 "
+                    "유지보수가 예정되어 있습니다."
+                ),
+            )
 
     async def channels(self) -> list[NotificationChannelResponse]:
         self._require_admin()
