@@ -5,9 +5,11 @@ import { createPortal } from "react-dom";
 
 import {
   AuditLog,
+  BackupPolicy,
   BackupRun,
   BackupStorageCandidate,
   BackupTarget,
+  BackupVerification,
   RestoreRun,
   AdminWorkloadJob,
   AdminApiError,
@@ -39,6 +41,7 @@ import {
   assignWorkload,
   createCluster,
   createBackupTarget,
+  createBackupPolicy,
   createIpPool,
   createOrganization,
   createOrganizationUser,
@@ -64,7 +67,9 @@ import {
   listAuditLogs,
   listAlerts,
   listBackups,
+  listBackupPolicies,
   listBackupTargets,
+  listBackupVerifications,
   listClusters,
   listIpPools,
   listInventoryFreshness,
@@ -83,10 +88,13 @@ import {
   requestAdminWorkloadAction,
   requestWorkloadBackup,
   requestBackupRestore,
+  requestBackupMetadataVerification,
   requestClusterSync,
   resolveReconciliationFinding,
+  reconcileBackupMetadata,
   discoverBackupStorages,
   searchOrganizations,
+  skipBackupPolicy,
   testCluster,
   unassignWorkload,
   updateAdminVmSpec,
@@ -97,6 +105,7 @@ import {
   updateUserStatus,
   updateTemplate,
   upsertProvisioningNode,
+  runBackupPolicyNow,
 } from "@/lib/admin-api";
 import { endBrowserSession } from "@/lib/browser-session";
 import { AuthSession, CustomerApiError } from "@/lib/customer-api";
@@ -274,6 +283,8 @@ export function AdminDashboard({
   const [backupTargets, setBackupTargets] = useState<BackupTarget[]>([]);
   const [backupCandidates, setBackupCandidates] = useState<BackupStorageCandidate[]>([]);
   const [backupRuns, setBackupRuns] = useState<BackupRun[]>([]);
+  const [backupPolicies, setBackupPolicies] = useState<BackupPolicy[]>([]);
+  const [backupVerifications, setBackupVerifications] = useState<BackupVerification[]>([]);
   const [activeBackupRun, setActiveBackupRun] = useState<BackupRun | null>(null);
   const [activeRestoreRun, setActiveRestoreRun] = useState<RestoreRun | null>(null);
   const [pools, setPools] = useState<IpPool[]>([]);
@@ -472,16 +483,30 @@ export function AdminDashboard({
         const visible = nextWorkloads.filter((item) => item.is_present && !item.is_template);
         setSelectedWorkload((current) => current && visible.some((item) => item.id === current) ? current : (visible[0]?.id ?? null));
       } else if (next === "backups") {
-        const [nextTargets, nextRuns, nextWorkloads, nextClusters] = await Promise.all([
+        const [
+          nextTargets,
+          nextRuns,
+          nextWorkloads,
+          nextClusters,
+          nextPolicies,
+          nextVerifications,
+          nextOrganizations,
+        ] = await Promise.all([
           listBackupTargets(apiBaseUrl, token),
           listBackups(apiBaseUrl, token),
           listWorkloads(apiBaseUrl, token),
           listClusters(apiBaseUrl, token),
+          listBackupPolicies(apiBaseUrl, token),
+          listBackupVerifications(apiBaseUrl, token),
+          isSuperAdmin ? listOrganizations(apiBaseUrl, token) : Promise.resolve([]),
         ]);
         setBackupTargets(nextTargets);
         setBackupRuns(nextRuns);
         setWorkloads(nextWorkloads);
         setClusters(nextClusters);
+        setBackupPolicies(nextPolicies);
+        setBackupVerifications(nextVerifications);
+        if (isSuperAdmin) setOrganizations(nextOrganizations);
       } else if (next === "provisioning") {
         const [nextProducts, nextTemplates, nextRequests, nextNodes, nextWorkloads, nextClusters] = await Promise.all([
           listProducts(apiBaseUrl, token),
@@ -902,6 +927,69 @@ export function AdminDashboard({
       );
       setActiveRestoreRun(run);
       setNotice(`복구 작업을 접수했습니다 · VMID ${run.target_vmid}`);
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function createPolicy(payload: {
+    name: string;
+    backup_target_id: string;
+    schedule: string;
+    timezone: string;
+    retention_reference: string | null;
+    verification_interval_days: number;
+    assignments: Array<{ organization_id?: string; workload_id?: string }>;
+  }) {
+    setSaving(true); setError("");
+    try {
+      await createBackupPolicy(apiBaseUrl, token, payload);
+      setNotice("자동 백업 정책을 생성했습니다.");
+      await loadSection("backups");
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function runPolicyNow(policyId: string) {
+    setSaving(true); setError("");
+    try {
+      const result = await runBackupPolicyNow(apiBaseUrl, token, policyId);
+      setNotice(`정책 백업 ${result.dispatched_count}건을 접수했습니다.`);
+      await loadSection("backups");
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function skipPolicy(policy: BackupPolicy) {
+    setSaving(true); setError("");
+    try {
+      await skipBackupPolicy(apiBaseUrl, token, policy);
+      setNotice("다음 정책 실행을 건너뛰도록 예약했습니다.");
+      await loadSection("backups");
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function reconcileMetadata() {
+    setSaving(true); setError("");
+    try {
+      const result = await reconcileBackupMetadata(apiBaseUrl, token);
+      setNotice(`스냅샷 메타데이터 ${result.processed_count}건을 보정했습니다.`);
+      await loadSection("backups");
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function verifyBackupMetadata(runId: string) {
+    setSaving(true); setError("");
+    try {
+      await requestBackupMetadataVerification(
+        apiBaseUrl,
+        token,
+        runId,
+        crypto.randomUUID(),
+      );
+      setNotice("스냅샷 메타데이터 검증을 완료했습니다.");
+      await loadSection("backups");
     } catch (caught) { setError(readableError(caught)); }
     finally { setSaving(false); }
   }
@@ -1439,7 +1527,32 @@ export function AdminDashboard({
           />
         )}
         {section === "vms" && <VmOperationsView workloads={workloads} backupRuns={backupRuns} onSelect={setSelectedWorkload} onCreate={() => setForm("vm")} onEdit={() => setForm("vm-spec")} onDelete={() => setForm("vm-delete")} onBackup={openBackupForWorkload} onAction={runVmAction} onConsole={openConsole} activeJob={activeVmJob} saving={saving} canManage={isSuperAdmin} />}
-        {section === "backups" && <BackupsView clusters={clusters} workloads={workloads} targets={backupTargets} candidates={backupCandidates} runs={backupRuns} preferredWorkloadId={backupFocusWorkload} activeRun={activeBackupRun} activeRestore={activeRestoreRun} saving={saving} canConfigure={isSuperAdmin} onClearPreferredWorkload={() => setBackupFocusWorkload(null)} onDiscover={discoverClusterBackups} onRegister={registerBackupTarget} onToggle={toggleBackupTarget} onBackup={runBackup} onRestore={runRestore} />}
+        {section === "backups" && <BackupsView
+          clusters={clusters}
+          workloads={workloads}
+          organizations={organizations}
+          targets={backupTargets}
+          candidates={backupCandidates}
+          runs={backupRuns}
+          policies={backupPolicies}
+          verifications={backupVerifications}
+          preferredWorkloadId={backupFocusWorkload}
+          activeRun={activeBackupRun}
+          activeRestore={activeRestoreRun}
+          saving={saving}
+          canConfigure={isSuperAdmin}
+          onClearPreferredWorkload={() => setBackupFocusWorkload(null)}
+          onDiscover={discoverClusterBackups}
+          onRegister={registerBackupTarget}
+          onToggle={toggleBackupTarget}
+          onBackup={runBackup}
+          onRestore={runRestore}
+          onCreatePolicy={createPolicy}
+          onRunPolicy={runPolicyNow}
+          onSkipPolicy={skipPolicy}
+          onReconcileMetadata={reconcileMetadata}
+          onVerifyMetadata={verifyBackupMetadata}
+        />}
         {section === "access" && <AccessView currentUserId={user.id} users={users} organizations={organizations} organizationTotal={organizationTotal} members={organizationMembers} workloads={workloads} selectedOrganization={selectedOrganization} canWrite={isSuperAdmin} saving={saving} onSelectOrganization={(organization) => { setSelectedOrganization(organization); setOrganizations((current) => current.some((item) => item.id === organization.id) ? current : [organization, ...current]); }} onSearchOrganizations={searchOrganizationOptions} onAddMember={addMember} onRemoveMember={removeMember} onAssign={assignToOrganization} onUnassign={unassignFromOrganization} onUser={() => setForm("user")} onResetPassword={(targetUser) => { setPasswordResetUser(targetUser); setForm("user-password-reset"); }} onUserStatus={(targetUser) => { setManagedUser(targetUser); setForm("user-status"); }} onDeleteUser={(targetUser) => { setManagedUser(targetUser); setForm("user-delete"); }} onCreateMember={() => setForm("organization-user")} onOrganization={() => { setEditingOrganization(null); setForm("organization"); }} onEditOrganization={(organization) => { setEditingOrganization(organization); setForm("organization"); }} onActivateOrganization={reactivateOrganization} onDeleteOrganization={(organization) => { setEditingOrganization(organization); setForm("organization-delete"); }} />}
         {section === "networks" && <NetworksView pools={pools} clusters={clusters} onCreate={() => { setEditingPool(null); setForm("pool"); }} onEdit={(pool) => { setEditingPool(pool); setForm("pool"); }} onDelete={(pool) => { setEditingPool(pool); setForm("pool-delete"); }} />}
         {section === "provisioning" && <ProvisioningView products={products} templates={templates} workloads={workloads} nodes={provisioningNodes} clusters={clusters} requests={requests} onCreateProduct={() => { setEditingProduct(null); setForm("product"); }} onEditProduct={(product) => { setEditingProduct(product); setForm("product"); }} onDeleteProduct={(product) => { setEditingProduct(product); setEditingTemplate(null); setForm("product-delete"); }} onCreateTemplate={() => { setEditingTemplate(null); setForm("template"); }} onEditTemplate={(template) => { setEditingTemplate(template); setForm("template"); }} onDeleteTemplate={(template) => { setEditingTemplate(template); setEditingProduct(null); setForm("template-delete"); }} onCreateNode={() => { setEditingProvisioningNode(null); setForm("node"); }} onEditNode={(node) => { setEditingProvisioningNode(node); setForm("node"); }} />}
@@ -1801,9 +1914,12 @@ function InventoryTable({ title, columns, rows, className = "" }: { title: strin
 function BackupsView({
   clusters,
   workloads,
+  organizations,
   targets,
   candidates,
   runs,
+  policies,
+  verifications,
   preferredWorkloadId,
   activeRun,
   activeRestore,
@@ -1815,12 +1931,20 @@ function BackupsView({
   onToggle,
   onBackup,
   onRestore,
+  onCreatePolicy,
+  onRunPolicy,
+  onSkipPolicy,
+  onReconcileMetadata,
+  onVerifyMetadata,
 }: {
   clusters: Cluster[];
   workloads: Workload[];
+  organizations: Organization[];
   targets: BackupTarget[];
   candidates: BackupStorageCandidate[];
   runs: BackupRun[];
+  policies: BackupPolicy[];
+  verifications: BackupVerification[];
   preferredWorkloadId: string | null;
   activeRun: BackupRun | null;
   activeRestore: RestoreRun | null;
@@ -1835,6 +1959,19 @@ function BackupsView({
     backupRunId: string,
     payload: { target_node: string; target_vmid: number; target_name: string },
   ) => void;
+  onCreatePolicy: (payload: {
+    name: string;
+    backup_target_id: string;
+    schedule: string;
+    timezone: string;
+    retention_reference: string | null;
+    verification_interval_days: number;
+    assignments: Array<{ organization_id?: string; workload_id?: string }>;
+  }) => void;
+  onRunPolicy: (policyId: string) => void;
+  onSkipPolicy: (policy: BackupPolicy) => void;
+  onReconcileMetadata: () => void;
+  onVerifyMetadata: (runId: string) => void;
 }) {
   const visibleWorkloads = useMemo(
     () => workloads.filter((item) => item.is_present && !item.is_template),
@@ -1870,6 +2007,25 @@ function BackupsView({
   const [restoreNode, setRestoreNode] = useState("");
   const [restoreVmid, setRestoreVmid] = useState("");
   const [restoreName, setRestoreName] = useState("");
+  const [policyName, setPolicyName] = useState("");
+  const [policyTargetId, setPolicyTargetId] = useState(targets[0]?.id ?? "");
+  const [policySchedule, setPolicySchedule] = useState("0 2 * * *");
+  const [policyTimezone, setPolicyTimezone] = useState("Asia/Seoul");
+  const [policyScopeType, setPolicyScopeType] = useState<"organization" | "workload">("organization");
+  const [policyScopeId, setPolicyScopeId] = useState(organizations[0]?.id ?? "");
+  const [retentionReference, setRetentionReference] = useState("");
+  const policyScopeOptions = policyScopeType === "organization"
+    ? organizations.map((item) => ({ id: item.id, label: item.name }))
+    : visibleWorkloads.map((item) => ({
+      id: item.id,
+      label: `${item.name ?? `VMID ${item.vmid}`} · ${item.cluster_name}`,
+    }));
+  const effectivePolicyTargetId = targets.some((item) => item.id === policyTargetId)
+    ? policyTargetId
+    : (targets[0]?.id ?? "");
+  const effectivePolicyScopeId = policyScopeOptions.some((item) => item.id === policyScopeId)
+    ? policyScopeId
+    : (policyScopeOptions[0]?.id ?? "");
   const filteredRuns = useMemo(() => {
     const normalizedQuery = historyQuery.trim().toLocaleLowerCase("ko");
     return runs.filter((item) => {
@@ -1953,6 +2109,49 @@ function BackupsView({
       <article><small>백업 없음</small><strong>{unprotectedCount}</strong><span>VM / CT</span></article>
     </section>
 
+    <section className="backup-panel backup-policy-panel">
+      <div className="admin-section-title">
+        <div>
+          <p className="eyebrow">Protection calendar</p>
+          <h2>자동 백업 정책</h2>
+          <p>표준 cron과 명시적 timezone으로 다음 실행을 계산합니다. 보존·prune은 PBS 정책을 참조만 합니다.</p>
+        </div>
+        <span>{policies.filter((item) => item.is_enabled).length} active</span>
+      </div>
+      {canConfigure && <form className="backup-policy-form" onSubmit={(event) => {
+        event.preventDefault();
+        if (!policyName.trim() || !effectivePolicyTargetId || !effectivePolicyScopeId) return;
+        onCreatePolicy({
+          name: policyName.trim(),
+          backup_target_id: effectivePolicyTargetId,
+          schedule: policySchedule,
+          timezone: policyTimezone,
+          retention_reference: retentionReference.trim() || null,
+          verification_interval_days: 90,
+          assignments: [policyScopeType === "organization"
+            ? { organization_id: effectivePolicyScopeId }
+            : { workload_id: effectivePolicyScopeId }],
+        });
+      }}>
+        <label><span>정책 이름</span><input value={policyName} onChange={(event) => setPolicyName(event.target.value)} maxLength={160} required /></label>
+        <label><span>PBS 대상</span><select value={effectivePolicyTargetId} onChange={(event) => setPolicyTargetId(event.target.value)} required><option value="">대상 선택</option>{targets.filter((item) => item.is_enabled).map((item) => <option key={item.id} value={item.id}>{item.cluster_name} · {item.storage_id}</option>)}</select></label>
+        <label><span>cron</span><input value={policySchedule} onChange={(event) => setPolicySchedule(event.target.value)} placeholder="0 2 * * *" required /></label>
+        <label><span>timezone</span><input value={policyTimezone} onChange={(event) => setPolicyTimezone(event.target.value)} placeholder="Asia/Seoul" required /></label>
+        <label><span>적용 범위</span><select value={policyScopeType} onChange={(event) => { const type = event.target.value as "organization" | "workload"; setPolicyScopeType(type); setPolicyScopeId(""); }}><option value="organization">조직 전체</option><option value="workload">개별 VM / CT</option></select></label>
+        <label><span>대상</span><select value={effectivePolicyScopeId} onChange={(event) => setPolicyScopeId(event.target.value)} required><option value="">범위 선택</option>{policyScopeOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+        <label><span>PBS 보존 정책 참조</span><input value={retentionReference} onChange={(event) => setRetentionReference(event.target.value)} placeholder="daily-30 / protected" /></label>
+        <button className="accent-button" type="submit" disabled={saving || !effectivePolicyTargetId || !effectivePolicyScopeId}>정책 생성</button>
+      </form>}
+      <div className="backup-policy-calendar">
+        {policies.map((policy) => <article key={policy.id} className={policy.consecutive_failures ? "degraded" : ""}>
+          <div><StatusMark ok={policy.is_enabled && !policy.consecutive_failures} label={policy.is_enabled ? policy.consecutive_failures ? "연속 실패" : "보호 중" : "비활성"} /><strong>{policy.name}</strong></div>
+          <dl><div><dt>다음 실행</dt><dd>{formatTime(policy.next_run_at)}</dd></div><div><dt>최근 성공</dt><dd>{formatTime(policy.recent_success_at)}</dd></div><div><dt>일정</dt><dd><code>{policy.schedule}</code> · {policy.timezone}</dd></div><div><dt>범위</dt><dd>{policy.assignments.map((item) => item.organization_name ?? item.workload_name ?? "삭제된 대상").join(", ")}</dd></div><div><dt>보존</dt><dd>{policy.retention_reference ?? "PBS 기본 정책"}</dd></div></dl>
+          <div className="backup-policy-actions"><button type="button" onClick={() => onRunPolicy(policy.id)} disabled={saving || !policy.is_enabled}>지금 실행</button>{canConfigure && <button type="button" onClick={() => onSkipPolicy(policy)} disabled={saving || !policy.is_enabled || Boolean(policy.skip_next_at)}>{policy.skip_next_at ? "skip 예약됨" : "다음 실행 건너뛰기"}</button>}</div>
+        </article>)}
+        {!policies.length && <p className="empty-state">아직 자동 백업 정책이 없습니다.</p>}
+      </div>
+    </section>
+
     <section className="backup-command-grid">
       <div className="backup-panel">
         <div className="admin-section-title"><div><p className="eyebrow">Manual backup</p><h2>지금 백업</h2><p>VM/CT와 같은 클러스터의 PBS 대상만 선택할 수 있습니다.</p></div></div>
@@ -1982,6 +2181,14 @@ function BackupsView({
       </div>
     </section>
 
+    <section className="backup-panel backup-verification-panel">
+      <div className="admin-section-title"><div><p className="eyebrow">Restore assurance</p><h2>복구 검증</h2><p>스냅샷 존재 여부와 격리 복구 훈련 결과를 보존합니다.</p></div><button type="button" onClick={onReconcileMetadata} disabled={saving}>메타데이터 재조정</button></div>
+      <div className="backup-verification-list">
+        {verifications.map((item) => <div key={item.id}><span><StatusMark ok={item.status === "SUCCEEDED" ? true : item.status === "FAILED" ? false : null} label={item.status} /><strong>{item.verification_type === "RESTORE_DRILL" ? "격리 복구 훈련" : "스냅샷 메타데이터"}</strong><small>{item.result_summary ?? (item.due_at ? `${formatTime(item.due_at)}까지 검증 필요` : "검증 진행 중")}</small></span><time>{formatTime(item.finished_at ?? item.created_at)}</time></div>)}
+        {!verifications.length && <p className="empty-state">기록된 복구 검증이 없습니다.</p>}
+      </div>
+    </section>
+
     <section className="backup-panel backup-history-panel">
       <div className="admin-section-title"><div><p className="eyebrow">Backup history</p><h2>백업 내역 관리</h2><p>전체 이력을 검색하고 VM별 실행 결과와 저장 정보를 확인합니다.</p></div><span>{filteredRuns.length} / {runs.length} runs</span></div>
       {preferredWorkloadId && historyWorkloadId !== "ALL" && <div className="backup-history-context"><span>VM에서 이동한 내역만 표시 중</span><button type="button" onClick={resetHistoryFilters}>전체 내역 보기</button></div>}
@@ -2008,6 +2215,7 @@ function BackupsView({
         <p className={`backup-size-note ${selectedRun.transferred_bytes === 0 ? "fully-reused" : ""}`}>{selectedRun.transferred_bytes === 0 ? "정상 백업입니다. PBS가 기존 청크를 100% 재사용해 이번 실행에서 새로 전송할 데이터가 없었습니다." : "논리 크기는 백업 데이터 전체 크기이며, 신규 전송 데이터는 PBS 중복제거로 재사용된 데이터를 제외하고 이번 실행에서 새로 전송된 양입니다."}</p>
         <div className="backup-detail-actions">
           <button className="accent-button" type="button" disabled={saving || !targets.some((item) => item.id === selectedRun.backup_target_id && item.is_enabled)} onClick={() => onBackup(selectedRun.workload_id, selectedRun.backup_target_id)}>같은 대상으로 다시 백업</button>
+          {canConfigure && selectedRun.status === "SUCCEEDED" && selectedRun.snapshot_volume_id && <button type="button" disabled={saving} onClick={() => onVerifyMetadata(selectedRun.id)}>스냅샷 메타데이터 검증</button>}
           {canConfigure && selectedRun.status === "SUCCEEDED" && selectedRun.snapshot_volume_id && <button className="restore-button" type="button" disabled={saving || Boolean(activeRestore && !["SUCCEEDED", "FAILED", "TIMEOUT"].includes(activeRestore.status))} onClick={() => setRestoreFormOpen((current) => !current)}>{restoreFormOpen ? "복구 입력 닫기" : "새 VM/CT로 복구"}</button>}
         </div>
         {activeRestore?.backup_run_id === selectedRun.id && <div className={`restore-progress ${activeRestore.status.toLowerCase()}`} role="status"><span>복구 작업</span><strong>VMID {activeRestore.target_vmid} · {activeRestore.status}</strong>{activeRestore.error_code && <small>{activeRestore.error_code}</small>}</div>}
@@ -2020,6 +2228,12 @@ function BackupsView({
           <div className="restore-safety-note"><strong>새 VM/CT로만 복구됩니다.</strong><span>기존 VMID는 덮어쓰지 않으며 복구 후 전원은 꺼진 상태로 유지됩니다.</span></div>
           <label><span>대상 노드</span><select value={restoreNode} onChange={(event) => setRestoreNode(event.target.value)} required><option value="">노드 선택</option>{restoreNodes.map((node) => <option key={node} value={node}>{node}</option>)}</select></label>
           <div className="restore-target-grid"><label><span>새 VMID</span><input type="number" min="100" max="999999999" value={restoreVmid} onChange={(event) => setRestoreVmid(event.target.value)} required /></label><label><span>새 이름</span><input type="text" minLength={1} maxLength={63} pattern="[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?" value={restoreName} onChange={(event) => setRestoreName(event.target.value)} required /></label></div>
+          <dl className="restore-impact-preview" aria-label="복구 영향 미리보기">
+            <div><dt>Node / VMID</dt><dd>{restoreNode || "선택 필요"} / {restoreVmid || "입력 필요"}</dd></div>
+            <div><dt>디스크 storage</dt><dd>snapshot 원본 mapping · PVE 검증</dd></div>
+            <div><dt>IP 영향</dt><dd>자동 할당 없음 · 격리 확인 필요</dd></div>
+            <div><dt>조직 영향</dt><dd>복구 후 미할당 · 수동 검토</dd></div>
+          </dl>
           <button className="accent-button" type="submit" disabled={saving || !restoreNode || !restoreName || Number(restoreVmid) < 100}>{saving ? "복구 요청 중…" : "복구 시작"}</button>
         </form>}
       </aside>

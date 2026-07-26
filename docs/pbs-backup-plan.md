@@ -305,8 +305,15 @@ MVP 완료 조건:
 
 ## 11. 후속 단계
 
-1. PVE native backup job을 PVE Master 정책으로 관리하고 desired/observed 상태를 조정한다.
-2. PBS prune/verification 상태를 읽기 전용으로 표시한다.
-3. 복구 완료 후 inventory 동기화를 즉시 요청하고 새 workload 연결 상태를 표시한다.
-4. 복구 대상 디스크 storage 재매핑과 네트워크 격리 옵션을 별도 검토한다.
-5. 조직 재할당 이력을 고려한 고객 백업 조회 정책을 별도 보안 검토 후 도입한다.
+단계 7 확장에서 PVE Master 자체 정책 dispatcher, 조직·workload 범위, next run,
+skip/run-now, metadata 재조정과 restore drill 기록을 구현했다. 정책의
+`retention_reference`는 PBS prune job을 읽기 쉬운 이름으로 참조할 뿐 PVE Master가
+snapshot 삭제나 prune을 요청하지 않는다.
+
+남은 후속 작업:
+
+1. PBS prune 결과와 보호 snapshot 상태를 읽기 전용으로 표시한다.
+2. 복구 완료 후 inventory 동기화로 새 workload 연결 상태를 표시하고 훈련 리소스
+   정리 절차를 자동화할지 별도 승인한다.
+3. 복구 대상 디스크 storage 재매핑과 네트워크 격리 옵션을 별도 검토한다.
+4. 조직 재할당 이력을 고려한 고객 백업 조회 정책을 별도 보안 검토 후 도입한다.

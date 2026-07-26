@@ -612,3 +612,20 @@ PVE 개별 클러스터 장애는 전체 API readiness를 실패시키지 않고
 
 Alert action은 body의 `version`이 현재 값과 다르면 `409 ALERT_VERSION_CONFLICT`다.
 Channel 응답 schema에는 endpoint, recipient, secret이 존재하지 않는다.
+
+## 20. 자동 백업 정책과 복구 검증 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET/POST | `/admin/backup-policies` | ADMIN / SUPER_ADMIN | 정책 목록·생성 |
+| GET/PUT/DELETE | `/admin/backup-policies/{id}` | ADMIN / SUPER_ADMIN | 정책 조회·변경·삭제 |
+| GET | `/admin/backup-policies/{id}/preview` | ADMIN | 현재 인벤토리 기준 적용 대상과 제외 사유 |
+| POST | `/admin/backup-policies/{id}/run-now` | ADMIN | 정책 범위를 즉시 실행 |
+| POST | `/admin/backup-policies/{id}/skip` | SUPER_ADMIN | version을 검사해 다음 1회 실행 건너뛰기 |
+| POST | `/admin/backup-metadata/reconcile` | ADMIN | 성공 run의 누락 snapshot metadata 보정 |
+| GET | `/admin/backup-verifications` | ADMIN | metadata·restore drill 검증 이력 |
+| POST | `/admin/backups/{id}/verifications` | SUPER_ADMIN | metadata 검증 또는 격리 restore drill 요청 |
+
+정책 변경과 skip에는 action-bound step-up MFA를 적용한다. Schedule은 5-field cron과
+IANA timezone을 함께 저장하며 API 응답은 UTC `next_run_at`을 반환한다. 고객 backup
+API는 제품 정책상 계속 제공하지 않는다.

@@ -459,3 +459,26 @@ DB trigger가 모든 UPDATE를 차단하고 DELETE는 retention transaction flag
 - downgrade가 데이터 손실을 유발하면 revision에 비가역 이유와 복구 절차를 명시한다.
 - enum/check 변경은 구버전 API/worker가 새 값을 읽는 배포 호환성을 고려한다.
 - 운영 migration은 별도 one-shot job에서 advisory lock을 얻고 실행한다.
+
+## 15. 자동 백업 정책과 검증
+
+### `backup_policies`
+
+- PBS `backup_target_id`, 5-field `schedule`, IANA `timezone`, `next_run_at`.
+- `retention_reference`는 PBS prune job 이름 또는 운영 참조이며 삭제 권한을 뜻하지 않는다.
+- `verification_interval_days`, `is_enabled`, 마지막 dispatch, 다음 skip, version을 저장한다.
+
+### `backup_policy_assignments`
+
+- policy와 `organization_id` 또는 `workload_id` 중 정확히 하나를 연결한다.
+- 조직 할당은 실행 시점의 현재 workload로 확장하며 다른 cluster의 target은 preview와
+  dispatch에서 제외한다.
+- `backup_runs.policy_assignment_id`, `scheduled_for`, `trigger_type`으로 실제 실행과
+  예정 시각을 연결한다.
+
+### `backup_verifications`
+
+- 성공 snapshot의 metadata 확인과 격리 restore drill 결과를 보존한다.
+- 원본 `backup_run_id`, 선택적 `restore_run_id`, 상태, due/started/finished, 안전한 오류
+  코드와 결과 요약을 저장한다.
+- snapshot이 PBS에서 prune되어도 run과 검증 이력은 삭제하지 않는다.

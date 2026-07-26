@@ -128,3 +128,23 @@ test("admin triages a failed operation from the persisted recovery center", asyn
     ),
   ).toBe(true);
 });
+
+test("admin reviews backup policy calendar and restore assurance", async ({ page }) => {
+  const state = await installApiMock(page);
+  await loginAs(page, "admin");
+
+  await page.getByRole("button", { name: "백업", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "자동 백업 정책" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "복구 검증" })).toBeVisible();
+  await expect(page.getByText(/보존·prune은 PBS 정책을 참조만/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "메타데이터 재조정" })).toBeVisible();
+
+  expect(state.requests).toContainEqual({
+    method: "GET",
+    path: "/api/v1/admin/backup-policies",
+  });
+  expect(state.requests).toContainEqual({
+    method: "GET",
+    path: "/api/v1/admin/backup-verifications",
+  });
+});

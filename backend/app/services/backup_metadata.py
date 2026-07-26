@@ -90,6 +90,49 @@ class BackupMetadataReconciler:
             reconciled += 1
         return reconciled
 
+    async def verify(self, run_id: UUID) -> bool:
+        source = (
+            await self._session.execute(
+                select(BackupRun.snapshot_volume_id, Workload.vmid)
+                .join(Workload, Workload.id == BackupRun.workload_id)
+                .where(
+                    BackupRun.id == run_id,
+                    BackupRun.status == OperationStatus.SUCCEEDED.value,
+                    BackupRun.snapshot_volume_id.is_not(None),
+                )
+            )
+        ).one_or_none()
+        if source is None:
+            raise AppError(409, "BACKUP_NOT_VERIFIABLE", "The backup cannot be verified.")
+        expected_volume, vmid = source
+        content = await self._load_content(run_id)
+        row = (
+            await self._session.execute(
+                select(BackupRun, BackupTarget)
+                .join(BackupTarget, BackupTarget.id == BackupRun.backup_target_id)
+                .where(BackupRun.id == run_id)
+                .with_for_update()
+            )
+        ).one()
+        run, target = row
+        observed = next(
+            (
+                item
+                for item in content
+                if item.get("volid") == expected_volume
+                and item.get("vmid") in {None, vmid, str(vmid)}
+            ),
+            None,
+        )
+        target.last_checked_at = datetime.now(UTC)
+        target.last_observed_available = observed is not None
+        if observed is not None:
+            size = observed.get("size")
+            if isinstance(size, int) and size >= 0:
+                run.size_bytes = size
+        await self._session.commit()
+        return observed is not None
+
     async def _load_content(self, run_id: UUID) -> list[dict[str, Any]]:
         row = (
             await self._session.execute(

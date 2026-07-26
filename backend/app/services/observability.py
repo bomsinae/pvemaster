@@ -12,7 +12,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.config import Settings
 from app.models.auth import AuditLog, Organization, User, UserRole
-from app.models.backup import BackupRun
+from app.models.backup import BackupPolicy, BackupRun, BackupVerification
 from app.models.cluster import Cluster
 from app.models.inventory import (
     FindingSeverity,
@@ -620,6 +620,41 @@ class ObservabilityService:
                     organization_id=backup.organization_id,
                     workload_id=backup.workload_id,
                     message="A workload backup failed or needs review.",
+                )
+            )
+        missed_policies = (
+            await self._session.scalars(
+                select(BackupPolicy).where(
+                    BackupPolicy.is_enabled.is_(True),
+                    BackupPolicy.next_run_at < datetime.now(UTC) - timedelta(minutes=10),
+                )
+            )
+        ).all()
+        for policy in missed_policies:
+            alerts.append(
+                OperationalAlert(
+                    code="BACKUP_SCHEDULE_MISSED",
+                    severity="critical",
+                    resource_type="backup_policy",
+                    resource_id=str(policy.id),
+                    message="An enabled backup policy missed its scheduled dispatch.",
+                )
+            )
+        due_verifications = (
+            await self._session.scalars(
+                select(BackupVerification).where(
+                    BackupVerification.status.in_(["DUE", "FAILED"])
+                )
+            )
+        ).all()
+        for verification in due_verifications:
+            alerts.append(
+                OperationalAlert(
+                    code="BACKUP_VERIFICATION_DUE",
+                    severity="warning" if verification.status == "DUE" else "critical",
+                    resource_type="backup_verification",
+                    resource_id=str(verification.id),
+                    message="A backup restore verification is due or failed.",
                 )
             )
         change_cutoff = datetime.now(UTC) - timedelta(minutes=10)

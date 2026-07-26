@@ -17,6 +17,7 @@ from app.security.credentials import CredentialCipher
 from app.security.notification_config import NotificationConfigCipher
 from app.services.alerting import AlertingService
 from app.services.backup_metadata import BackupMetadataReconciler
+from app.services.backup_policies import BackupPolicyService
 from app.services.maintenance import (
     operation_watchdog_callback,
     outbox_dispatch_callback,
@@ -169,6 +170,40 @@ def reconcile_backup_metadata() -> int:
         ).reconcile()
 
     return _run("backup_metadata_reconciliation", callback)
+
+
+@celery_app.task(name="app.tasks.scheduler.dispatch_backup_policies")  # type: ignore[untyped-decorator]
+def dispatch_backup_policies() -> int:
+    settings = get_settings()
+
+    async def callback(session: AsyncSession) -> int:
+        return await BackupPolicyService(
+            session=session,
+            settings=settings,
+            cipher=CredentialCipher(settings.app_secret_key.get_secret_value()),
+            publisher=enqueue_backup_operation,
+            restore_publisher=enqueue_restore_operation,
+        ).dispatch_due()
+
+    return _run("backup_policy_dispatch", callback)
+
+
+@celery_app.task(name="app.tasks.scheduler.reconcile_backup_verifications")  # type: ignore[untyped-decorator]
+def reconcile_backup_verifications() -> int:
+    settings = get_settings()
+
+    async def callback(session: AsyncSession) -> int:
+        service = BackupPolicyService(
+            session=session,
+            settings=settings,
+            cipher=CredentialCipher(settings.app_secret_key.get_secret_value()),
+            publisher=enqueue_backup_operation,
+            restore_publisher=enqueue_restore_operation,
+        )
+        changed = await service.reconcile_verifications()
+        return changed + await service.mark_due_verifications()
+
+    return _run("backup_verification_reconciliation", callback)
 
 
 async def _check_control_plane_state(session: AsyncSession) -> int:

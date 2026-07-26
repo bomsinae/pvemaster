@@ -16,7 +16,14 @@ from app.models.auth import (
     User,
     UserRole,
 )
-from app.models.backup import BackupRun, BackupTarget, RestoreRun
+from app.models.backup import (
+    BackupPolicy,
+    BackupPolicyAssignment,
+    BackupRun,
+    BackupTarget,
+    BackupVerification,
+    RestoreRun,
+)
 from app.models.cluster import Cluster, ClusterCredential
 from app.models.inventory import (
     FindingKind,
@@ -69,7 +76,10 @@ __all__ = [
     "Alert",
     "AlertEvent",
     "BackupRun",
+    "BackupPolicy",
+    "BackupPolicyAssignment",
     "BackupTarget",
+    "BackupVerification",
     "RestoreRun",
     "Cluster",
     "ClusterCredential",

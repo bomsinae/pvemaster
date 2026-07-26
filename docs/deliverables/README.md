@@ -45,7 +45,7 @@ docs/
 | 4 — 관리자 Operation 센터와 복구 흐름 | 구현·로컬 검증 완료 | [설계 결정](04-operation-center-recovery/design.md), [운영 runbook](04-operation-center-recovery/runbook.md), [검증 보고서](04-operation-center-recovery/verification-report.md) |
 | 5 — MFA, Session과 고위험 작업 보호 | 구현·로컬 검증 완료 | [설계 결정](05-mfa-session-security/design.md), [운영 runbook](05-mfa-session-security/runbook.md), [검증 보고서](05-mfa-session-security/verification-report.md) |
 | 6 — 경보, Incident와 Notification | 구현·로컬 검증 완료 | [설계 결정](06-alert-incident-notification/design.md), [운영 runbook](06-alert-incident-notification/runbook.md), [검증 보고서](06-alert-incident-notification/verification-report.md) |
-| 7 — PBS 백업 자동화와 복구 검증 | 예정 | — |
+| 7 — PBS 백업 자동화와 복구 검증 | 구현·로컬 검증 완료 | [설계 결정](07-pbs-backup-automation/design.md), [운영 runbook](07-pbs-backup-automation/runbook.md), [검증 보고서](07-pbs-backup-automation/verification-report.md) |
 | 8 — 고객 작업 이력, VM 상세와 성능 지표 | 예정 | — |
 | 9 — 고객 계정 보안과 알림 설정 | 예정 | — |
 | 10 — 제한된 고객 Self-service | 예정 | — |

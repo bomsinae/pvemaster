@@ -251,6 +251,9 @@ export type BackupRun = {
   source_node: string;
   organization_id: string | null;
   organization_name: string | null;
+  policy_assignment_id: string | null;
+  scheduled_for: string | null;
+  trigger_type: "MANUAL" | "SCHEDULED" | "RUN_NOW";
   mode: string;
   compression: string;
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "TIMEOUT";
@@ -265,6 +268,51 @@ export type BackupRun = {
   requested_at: string;
   started_at: string | null;
   finished_at: string | null;
+};
+
+export type BackupPolicyAssignment = {
+  id: string;
+  organization_id: string | null;
+  organization_name: string | null;
+  workload_id: string | null;
+  workload_name: string | null;
+};
+
+export type BackupPolicy = {
+  id: string;
+  name: string;
+  backup_target_id: string;
+  backup_target_name: string;
+  schedule: string;
+  timezone: string;
+  mode: string;
+  retention_reference: string | null;
+  verification_interval_days: number;
+  is_enabled: boolean;
+  next_run_at: string;
+  last_dispatched_at: string | null;
+  skip_next_at: string | null;
+  recent_success_at: string | null;
+  consecutive_failures: number;
+  assignments: BackupPolicyAssignment[];
+  created_at: string;
+  updated_at: string;
+  version: number;
+};
+
+export type BackupVerification = {
+  id: string;
+  backup_run_id: string;
+  restore_run_id: string | null;
+  verification_type: "METADATA" | "RESTORE_DRILL";
+  status: "DUE" | "RUNNING" | "SUCCEEDED" | "FAILED";
+  snapshot_volume_id: string;
+  due_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error_code: string | null;
+  result_summary: string | null;
+  created_at: string;
 };
 
 export type RestoreRun = {
@@ -1096,6 +1144,107 @@ export const updateBackupTarget = (
   {
     method: "PATCH",
     body: JSON.stringify({ is_enabled: isEnabled, version: target.version }),
+  },
+  fetcher,
+);
+
+export async function listBackupPolicies(base: string, token: string, fetcher?: Fetcher) {
+  return (await api<{ items: BackupPolicy[] }>(
+    base,
+    "/api/v1/admin/backup-policies",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const createBackupPolicy = (
+  base: string,
+  token: string,
+  payload: {
+    name: string;
+    backup_target_id: string;
+    schedule: string;
+    timezone: string;
+    retention_reference: string | null;
+    verification_interval_days: number;
+    assignments: Array<{ organization_id?: string; workload_id?: string }>;
+  },
+  fetcher?: Fetcher,
+) => api<BackupPolicy>(
+  base,
+  "/api/v1/admin/backup-policies",
+  token,
+  { method: "POST", body: JSON.stringify(payload) },
+  fetcher,
+);
+
+export const runBackupPolicyNow = (
+  base: string,
+  token: string,
+  policyId: string,
+  fetcher?: Fetcher,
+) => api<{ dispatched_count: number }>(
+  base,
+  `/api/v1/admin/backup-policies/${encodeURIComponent(policyId)}/run-now`,
+  token,
+  { method: "POST" },
+  fetcher,
+);
+
+export const skipBackupPolicy = (
+  base: string,
+  token: string,
+  policy: BackupPolicy,
+  fetcher?: Fetcher,
+) => api<BackupPolicy>(
+  base,
+  `/api/v1/admin/backup-policies/${encodeURIComponent(policy.id)}/skip`,
+  token,
+  { method: "POST", body: JSON.stringify({ version: policy.version }) },
+  fetcher,
+);
+
+export async function listBackupVerifications(
+  base: string,
+  token: string,
+  fetcher?: Fetcher,
+) {
+  return (await api<{ items: BackupVerification[] }>(
+    base,
+    "/api/v1/admin/backup-verifications",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const reconcileBackupMetadata = (
+  base: string,
+  token: string,
+  fetcher?: Fetcher,
+) => api<{ processed_count: number }>(
+  base,
+  "/api/v1/admin/backup-metadata/reconcile",
+  token,
+  { method: "POST" },
+  fetcher,
+);
+
+export const requestBackupMetadataVerification = (
+  base: string,
+  token: string,
+  runId: string,
+  idempotencyKey: string,
+  fetcher?: Fetcher,
+) => api<BackupVerification>(
+  base,
+  `/api/v1/admin/backups/${encodeURIComponent(runId)}/verifications`,
+  token,
+  {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ verification_type: "METADATA" }),
   },
   fetcher,
 );

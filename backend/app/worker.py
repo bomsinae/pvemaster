@@ -68,6 +68,14 @@ celery_app.conf.update(
             "task": "app.tasks.scheduler.reconcile_backup_metadata",
             "schedule": 300.0,
         },
+        "dispatch-backup-policies": {
+            "task": "app.tasks.scheduler.dispatch_backup_policies",
+            "schedule": 60.0,
+        },
+        "reconcile-backup-verifications": {
+            "task": "app.tasks.scheduler.reconcile_backup_verifications",
+            "schedule": 300.0,
+        },
         "run-data-retention": {
             "task": "app.tasks.scheduler.run_retention",
             "schedule": 86400.0,

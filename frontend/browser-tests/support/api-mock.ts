@@ -582,6 +582,8 @@ export async function installApiMock(
       "/api/v1/admin/provision-requests",
       "/api/v1/admin/backup-targets",
       "/api/v1/admin/backups",
+      "/api/v1/admin/backup-policies",
+      "/api/v1/admin/backup-verifications",
       "/api/v1/admin/backups/storage-candidates",
     ]);
     if (emptyItemEndpoints.has(path)) {

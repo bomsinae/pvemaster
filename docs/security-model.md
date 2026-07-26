@@ -254,6 +254,11 @@ Notification channel 구성은 PVE credential/MFA와 분리된 HKDF context의 A
 - 암호화 키, PVE 토큰, 관리자 세션, 백업 복구에 대한 사고 대응 및 회전 런북을 유지한다.
 - 백업은 암호화하고 복구 훈련을 수행한다. 복구된 감사 로그의 hash/checkpoint도 검증한다.
 - 기본적으로 민감 오류 상세를 클라이언트에 숨기고 request ID로 운영 로그와 연결한다.
+- 자동 백업 정책은 PVE에 등록된 PBS storage만 참조하며 PBS credential, encryption
+  key와 prune 권한을 저장하지 않는다.
+- policy 변경·skip과 restore drill에는 최근 MFA 기반 step-up을 요구하고, schedule
+  dispatch는 생성자가 여전히 활성 SUPER_ADMIN인지 다시 확인한다.
+- 고객 backup/snapshot API는 과거 소유권 경계 검증이 별도 승인되기 전까지 deny한다.
 
 ## 11. 출시 전 보안 완료 조건
 
