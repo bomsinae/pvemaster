@@ -134,6 +134,7 @@ import { SecurityCenterDialog } from "./security-center-dialog";
 import { StepUpDialog } from "./step-up-dialog";
 import { ServiceRequestCenter } from "./service-request-center";
 import { OrganizationGovernanceView } from "./organization-governance-view";
+import { AdvancedOperationsView } from "./advanced-operations-view";
 import { useDialogFocus } from "./use-dialog-focus";
 
 type Section = AdminSection;
@@ -148,6 +149,7 @@ const sectionLabels: Record<Section, string> = {
   clusters: "클러스터",
   inventory: "동기화와 재조정",
   vms: "가상 머신",
+  advanced: "고급 PVE 운영",
   backups: "백업",
   access: "사용자와 조직",
   governance: "조직 권한과 Quota",
@@ -326,7 +328,7 @@ export function AdminDashboard({
   const navigation = useMemo<Section[]>(
     () => isSuperAdmin
       ? [...adminSections]
-      : ["overview", "clusters", "inventory", "vms", "backups", "access", "governance", "service_requests", "operations", "alerts"],
+      : ["overview", "clusters", "inventory", "vms", "advanced", "backups", "access", "governance", "service_requests", "operations", "alerts"],
     [isSuperAdmin],
   );
 
@@ -450,6 +452,8 @@ export function AdminDashboard({
         setInventorySyncRuns(nextRuns);
         setReconciliationFindings(nextFindings);
         setUsers(nextUsers);
+      } else if (next === "advanced") {
+        setWorkloads(await listWorkloads(apiBaseUrl, token));
       } else if (next === "access") {
         const [nextUsers, organizationPage, nextWorkloads] = await Promise.all([
           listUsers(apiBaseUrl, token),
@@ -1533,6 +1537,7 @@ export function AdminDashboard({
           />
         )}
         {section === "vms" && <VmOperationsView workloads={workloads} backupRuns={backupRuns} onSelect={setSelectedWorkload} onCreate={() => setForm("vm")} onEdit={() => setForm("vm-spec")} onDelete={() => setForm("vm-delete")} onBackup={openBackupForWorkload} onAction={runVmAction} onConsole={openConsole} activeJob={activeVmJob} saving={saving} canManage={isSuperAdmin} />}
+        {section === "advanced" && <AdvancedOperationsView apiBaseUrl={apiBaseUrl} token={token} workloads={workloads} canWrite={isSuperAdmin} />}
         {section === "backups" && <BackupsView
           clusters={clusters}
           workloads={workloads}

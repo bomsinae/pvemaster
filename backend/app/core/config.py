@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     outbox_dispatch_batch_size: int = Field(default=100, ge=1, le=1000)
     outbox_max_backoff_seconds: int = Field(default=300, ge=5, le=3600)
     inventory_stale_after_seconds: int = Field(default=180, ge=30, le=86400)
+    advanced_snapshot_enabled: bool = False
+    advanced_migration_enabled: bool = False
+    advanced_ha_enabled: bool = False
+    advanced_node_maintenance_enabled: bool = False
+    advanced_bulk_enabled: bool = False
+    advanced_guest_config_enabled: bool = False
+    advanced_firewall_sdn_enabled: bool = False
 
 
 @lru_cache

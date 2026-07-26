@@ -726,6 +726,68 @@ export type AdminWorkloadJob = {
 /** @deprecated Use AdminWorkloadJob. */
 export type AdminVmJob = AdminWorkloadJob;
 
+export type AdvancedFeature =
+  | "SNAPSHOT"
+  | "MIGRATION"
+  | "HA"
+  | "NODE_MAINTENANCE"
+  | "BULK"
+  | "GUEST_CONFIG"
+  | "FIREWALL_SDN";
+
+export type AdvancedFeatureCapability = {
+  feature: AdvancedFeature;
+  enabled: boolean;
+  mode: "EXECUTE" | "READ_ONLY";
+  actions: string[];
+};
+
+export type AdvancedPreviewInput = {
+  feature: AdvancedFeature;
+  action: string;
+  workload_ids: string[];
+  options: Record<string, unknown>;
+};
+
+export type AdvancedPreview = {
+  feature: AdvancedFeature;
+  action: string;
+  enabled: boolean;
+  executable: boolean;
+  targets: Array<{
+    workload_id: string;
+    name: string;
+    kind: string;
+    node: string;
+    power_state: string;
+    version: number;
+  }>;
+  warnings: string[];
+  blockers: string[];
+  required_confirmation: string;
+  step_up_action: string | null;
+  requested_state: Record<string, unknown>;
+};
+
+export type AdvancedOperation = {
+  operation_id: string;
+  feature: AdvancedFeature;
+  action: string;
+  status: string;
+  targets: AdvancedPreview["targets"];
+  requested_state: Record<string, unknown>;
+  observed_state: Record<string, unknown>;
+  error_code: string | null;
+};
+
+export type AdvancedInspection = {
+  feature: AdvancedFeature;
+  scope: string;
+  workload_id: string;
+  items: Array<Record<string, unknown>>;
+  related: Record<string, Array<Record<string, unknown>>>;
+};
+
 export type AuditLog = {
   id: string;
   actor_user_id: string | null;
@@ -1102,6 +1164,66 @@ export async function listWorkloads(
     fetcher,
   )).items;
 }
+
+export async function getAdvancedCapabilities(
+  base: string,
+  token: string,
+  fetcher?: Fetcher,
+) {
+  return (await api<{ items: AdvancedFeatureCapability[] }>(
+    base,
+    "/api/v1/admin/advanced/capabilities",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const previewAdvancedOperation = (
+  base: string,
+  token: string,
+  payload: AdvancedPreviewInput,
+  fetcher?: Fetcher,
+) => api<AdvancedPreview>(
+  base,
+  "/api/v1/admin/advanced/preview",
+  token,
+  { method: "POST", body: JSON.stringify(payload) },
+  fetcher,
+);
+
+export const createAdvancedOperation = (
+  base: string,
+  token: string,
+  preview: AdvancedPreviewInput,
+  confirmation: string,
+  idempotencyKey: string,
+  fetcher?: Fetcher,
+) => api<AdvancedOperation>(
+  base,
+  "/api/v1/admin/advanced/operations",
+  token,
+  {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ preview, confirmation }),
+  },
+  fetcher,
+);
+
+export const inspectAdvancedWorkload = (
+  base: string,
+  token: string,
+  workloadId: string,
+  feature: AdvancedFeature,
+  fetcher?: Fetcher,
+) => api<AdvancedInspection>(
+  base,
+  `/api/v1/admin/advanced/workloads/${encodeURIComponent(workloadId)}/inspection?feature=${encodeURIComponent(feature)}`,
+  token,
+  {},
+  fetcher,
+);
 
 export const getWorkload = (
   base: string,

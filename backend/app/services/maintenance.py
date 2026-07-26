@@ -21,6 +21,7 @@ from app.models.scheduling import (
     SyncRun,
 )
 from app.services.outbox import (
+    ADVANCED_EVENT,
     BACKUP_EVENT,
     POWER_EVENT,
     RESTORE_EVENT,
@@ -332,6 +333,8 @@ def retention_callback(settings: Settings) -> MaintenanceCallback:
 
 
 def _operation_event_type(operation: Operation) -> str:
+    if operation.operation_type.startswith("ADVANCED_"):
+        return ADVANCED_EVENT
     if operation.operation_type == "WORKLOAD_BACKUP":
         return BACKUP_EVENT
     if operation.operation_type == "WORKLOAD_RESTORE":

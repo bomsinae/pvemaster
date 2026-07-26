@@ -1,4 +1,5 @@
 from app.models import event_capture as _event_capture  # noqa: E402,F401
+from app.models.advanced_operations import AdvancedOperationIntent, AdvancedOperationTarget
 from app.models.alerting import (
     Alert,
     AlertEvent,
@@ -97,6 +98,8 @@ from app.models.self_service import (
 )
 
 __all__ = [
+    "AdvancedOperationIntent",
+    "AdvancedOperationTarget",
     "AuditLog",
     "Alert",
     "AlertEvent",

@@ -724,3 +724,23 @@ step-up을 요구한다.
 hash만 저장하고 로그인 이메일 일치, 만료, revoke, replay를 검사한다. Provisioning과
 증설은 조직 row lock과 같은 transaction에서 quota reservation을 만들며 초과 시
 `409 ORGANIZATION_QUOTA_EXCEEDED`를 반환한다.
+
+## 25. 관리자 고급 PVE 운영 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/admin/advanced/capabilities` | ADMIN | 기능별 flag, 실행/read-only mode와 action |
+| POST | `/admin/advanced/preview` | ADMIN | 대상·호환성·충돌·downtime·확인 문구 사전 검사 |
+| POST | `/admin/advanced/operations` | SUPER_ADMIN | immutable target snapshot으로 작업 접수 |
+| GET | `/admin/advanced/operations/{operation_id}` | ADMIN | requested/observed state와 결과 조회 |
+| GET | `/admin/advanced/workloads/{id}/inspection` | ADMIN | VM snapshot, HA 또는 Firewall/SDN 현재 구성 |
+
+기능은 `SNAPSHOT`, `MIGRATION`, `HA`, `NODE_MAINTENANCE`, `BULK`,
+`GUEST_CONFIG`, `FIREWALL_SDN`으로 분리하며 각각 독립 환경 flag가 기본
+`false`다. Firewall/SDN은 초기에는 `READ_ONLY`이고 변경 action은 제공하지 않는다.
+
+실행 요청은 preview 입력 전체와 정확한 typed confirmation, `Idempotency-Key`를
+요구한다. 위험 작업은 action-bound step-up token을 추가로 검사한다. 대상 이름,
+node, 종류, 전원 상태와 version은 접수 transaction에서 고정되고 모든 대상에 활성
+잠금을 둔다. 제출 timeout은 결과 불명확으로 `NEEDS_ATTENTION`에 남기며 일반 retry는
+허용하지 않고 새 preview를 요구한다.

@@ -523,6 +523,71 @@ export async function installApiMock(
       await json(route, { items: state.imported ? [workload(state)] : [] });
       return;
     }
+    if (path === "/api/v1/admin/advanced/capabilities") {
+      await json(route, {
+        items: [
+          { feature: "SNAPSHOT", enabled: true, mode: "EXECUTE", actions: ["CREATE", "DELETE", "ROLLBACK"] },
+          { feature: "MIGRATION", enabled: true, mode: "EXECUTE", actions: ["LIVE", "OFFLINE"] },
+          { feature: "HA", enabled: true, mode: "EXECUTE", actions: ["SET_STATE"] },
+          { feature: "NODE_MAINTENANCE", enabled: true, mode: "EXECUTE", actions: ["DRAIN", "ENTER", "EXIT"] },
+          { feature: "BULK", enabled: true, mode: "EXECUTE", actions: ["START", "SHUTDOWN", "STOP", "REBOOT"] },
+          { feature: "GUEST_CONFIG", enabled: true, mode: "EXECUTE", actions: ["APPLY"] },
+          { feature: "FIREWALL_SDN", enabled: true, mode: "READ_ONLY", actions: ["INSPECT"] },
+        ],
+      });
+      return;
+    }
+    if (path === "/api/v1/admin/advanced/preview" && method === "POST") {
+      const body = request.postDataJSON() as {
+        feature: string;
+        action: string;
+        workload_ids: string[];
+        options: Record<string, unknown>;
+      };
+      await json(route, {
+        feature: body.feature,
+        action: body.action,
+        enabled: true,
+        executable: true,
+        targets: body.workload_ids.map(() => ({
+          workload_id: ids.workload,
+          name: "customer-web-01",
+          kind: "QEMU",
+          node: "pve-a",
+          power_state: state.powerState,
+          version: 1,
+        })),
+        warnings: body.feature === "BULK" ? ["BULK_RATE_LIMIT_APPLIES"] : [],
+        blockers: [],
+        required_confirmation: `${body.workload_ids.length} TARGETS`,
+        step_up_action: "advanced:bulk:start",
+        requested_state: body.options,
+      });
+      return;
+    }
+    if (path === "/api/v1/admin/advanced/operations" && method === "POST") {
+      const body = request.postDataJSON() as {
+        preview: { feature: string; action: string };
+      };
+      await json(route, {
+        operation_id: ids.operation,
+        feature: body.preview.feature,
+        action: body.preview.action,
+        status: "QUEUED",
+        targets: [{
+          workload_id: ids.workload,
+          name: "customer-web-01",
+          kind: "QEMU",
+          node: "pve-a",
+          power_state: state.powerState,
+          version: 1,
+        }],
+        requested_state: {},
+        observed_state: {},
+        error_code: null,
+      }, 202);
+      return;
+    }
     if (path === `/api/v1/admin/workloads/${ids.workload}/assign`) {
       state.assigned = true;
       await json(route, {

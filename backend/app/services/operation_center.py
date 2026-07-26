@@ -38,7 +38,13 @@ from app.schemas.operation_center import (
 )
 from app.security.access import Principal, require_service_role
 from app.services.audit import add_audit_event
-from app.services.outbox import BACKUP_EVENT, POWER_EVENT, RESTORE_EVENT, add_operation_event
+from app.services.outbox import (
+    ADVANCED_EVENT,
+    BACKUP_EVENT,
+    POWER_EVENT,
+    RESTORE_EVENT,
+    add_operation_event,
+)
 from app.services.provisioning import PROVISIONING_STEPS
 
 OperationPublisher = Callable[[UUID, str], None]
@@ -432,6 +438,12 @@ class OperationCenterService:
         )
         if existing is not None:
             return existing.id
+        if original.operation_type.startswith("ADVANCED_"):
+            raise AppError(
+                409,
+                "ADVANCED_OPERATION_RETRY_REQUIRES_NEW_PREVIEW",
+                "Create a new preview before retrying an advanced operation.",
+            )
         conflict = await self._session.scalar(
             select(Operation.id).where(
                 Operation.workload_id == original.workload_id,
@@ -918,6 +930,8 @@ class OperationCenterService:
             if assignment is None or assignment.acknowledged_at is None:
                 actions.append("ACKNOWLEDGE")
         retry_allowed = retryable and status in {"FAILED", "TIMEOUT"}
+        if operation_type.startswith("ADVANCED_"):
+            retry_allowed = False
         if resource_type == "PROVISIONING":
             retry_allowed = provisioning_safe_retry
         requires_super = operation_type in {
@@ -1053,6 +1067,8 @@ class OperationCenterService:
 
     @staticmethod
     def _outbox_event_type(operation_type: str) -> str:
+        if operation_type.startswith("ADVANCED_"):
+            return ADVANCED_EVENT
         if operation_type == "WORKLOAD_BACKUP":
             return BACKUP_EVENT
         if operation_type == "WORKLOAD_RESTORE":

@@ -3,6 +3,7 @@ export const adminSections = [
   "clusters",
   "inventory",
   "vms",
+  "advanced",
   "backups",
   "access",
   "governance",

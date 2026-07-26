@@ -14,6 +14,7 @@ celery_app = Celery(
     backend=settings.redis_url.get_secret_value(),
     include=[
         "app.tasks.backup",
+        "app.tasks.advanced_operations",
         "app.tasks.inventory",
         "app.tasks.power",
         "app.tasks.provisioning",
@@ -33,6 +34,7 @@ celery_app.conf.update(
     result_expires=86400,
     task_routes={
         "app.tasks.backup.*": {"queue": "operations"},
+        "app.tasks.advanced_operations.*": {"queue": "operations"},
         "app.tasks.power.*": {"queue": "operations"},
         "app.tasks.provisioning.*": {"queue": "operations"},
         "app.tasks.inventory.*": {"queue": "inventory"},

@@ -93,5 +93,21 @@ npm run build
   안전한 reference와 대상 실제 상태를 대조한 뒤 해결 근거를 기록한다.
 - 보존 정책과 prune은 PBS에서 관리한다. PVE Master MVP는 snapshot을 삭제하지 않는다.
 - 복구는 성공 백업 상세에서 새 VMID로만 실행한다. 요청 전에 대상 node의 용량과 VMID가 비어 있는지 확인한다.
+
+## 고급 PVE 운영 기능 flag
+
+고급 기능은 배포 환경별로 다음 값을 개별 활성화한다. 초기값은 모두 `false`다.
+
+- `ADVANCED_SNAPSHOT_ENABLED`
+- `ADVANCED_MIGRATION_ENABLED`
+- `ADVANCED_HA_ENABLED`
+- `ADVANCED_NODE_MAINTENANCE_ENABLED`
+- `ADVANCED_BULK_ENABLED`
+- `ADVANCED_GUEST_CONFIG_ENABLED`
+- `ADVANCED_FIREWALL_SDN_ENABLED`
+
+활성화 전 staging에서 해당 PVE token의 최소 ACL, storage/network/guest capability,
+step-up MFA와 customer downtime 알림 절차를 확인한다. Firewall/SDN flag는 현재
+read-only 투영만 활성화하며 변경 권한을 token에 추가하지 않는다.
 - 복구 작업은 전원을 켜지 않은 상태로 완료된다. inventory를 갱신한 뒤 NIC, IP와 조직 할당을 검토하고 수동으로 기동한다.
 - PVE API token에 VM.Allocate, Datastore.AllocateSpace와 복구 원본을 읽을 권한이 없으면 작업은 권한 오류로 종료된다.

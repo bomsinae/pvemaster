@@ -7,6 +7,7 @@ import {
   AdminApiError,
   assignWorkload,
   createCluster,
+  createAdvancedOperation,
   createOrganizationUser,
   createProvisionRequest,
   createTemplate,
@@ -17,6 +18,7 @@ import {
   deleteCluster,
   deleteTemplate,
   getAdminVmJob,
+  getAdvancedCapabilities,
   getAdminOrganizationQuota,
   getClusterInventory,
   getClusterResourceOverview,
@@ -37,6 +39,7 @@ import {
   listUsers,
   listWorkloads,
   OrganizationUserProvisionError,
+  previewAdvancedOperation,
   removeOrganizationMember,
   resetUserPassword,
   requestAdminWorkloadAction,
@@ -586,4 +589,79 @@ test("administrator quota client sends optimistic version and exposes reservatio
   assert.equal(current.reserved.vcpu, 2);
   assert.equal((requests[1].body as { version: number }).version, 7);
   assert.equal((requests[1].body as { max_vcpu: number }).max_vcpu, 24);
+});
+
+test("advanced operation client preserves preview confirmation and idempotency", async () => {
+  const requests: Array<{ url: string; method?: string; headers: Headers; body?: unknown }> = [];
+  const input = {
+    feature: "BULK" as const,
+    action: "START",
+    workload_ids: ["9927945d-515b-4ef3-9d3c-f0e6892ef069"],
+    options: {},
+  };
+  const preview = {
+    feature: input.feature,
+    action: input.action,
+    enabled: true,
+    executable: true,
+    targets: [{
+      workload_id: input.workload_ids[0],
+      name: "vm-101",
+      kind: "QEMU",
+      node: "pve-a",
+      power_state: "STOPPED",
+      version: 3,
+    }],
+    warnings: [],
+    blockers: [],
+    required_confirmation: "1 TARGETS",
+    step_up_action: "advanced:bulk:start",
+    requested_state: { power_action: "start" },
+  };
+  const fetcher: typeof fetch = async (request, init) => {
+    const url = String(request);
+    requests.push({
+      url,
+      method: init?.method,
+      headers: new Headers(init?.headers),
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    if (url.endsWith("/capabilities")) {
+      return response({ items: [{ feature: "BULK", enabled: true, mode: "EXECUTE", actions: ["START"] }] });
+    }
+    if (url.endsWith("/preview")) return response(preview);
+    return response({
+      operation_id: "2ab92d25-95ed-4af4-aefe-d86902305795",
+      feature: "BULK",
+      action: "START",
+      status: "QUEUED",
+      targets: preview.targets,
+      requested_state: preview.requested_state,
+      observed_state: {},
+      error_code: null,
+    }, 202);
+  };
+
+  const capabilities = await getAdvancedCapabilities(
+    "http://api.test", "admin-token", fetcher,
+  );
+  const checked = await previewAdvancedOperation(
+    "http://api.test", "admin-token", input, fetcher,
+  );
+  const operation = await createAdvancedOperation(
+    "http://api.test",
+    "admin-token",
+    input,
+    checked.required_confirmation,
+    "advanced-idempotency-001",
+    fetcher,
+  );
+
+  assert.equal(capabilities[0].mode, "EXECUTE");
+  assert.equal(operation.status, "QUEUED");
+  assert.equal(requests[2].headers.get("Idempotency-Key"), "advanced-idempotency-001");
+  assert.equal(
+    (requests[2].body as { confirmation: string }).confirmation,
+    "1 TARGETS",
+  );
 });

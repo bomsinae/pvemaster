@@ -647,3 +647,64 @@ async def test_invalid_console_ticket_is_rejected(payload: dict[str, object]) ->
             await client.create_console_proxy(kind="QEMU", node="pve-a", vmid=141)
 
     assert error.value.code == "PVE_INVALID_RESPONSE"
+
+
+async def test_advanced_operations_use_scoped_typed_pve_endpoints() -> None:
+    requests: list[tuple[str, str, dict[str, list[str]]]] = []
+
+    def success(request: httpx.Request) -> httpx.Response:
+        path = request.url.raw_path.decode()
+        requests.append((request.method, path, parse_qs(request.content.decode())))
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": [{"name": "before-change"}]})
+        if path.endswith("/config") or "/cluster/ha/resources/" in path:
+            return httpx.Response(200, json={"data": None})
+        return httpx.Response(200, json={"data": f"UPID:{len(requests)}"})
+
+    async with make_client(success) as client:
+        snapshots = await client.get_guest_snapshots(kind="QEMU", node="pve a", vmid=101)
+        snapshot_upid = await client.submit_guest_snapshot(
+            kind="QEMU",
+            node="pve a",
+            vmid=101,
+            snapshot_name="before-change",
+            include_memory=True,
+        )
+        migration_upid = await client.migrate_guest(
+            kind="QEMU",
+            node="pve a",
+            vmid=101,
+            target_node="pve-b",
+            online=True,
+            target_storage="shared",
+            target_network="10.0.0.0/24",
+        )
+        await client.update_ha_resource(
+            resource_id="vm:101",
+            state="started",
+            group="production",
+        )
+        await client.configure_guest_advanced(
+            kind="QEMU",
+            node="pve a",
+            vmid=101,
+            values={"cores": "4", "memory": "4096"},
+        )
+
+    assert snapshots == [{"name": "before-change"}]
+    assert snapshot_upid.startswith("UPID:")
+    assert migration_upid.startswith("UPID:")
+    assert requests[0][1] == "/api2/json/nodes/pve%20a/qemu/101/snapshot"
+    assert requests[1][2] == {
+        "snapname": ["before-change"],
+        "vmstate": ["1"],
+    }
+    assert requests[2][2] == {
+        "target": ["pve-b"],
+        "online": ["1"],
+        "with-local-disks": ["1"],
+        "targetstorage": ["shared"],
+        "migration_network": ["10.0.0.0/24"],
+    }
+    assert requests[3][1] == "/api2/json/cluster/ha/resources/vm%3A101"
+    assert requests[4][1] == "/api2/json/nodes/pve%20a/qemu/101/config"

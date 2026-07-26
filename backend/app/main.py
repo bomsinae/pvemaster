@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
 from app.api.accounts import router as accounts_router
+from app.api.advanced_operations import router as advanced_operations_router
 from app.api.alerting import router as alerting_router
 from app.api.auth import router as auth_router
 from app.api.backups import router as backups_router
@@ -69,6 +70,12 @@ def enqueue_inventory_sync(run_id: UUID) -> None:
     publish(run_id)
 
 
+def enqueue_advanced_operation(operation_id: UUID, task_id: str) -> None:
+    from app.tasks.advanced_operations import enqueue_advanced_operation as publish
+
+    publish(operation_id, task_id)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or get_settings()
     configure_logging(app_settings.log_level)
@@ -101,6 +108,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.restore_publisher = enqueue_restore_operation
     app.state.provisioning_publisher = enqueue_provisioning_request
     app.state.inventory_publisher = enqueue_inventory_sync
+    app.state.advanced_operation_publisher = enqueue_advanced_operation
 
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(
@@ -125,6 +133,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(alerting_router)
+    app.include_router(advanced_operations_router)
     app.include_router(backups_router)
     app.include_router(accounts_router)
     app.include_router(clusters_router)

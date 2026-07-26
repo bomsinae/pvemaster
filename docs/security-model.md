@@ -293,6 +293,14 @@ Notification channel 구성은 PVE credential/MFA와 분리된 HKDF context의 A
   이메일, 만료, 폐기와 replay를 모두 검사한다.
 - quota 검증과 예약은 조직 row lock을 획득한 동일 transaction에서 수행하며,
   현재 사용량과 모든 활성 예약을 함께 계산해 병렬 초과 예약을 막는다.
+- Snapshot rollback, migration, HA, node drain, 큰 bulk와 구조화 구성 변경은 항상
+  preview·typed confirmation을 거치며 정책에 따라 action-bound step-up MFA를 요구한다.
+- 고급 작업은 feature별 기본 비활성 flag를 사용한다. Firewall/SDN은 read-only로
+  투영하고 PVE 응답을 필드 allowlist로 축소한다.
+- bulk 대상은 실행 전 immutable snapshot과 모든 workload의 활성 DB 잠금을 만든다.
+  worker는 각 대상의 존재·node·version과 관리자 활성 권한을 다시 검사한다.
+- 임의 PVE argument, passthrough, disk 축소와 자유 형식 Cloud-Init/firewall 입력은
+  schema에 없다. PVE 제출 timeout은 자동 재제출하지 않고 `NEEDS_ATTENTION`으로 남긴다.
 
 ## 11. 출시 전 보안 완료 조건
 

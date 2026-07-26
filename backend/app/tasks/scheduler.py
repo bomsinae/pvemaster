@@ -27,9 +27,10 @@ from app.services.maintenance import (
     run_maintenance_job,
 )
 from app.services.observability import ObservabilityService
-from app.services.outbox import BACKUP_EVENT, POWER_EVENT, RESTORE_EVENT
+from app.services.outbox import ADVANCED_EVENT, BACKUP_EVENT, POWER_EVENT, RESTORE_EVENT
 from app.services.reconciliation import create_sync_run
 from app.services.workload_metrics import WorkloadMetricService
+from app.tasks.advanced_operations import enqueue_advanced_operation
 from app.tasks.backup import enqueue_backup_operation, enqueue_restore_operation
 from app.tasks.inventory import enqueue_inventory_sync
 from app.tasks.power import enqueue_power_operation
@@ -70,6 +71,7 @@ def dispatch_operation_outbox() -> int:
                 POWER_EVENT: enqueue_power_operation,
                 BACKUP_EVENT: enqueue_backup_operation,
                 RESTORE_EVENT: enqueue_restore_operation,
+                ADVANCED_EVENT: enqueue_advanced_operation,
             },
         ),
     )

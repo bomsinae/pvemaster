@@ -176,3 +176,27 @@ test("admin reviews reservations and updates organization quota", async ({ page 
   await expect(page.getByText("조직 quota를 저장했습니다.")).toBeVisible();
   expect(state.organizationQuotaVcpu).toBe(40);
 });
+
+test("admin previews an immutable bulk target before advanced execution", async ({ page }) => {
+  const state = await installApiMock(page);
+  await loginAs(page, "admin");
+
+  await page.getByRole("button", { name: "고급 PVE 운영" }).click();
+  await expect(page.getByRole("heading", { name: "실행 대상" })).toBeVisible();
+  await page.getByRole("button", { name: /일괄 전원 작업/ }).click();
+  await page.getByText("customer-web-01", { exact: true }).click();
+  await page.getByRole("button", { name: "실행 전 검사" }).click();
+  await expect(page.getByRole("heading", { name: "실행 가능" })).toBeVisible();
+  await page.getByLabel("확인 문구").fill("1 TARGETS");
+  await page.getByRole("button", { name: "작업 접수" }).click();
+  await expect(page.getByText(/작업을 접수했습니다/)).toBeVisible();
+
+  expect(state.requests).toContainEqual({
+    method: "POST",
+    path: "/api/v1/admin/advanced/preview",
+  });
+  expect(state.requests).toContainEqual({
+    method: "POST",
+    path: "/api/v1/admin/advanced/operations",
+  });
+});

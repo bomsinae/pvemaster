@@ -585,3 +585,22 @@ maintenance 작업으로 실행한다.
 
 - 조직과 요청 유형을 복합 유일 키로 사용한다.
 - 승인 필요 여부, 최소 승인자 조직 역할, 자동 승인 한도와 version을 저장한다.
+
+## 20. 고급 PVE 운영 Intent와 대상 잠금
+
+### `advanced_operation_intents`
+
+- 기존 `operations`와 1:1이며 feature/action별 상태 머신의 안전한 입력을 저장한다.
+- `target_snapshot`은 workload UUID, 표시 이름, guest 종류, node, 전원 상태와 version을
+  접수 시점에 고정한다.
+- `options_snapshot`은 feature별 allowlist를 통과한 값만 담고, `preview_snapshot`은
+  경고·차단·typed confirmation·step-up action을 보존한다.
+- HA와 maintenance처럼 desired/actual이 다를 수 있는 기능은 `requested_state`와
+  `observed_state`를 분리한다.
+
+### `advanced_operation_targets`
+
+- operation과 모든 workload 대상을 ordinal로 연결한다.
+- `active=true` workload에는 partial unique index를 적용해 bulk의 두 번째 이후 대상도
+  다른 operation과 동시에 변경되지 않게 한다.
+- terminal 상태에서 active를 해제하되 이력 행과 immutable target snapshot은 남긴다.

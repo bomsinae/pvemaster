@@ -42,6 +42,7 @@ async def recover_power_operations() -> int:
             operations = await session.scalars(
                 select(Operation).where(
                     Operation.operation_type != "WORKLOAD_BACKUP",
+                    ~Operation.operation_type.startswith("ADVANCED_"),
                     Operation.status.in_(
                         [OperationStatus.QUEUED.value, OperationStatus.RUNNING.value]
                     ),
