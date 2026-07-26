@@ -34,7 +34,7 @@ services:
       context: ./backend
     environment:
       APP_NAME: PVE Master
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: INFO
       APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set}
       DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster
@@ -53,6 +53,13 @@ services:
       SMTP_FROM_ADDRESS: '${SMTP_FROM_ADDRESS:-}'
       PVE_ALLOWED_HOSTS: '${PVE_ALLOWED_HOSTS:-[]}'
       PVE_ALLOWED_NETWORKS: '${PVE_ALLOWED_NETWORKS:-[]}'
+      ADVANCED_SNAPSHOT_ENABLED: '${ADVANCED_SNAPSHOT_ENABLED:-false}'
+      ADVANCED_MIGRATION_ENABLED: '${ADVANCED_MIGRATION_ENABLED:-false}'
+      ADVANCED_HA_ENABLED: '${ADVANCED_HA_ENABLED:-false}'
+      ADVANCED_NODE_MAINTENANCE_ENABLED: '${ADVANCED_NODE_MAINTENANCE_ENABLED:-false}'
+      ADVANCED_BULK_ENABLED: '${ADVANCED_BULK_ENABLED:-false}'
+      ADVANCED_GUEST_CONFIG_ENABLED: '${ADVANCED_GUEST_CONFIG_ENABLED:-false}'
+      ADVANCED_FIREWALL_SDN_ENABLED: '${ADVANCED_FIREWALL_SDN_ENABLED:-false}'
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -92,7 +99,7 @@ services:
       ]
     environment:
       APP_NAME: PVE Master Worker
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: INFO
       APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set}
       DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster
@@ -135,7 +142,7 @@ services:
       ]
     environment:
       APP_NAME: PVE Master Inventory Worker
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: INFO
       APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set}
       DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster
@@ -178,7 +185,7 @@ services:
       ]
     environment:
       APP_NAME: PVE Master Maintenance Worker
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: INFO
       APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set}
       DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster
@@ -227,7 +234,7 @@ services:
       ]
     environment:
       APP_NAME: PVE Master Scheduler
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: INFO
       APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set}
       DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster

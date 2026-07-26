@@ -19,9 +19,7 @@ from app.db import Base
 
 class CustomerNotificationPreference(Base):
     __tablename__ = "customer_notification_preferences"
-    __table_args__ = (
-        UniqueConstraint("user_id", "organization_id", "event_type"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "organization_id", "event_type"),)
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(
@@ -43,9 +41,7 @@ class CustomerNotificationPreference(Base):
 
 class OrganizationNotificationPolicy(Base):
     __tablename__ = "organization_notification_policies"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "event_type"),
-    )
+    __table_args__ = (UniqueConstraint("organization_id", "event_type"),)
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     organization_id: Mapped[UUID] = mapped_column(

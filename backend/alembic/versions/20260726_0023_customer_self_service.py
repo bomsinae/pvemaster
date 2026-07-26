@@ -79,9 +79,7 @@ def upgrade() -> None:
     op.create_table(
         "organization_service_quotas",
         sa.Column("organization_id", sa.Uuid(), nullable=False),
-        sa.Column(
-            "max_cpu_cores_per_vm", sa.Integer(), nullable=False, server_default="64"
-        ),
+        sa.Column("max_cpu_cores_per_vm", sa.Integer(), nullable=False, server_default="64"),
         sa.Column(
             "max_memory_bytes_per_vm",
             sa.BigInteger(),
@@ -139,9 +137,7 @@ def upgrade() -> None:
             ["assignment_id"], ["workload_assignments.id"], ondelete="RESTRICT"
         ),
         sa.ForeignKeyConstraint(["operation_id"], ["operations.id"], ondelete="SET NULL"),
-        sa.ForeignKeyConstraint(
-            ["organization_id"], ["organizations.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["requested_by_id"], ["users.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["workload_id"], ["workloads.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
@@ -190,9 +186,7 @@ def upgrade() -> None:
             server_default=sa.func.now(),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(
-            ["ssh_public_key_id"], ["ssh_public_keys.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["ssh_public_key_id"], ["ssh_public_keys.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["workload_id"], ["workloads.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("workload_id", "ssh_public_key_id"),
@@ -215,9 +209,7 @@ def upgrade() -> None:
             name="fk_workload_security_groups_service_request",
             ondelete="SET NULL",
         ),
-        sa.ForeignKeyConstraint(
-            ["security_group_id"], ["security_groups.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["security_group_id"], ["security_groups.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["workload_id"], ["workloads.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("workload_id", "security_group_id"),

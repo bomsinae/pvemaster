@@ -239,8 +239,7 @@ async def test_organization_rbac_invitation_quota_and_policy_boundaries() -> Non
         assert replay.status_code == 404
 
         last_owner = await client.patch(
-            f"/api/v1/customer/organizations/{organization_a}/members/"
-            f"{ids['owner_membership']}",
+            f"/api/v1/customer/organizations/{organization_a}/members/{ids['owner_membership']}",
             headers=headers["owner"],
             json={"organization_role": "ORG_VIEWER", "version": 1},
         )
@@ -316,10 +315,7 @@ async def test_organization_rbac_invitation_quota_and_policy_boundaries() -> Non
             headers=headers["owner"],
         )
         assert activity.status_code == 200
-        assert any(
-            item["action"] == "ORGANIZATION_QUOTA_UPDATED"
-            for item in activity.json()
-        )
+        assert any(item["action"] == "ORGANIZATION_QUOTA_UPDATED" for item in activity.json())
 
     await app.state.db_engine.dispose()
 

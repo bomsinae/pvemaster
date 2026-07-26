@@ -339,9 +339,7 @@ async def run_backup_policy_now(
     principal: PrincipalDependency,
 ) -> dict[str, int]:
     return {
-        "dispatched_count": await _policy_service(
-            request, session, principal
-        ).run_now(policy_id)
+        "dispatched_count": await _policy_service(request, session, principal).run_now(policy_id)
     }
 
 
@@ -364,9 +362,7 @@ async def skip_backup_policy(
         action="BACKUP_POLICY_CHANGE",
         step_up_token=x_step_up_token,
     )
-    return await _policy_service(request, session, principal).skip_next(
-        policy_id, payload.version
-    )
+    return await _policy_service(request, session, principal).skip_next(policy_id, payload.version)
 
 
 @router.post(

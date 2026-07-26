@@ -75,9 +75,7 @@ class AccountService:
         else:
             token_filters.append(RefreshToken.family_id != self._principal.session_id)
         await self._session.execute(
-            update(RefreshToken)
-            .where(*token_filters)
-            .values(revoked_at=datetime.now(UTC))
+            update(RefreshToken).where(*token_filters).values(revoked_at=datetime.now(UTC))
         )
         self._audit(
             "USER_PASSWORD_CHANGED",
@@ -541,8 +539,7 @@ class AccountService:
                 .where(
                     OrganizationMember.organization_id == organization_id,
                     OrganizationMember.id != membership.id,
-                    OrganizationMember.organization_role
-                    == OrganizationRole.ORG_OWNER.value,
+                    OrganizationMember.organization_role == OrganizationRole.ORG_OWNER.value,
                     OrganizationMember.status == "ACTIVE",
                     OrganizationMember.expires_at.is_(None),
                 )

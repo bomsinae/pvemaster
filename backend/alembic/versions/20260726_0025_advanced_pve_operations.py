@@ -51,9 +51,7 @@ def upgrade() -> None:
             "status IN ('QUEUED','RUNNING','SUCCEEDED','FAILED','NEEDS_ATTENTION')",
             name="ck_advanced_operation_intents_status",
         ),
-        sa.ForeignKeyConstraint(
-            ["operation_id"], ["operations.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["operation_id"], ["operations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("operation_id"),
     )
     op.create_index(
@@ -72,9 +70,7 @@ def upgrade() -> None:
             ["advanced_operation_intents.operation_id"],
             ondelete="CASCADE",
         ),
-        sa.ForeignKeyConstraint(
-            ["workload_id"], ["workloads.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["workload_id"], ["workloads.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("operation_id", "workload_id"),
     )
     op.create_index(

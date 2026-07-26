@@ -176,9 +176,7 @@ class BackupPolicyAssignment(Base):
     organization_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE")
     )
-    workload_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("workloads.id", ondelete="CASCADE")
-    )
+    workload_id: Mapped[UUID | None] = mapped_column(ForeignKey("workloads.id", ondelete="CASCADE"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

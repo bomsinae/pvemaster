@@ -106,15 +106,9 @@ def upgrade() -> None:
             "('ORG_OWNER','ORG_ADMIN','ORG_OPERATOR','ORG_VIEWER','BILLING_VIEWER')",
             name="ck_organization_invitations_role",
         ),
-        sa.ForeignKeyConstraint(
-            ["accepted_by_id"], ["users.id"], ondelete="SET NULL"
-        ),
-        sa.ForeignKeyConstraint(
-            ["invited_by_id"], ["users.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"], ["organizations.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["accepted_by_id"], ["users.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(["invited_by_id"], ["users.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("token_hash"),
     )
@@ -153,12 +147,8 @@ def upgrade() -> None:
             "AND max_vms >= 0 AND max_ips >= 0 AND max_backup_bytes >= 0",
             name="ck_organization_quotas_nonnegative",
         ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"], ["organizations.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["updated_by_id"], ["users.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["updated_by_id"], ["users.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("organization_id"),
     )
 
@@ -178,9 +168,7 @@ def upgrade() -> None:
             server_default=sa.func.now(),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"], ["organizations.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -222,9 +210,7 @@ def upgrade() -> None:
             "AND vms >= 0 AND ips >= 0 AND backup_bytes >= 0",
             name="ck_quota_reservations_nonnegative",
         ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"], ["organizations.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["provisioning_request_id"],
             ["provisioning_requests.id"],
@@ -267,12 +253,8 @@ def upgrade() -> None:
             "minimum_role IN ('ORG_OWNER','ORG_ADMIN','ORG_OPERATOR')",
             name="ck_approval_policies_minimum_role",
         ),
-        sa.ForeignKeyConstraint(
-            ["organization_id"], ["organizations.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["updated_by_id"], ["users.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["updated_by_id"], ["users.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("organization_id", "request_type"),
     )

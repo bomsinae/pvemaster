@@ -94,9 +94,7 @@ class AdvancedOperationService:
                 AdvancedFeatureCapability(
                     feature=feature,
                     enabled=self._enabled(feature),
-                    mode="READ_ONLY"
-                    if feature is AdvancedFeature.FIREWALL_SDN
-                    else "EXECUTE",
+                    mode="READ_ONLY" if feature is AdvancedFeature.FIREWALL_SDN else "EXECUTE",
                     actions=list(actions),
                 )
                 for feature, actions in FEATURE_ACTIONS.items()
@@ -386,8 +384,7 @@ class AdvancedOperationService:
             action=intent.action,
             status=operation.status,
             targets=[
-                AdvancedTargetSnapshot.model_validate(item)
-                for item in intent.target_snapshot
+                AdvancedTargetSnapshot.model_validate(item) for item in intent.target_snapshot
             ],
             requested_state=intent.requested_state,
             observed_state=intent.observed_state,
@@ -419,13 +416,15 @@ class AdvancedOperationService:
         return ordered
 
     @staticmethod
-    def _validate_target_count(
-        feature: AdvancedFeature, targets: list[Workload]
-    ) -> None:
-        if feature not in {
-            AdvancedFeature.BULK,
-            AdvancedFeature.NODE_MAINTENANCE,
-        } and len(targets) != 1:
+    def _validate_target_count(feature: AdvancedFeature, targets: list[Workload]) -> None:
+        if (
+            feature
+            not in {
+                AdvancedFeature.BULK,
+                AdvancedFeature.NODE_MAINTENANCE,
+            }
+            and len(targets) != 1
+        ):
             raise AppError(422, "ADVANCED_TARGET_COUNT_INVALID", "Select exactly one target.")
 
     def _validate_options(
@@ -519,9 +518,7 @@ class AdvancedOperationService:
             if not options:
                 raise AppError(422, "GUEST_CONFIG_EMPTY", "No configuration was provided.")
             cores = options.get("cores")
-            if cores is not None and (
-                not isinstance(cores, int) or not 1 <= cores <= 512
-            ):
+            if cores is not None and (not isinstance(cores, int) or not 1 <= cores <= 512):
                 raise AppError(422, "GUEST_CONFIG_INVALID", "The CPU value is invalid.")
             memory = options.get("memory_mib")
             if memory is not None and (
@@ -541,8 +538,7 @@ class AdvancedOperationService:
                     raise AppError(422, "VLAN_TAG_INVALID", "The VLAN tag is invalid.")
             boot_order = options.get("boot_order")
             if boot_order is not None and (
-                not isinstance(boot_order, str)
-                or not BOOT_ORDER.fullmatch(boot_order)
+                not isinstance(boot_order, str) or not BOOT_ORDER.fullmatch(boot_order)
             ):
                 raise AppError(422, "GUEST_CONFIG_INVALID", "The boot order is invalid.")
             cloud_init = options.get("cloud_init")
@@ -570,9 +566,7 @@ class AdvancedOperationService:
         return {"scope": "WORKLOAD", "read_only": True}
 
     @staticmethod
-    def _confirmation(
-        payload: AdvancedPreviewRequest, targets: list[Workload]
-    ) -> str:
+    def _confirmation(payload: AdvancedPreviewRequest, targets: list[Workload]) -> str:
         if payload.feature is AdvancedFeature.BULK:
             return f"{len(targets)} TARGETS"
         if payload.feature is AdvancedFeature.NODE_MAINTENANCE:
@@ -580,9 +574,7 @@ class AdvancedOperationService:
         return f"{targets[0].name or targets[0].vmid} {payload.action}"
 
     @staticmethod
-    def _step_up_action(
-        payload: AdvancedPreviewRequest, targets: list[Workload]
-    ) -> str | None:
+    def _step_up_action(payload: AdvancedPreviewRequest, targets: list[Workload]) -> str | None:
         high_risk = (
             payload.feature is not AdvancedFeature.SNAPSHOT
             or payload.action in {"DELETE", "ROLLBACK"}
@@ -609,9 +601,7 @@ class AdvancedOperationService:
         return bool(getattr(self._settings, FLAG_FIELDS[feature]))
 
     @staticmethod
-    def _allow(
-        item: dict[str, object], allowed: set[str]
-    ) -> dict[str, object]:
+    def _allow(item: dict[str, object], allowed: set[str]) -> dict[str, object]:
         return {key: value for key, value in item.items() if key in allowed}
 
     @asynccontextmanager

@@ -13,6 +13,12 @@ async def test_health_returns_ok_and_request_id(app: FastAPI) -> None:
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert response.headers["X-Request-ID"] == "test-request-1"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert response.headers["Referrer-Policy"] == "no-referrer"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "payment=()" in response.headers["Permissions-Policy"]
+    assert "Strict-Transport-Security" not in response.headers
 
 
 async def test_customer_power_action_cors_preflight_allows_idempotency_key(

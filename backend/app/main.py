@@ -30,7 +30,7 @@ from app.api.workloads import router as workloads_router
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError, app_error_handler, request_validation_error_handler
 from app.core.logging import configure_logging
-from app.core.middleware import RequestIdMiddleware
+from app.core.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
 from app.db import create_engine, create_session_factory
 from app.health import check_readiness
 from app.security.credentials import CredentialCipher
@@ -111,6 +111,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.advanced_operation_publisher = enqueue_advanced_operation
 
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        enable_hsts=app_settings.environment.lower() in {"production", "prod"},
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[str(origin).rstrip("/") for origin in app_settings.cors_origins],

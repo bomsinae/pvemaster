@@ -132,9 +132,7 @@ class BackupPolicyService:
             )
             policy.skip_next_at = None
         await self._session.execute(
-            delete(BackupPolicyAssignment).where(
-                BackupPolicyAssignment.policy_id == policy.id
-            )
+            delete(BackupPolicyAssignment).where(BackupPolicyAssignment.policy_id == policy.id)
         )
         self._add_assignments(policy.id, payload.assignments)
         self._audit("BACKUP_POLICY_UPDATED", policy.id)
@@ -267,9 +265,7 @@ class BackupPolicyService:
                 settings=self._settings,
                 cipher=self._cipher,
             ).verify(run.id)
-            loaded_verification = await self._session.get(
-                BackupVerification, verification_id
-            )
+            loaded_verification = await self._session.get(BackupVerification, verification_id)
             assert loaded_verification is not None
             verification = loaded_verification
             verification.status = "SUCCEEDED" if available else "FAILED"
@@ -296,9 +292,7 @@ class BackupPolicyService:
                 )
             except Exception as exc:
                 await self._session.rollback()
-                failed_verification = await self._session.get(
-                    BackupVerification, verification_id
-                )
+                failed_verification = await self._session.get(BackupVerification, verification_id)
                 assert failed_verification is not None
                 verification = failed_verification
                 verification.status = "FAILED"
@@ -308,9 +302,7 @@ class BackupPolicyService:
                 verification.finished_at = datetime.now(UTC)
                 await self._session.commit()
                 raise
-            stored_verification = await self._session.get(
-                BackupVerification, verification_id
-            )
+            stored_verification = await self._session.get(BackupVerification, verification_id)
             assert stored_verification is not None
             verification = stored_verification
             verification.restore_run_id = restore.id
@@ -351,9 +343,7 @@ class BackupPolicyService:
             }:
                 continue
             verification.status = (
-                "SUCCEEDED"
-                if restore.status == OperationStatus.SUCCEEDED.value
-                else "FAILED"
+                "SUCCEEDED" if restore.status == OperationStatus.SUCCEEDED.value else "FAILED"
             )
             verification.error_code = (
                 None if verification.status == "SUCCEEDED" else f"RESTORE_{restore.status}"
@@ -470,9 +460,7 @@ class BackupPolicyService:
     async def _preview_items(self, policy: BackupPolicy) -> list[BackupPolicyPreviewItem]:
         assignments = (
             await self._session.scalars(
-                select(BackupPolicyAssignment).where(
-                    BackupPolicyAssignment.policy_id == policy.id
-                )
+                select(BackupPolicyAssignment).where(BackupPolicyAssignment.policy_id == policy.id)
             )
         ).all()
         items: list[BackupPolicyPreviewItem] = []
@@ -527,9 +515,7 @@ class BackupPolicyService:
         policy, target = row
         assignments = (
             await self._session.scalars(
-                select(BackupPolicyAssignment).where(
-                    BackupPolicyAssignment.policy_id == policy.id
-                )
+                select(BackupPolicyAssignment).where(BackupPolicyAssignment.policy_id == policy.id)
             )
         ).all()
         assignment_responses: list[BackupPolicyAssignmentResponse] = []

@@ -130,9 +130,7 @@ async def invite_organization_member(
     session: SessionDependency,
     principal: PrincipalDependency,
 ) -> OrganizationInvitationResponse:
-    return await _customer_service(request, session, principal).invite(
-        organization_id, payload
-    )
+    return await _customer_service(request, session, principal).invite(organization_id, payload)
 
 
 @customer_router.get(
@@ -145,9 +143,7 @@ async def list_organization_invitations(
     session: SessionDependency,
     principal: PrincipalDependency,
 ) -> list[OrganizationInvitationResponse]:
-    return await _customer_service(request, session, principal).list_invitations(
-        organization_id
-    )
+    return await _customer_service(request, session, principal).list_invitations(organization_id)
 
 
 @customer_router.delete(
@@ -205,9 +201,7 @@ async def list_customer_approval_policies(
     session: SessionDependency,
     principal: PrincipalDependency,
 ) -> list[ApprovalPolicyResponse]:
-    return await _customer_service(request, session, principal).approval_policies(
-        organization_id
-    )
+    return await _customer_service(request, session, principal).approval_policies(organization_id)
 
 
 @customer_router.get(
@@ -250,9 +244,7 @@ async def set_admin_organization_quota(
     session: SessionDependency,
     principal: PrincipalDependency,
 ) -> OrganizationQuotaResponse:
-    return await _admin_service(request, session, principal).set_quota(
-        organization_id, payload
-    )
+    return await _admin_service(request, session, principal).set_quota(organization_id, payload)
 
 
 @admin_router.get(
@@ -265,9 +257,9 @@ async def list_admin_approval_policies(
     session: SessionDependency,
     principal: PrincipalDependency,
 ) -> list[ApprovalPolicyResponse]:
-    return await _admin_service(
-        request, session, principal
-    ).list_approval_policies_admin(organization_id)
+    return await _admin_service(request, session, principal).list_approval_policies_admin(
+        organization_id
+    )
 
 
 @admin_router.put(

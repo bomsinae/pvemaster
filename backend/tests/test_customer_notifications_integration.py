@@ -137,9 +137,7 @@ async def test_customer_notification_policy_delivery_race_and_session_isolation(
             assert customer_a.email not in listed.text
             assert len(listed.json()["items"]) == 4
             maintenance = next(
-                item
-                for item in listed.json()["items"]
-                if item["event_type"] == "MAINTENANCE"
+                item for item in listed.json()["items"] if item["event_type"] == "MAINTENANCE"
             )
             assert maintenance["required_by_organization"] is True
             assert maintenance["email_enabled"] is True
@@ -188,33 +186,42 @@ async def test_customer_notification_policy_delivery_race_and_session_isolation(
             assert cross_customer_revoke.status_code == 404
 
             async with app.state.db_session_factory() as session:
-                assert await queue_customer_notification(
-                    session,
-                    organization_id=organization.id,
-                    recipient_user_id=customer_a.id,
-                    event_type="VM_DOWN",
-                    event_key="vm-down-disabled",
-                    subject="disabled",
-                    message="disabled",
-                ) == 0
-                assert await queue_customer_notification(
-                    session,
-                    organization_id=organization.id,
-                    recipient_user_id=customer_a.id,
-                    event_type="MAINTENANCE",
-                    event_key="forced-maintenance",
-                    subject="Maintenance",
-                    message="Safe maintenance message",
-                ) == 1
-                assert await queue_customer_notification(
-                    session,
-                    organization_id=organization.id,
-                    recipient_user_id=customer_a.id,
-                    event_type="OPERATION_COMPLETED",
-                    event_key="operation-before-opt-out",
-                    subject="Operation",
-                    message="Safe operation message",
-                ) == 1
+                assert (
+                    await queue_customer_notification(
+                        session,
+                        organization_id=organization.id,
+                        recipient_user_id=customer_a.id,
+                        event_type="VM_DOWN",
+                        event_key="vm-down-disabled",
+                        subject="disabled",
+                        message="disabled",
+                    )
+                    == 0
+                )
+                assert (
+                    await queue_customer_notification(
+                        session,
+                        organization_id=organization.id,
+                        recipient_user_id=customer_a.id,
+                        event_type="MAINTENANCE",
+                        event_key="forced-maintenance",
+                        subject="Maintenance",
+                        message="Safe maintenance message",
+                    )
+                    == 1
+                )
+                assert (
+                    await queue_customer_notification(
+                        session,
+                        organization_id=organization.id,
+                        recipient_user_id=customer_a.id,
+                        event_type="OPERATION_COMPLETED",
+                        event_key="operation-before-opt-out",
+                        subject="Operation",
+                        message="Safe operation message",
+                    )
+                    == 1
+                )
                 await session.commit()
 
             operation_opt_out = await client.put(
@@ -244,11 +251,11 @@ async def test_customer_notification_policy_delivery_race_and_session_isolation(
                 statuses = dict(
                     (
                         await session.execute(
-                        select(
-                            CustomerNotificationDelivery.event_key,
-                            CustomerNotificationDelivery.status,
+                            select(
+                                CustomerNotificationDelivery.event_key,
+                                CustomerNotificationDelivery.status,
+                            )
                         )
-                    )
                     ).all()
                 )
                 assert statuses["forced-maintenance"] == "DELIVERED"
@@ -267,9 +274,7 @@ async def test_customer_notification_policy_delivery_race_and_session_isolation(
             assert "token" not in security_events.text.lower()
 
             second_login_a = await _login(client, customer_a.email, passwords["a"])
-            second_headers_a = {
-                "Authorization": f"Bearer {second_login_a['access_token']}"
-            }
+            second_headers_a = {"Authorization": f"Bearer {second_login_a['access_token']}"}
             changed_password = await client.post(
                 "/api/v1/auth/change-password",
                 headers=headers_a,

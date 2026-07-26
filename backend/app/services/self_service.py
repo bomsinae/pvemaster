@@ -89,9 +89,7 @@ class CustomerSelfService:
         )
         return [self._key_response(item) for item in items]
 
-    async def create_key(
-        self, vm_id: UUID, payload: SshPublicKeyCreate
-    ) -> SshPublicKeyResponse:
+    async def create_key(self, vm_id: UUID, payload: SshPublicKeyCreate) -> SshPublicKeyResponse:
         workload, _ = await self._owned_vm(vm_id)
         if workload.organization_id is None:
             raise AppError(404, "VM_NOT_FOUND", "The VM was not found.")
@@ -356,9 +354,8 @@ class CustomerSelfService:
             },
             ServiceRequestType.REINSTALL: {"confirmation", "ssh_key_id", "reason"},
         }[request_type]
-        if (
-            not set(data).issubset(allowed_fields)
-            or (not data and request_type is not ServiceRequestType.BACKUP_RUN)
+        if not set(data).issubset(allowed_fields) or (
+            not data and request_type is not ServiceRequestType.BACKUP_RUN
         ):
             raise AppError(422, "SERVICE_REQUEST_INPUT_INVALID", "The request input is invalid.")
         required = {
@@ -373,12 +370,16 @@ class CustomerSelfService:
             ServiceRequestType.RESIZE: set(),
             ServiceRequestType.REINSTALL: {"confirmation"},
         }[request_type]
-        if not required.issubset(data) or (
-            request_type is ServiceRequestType.METADATA_CHANGE
-            and not {"hostname", "description"}.intersection(data)
-        ) or (
-            request_type is ServiceRequestType.RESIZE
-            and not {"cpu_cores", "memory_bytes", "disk_bytes"}.intersection(data)
+        if (
+            not required.issubset(data)
+            or (
+                request_type is ServiceRequestType.METADATA_CHANGE
+                and not {"hostname", "description"}.intersection(data)
+            )
+            or (
+                request_type is ServiceRequestType.RESIZE
+                and not {"cpu_cores", "memory_bytes", "disk_bytes"}.intersection(data)
+            )
         ):
             raise AppError(422, "SERVICE_REQUEST_INPUT_INVALID", "Required input is missing.")
 
@@ -391,9 +392,7 @@ class CustomerSelfService:
             if (
                 group is None
                 or not group.is_enabled
-                or not (
-                    group.is_global or group.organization_id == workload.organization_id
-                )
+                or not (group.is_global or group.organization_id == workload.organization_id)
             ):
                 raise AppError(
                     404,
@@ -403,28 +402,19 @@ class CustomerSelfService:
 
         quota = await self._quota(workload.organization_id)
         if request_type is ServiceRequestType.RESIZE:
-            if (
-                payload.input.cpu_cores is not None
-                and (
-                    payload.input.cpu_cores < (workload.cpu_cores or 0)
-                    or payload.input.cpu_cores > quota["max_cpu_cores_per_vm"]
-                )
+            if payload.input.cpu_cores is not None and (
+                payload.input.cpu_cores < (workload.cpu_cores or 0)
+                or payload.input.cpu_cores > quota["max_cpu_cores_per_vm"]
             ):
                 raise AppError(409, "RESIZE_QUOTA_EXCEEDED", "The requested CPU is not allowed.")
-            if (
-                payload.input.memory_bytes is not None
-                and (
-                    payload.input.memory_bytes < (workload.memory_bytes or 0)
-                    or payload.input.memory_bytes > quota["max_memory_bytes_per_vm"]
-                )
+            if payload.input.memory_bytes is not None and (
+                payload.input.memory_bytes < (workload.memory_bytes or 0)
+                or payload.input.memory_bytes > quota["max_memory_bytes_per_vm"]
             ):
                 raise AppError(409, "RESIZE_QUOTA_EXCEEDED", "The requested memory is not allowed.")
-            if (
-                payload.input.disk_bytes is not None
-                and (
-                    payload.input.disk_bytes < (workload.disk_bytes or 0)
-                    or payload.input.disk_bytes > quota["max_disk_bytes_per_vm"]
-                )
+            if payload.input.disk_bytes is not None and (
+                payload.input.disk_bytes < (workload.disk_bytes or 0)
+                or payload.input.disk_bytes > quota["max_disk_bytes_per_vm"]
             ):
                 raise AppError(
                     409,
@@ -458,9 +448,7 @@ class CustomerSelfService:
             ServiceRequestType.RESTORE_REQUEST: [
                 "기존 VM을 덮어쓰지 않고 별도 복구 대상으로 처리합니다."
             ],
-            ServiceRequestType.RESIZE: [
-                "disk 축소는 허용되지 않으며 재부팅이 필요할 수 있습니다."
-            ],
+            ServiceRequestType.RESIZE: ["disk 축소는 허용되지 않으며 재부팅이 필요할 수 있습니다."],
             ServiceRequestType.REINSTALL: [
                 "현재 VM의 데이터가 삭제될 수 있으며 승인 후 취소할 수 없습니다."
             ],
@@ -500,9 +488,7 @@ class CustomerSelfService:
             raise AppError(404, "VM_NOT_FOUND", "The VM was not found.")
         return row[0], row[1]
 
-    async def _customer_request(
-        self, request_id: UUID, *, lock: bool = False
-    ) -> ServiceRequest:
+    async def _customer_request(self, request_id: UUID, *, lock: bool = False) -> ServiceRequest:
         statement = (
             select(ServiceRequest)
             .join(Workload, Workload.id == ServiceRequest.workload_id)
@@ -716,9 +702,7 @@ class AdminSelfService:
     ) -> ServiceRequestResponse:
         require_service_role(self._principal, UserRole.SUPER_ADMIN)
         item = await self._request(request_id, lock=True)
-        self._require_version_status(
-            item, payload.version, ServiceRequestStatus.PENDING_APPROVAL
-        )
+        self._require_version_status(item, payload.version, ServiceRequestStatus.PENDING_APPROVAL)
         workload, assignment = await self._current_owner(item)
         if payload.approved_input is not None:
             validator = CustomerSelfService(
@@ -785,9 +769,7 @@ class AdminSelfService:
         self, request_id: UUID, payload: ServiceRequestDecision
     ) -> ServiceRequestResponse:
         item = await self._request(request_id, lock=True)
-        self._require_version_status(
-            item, payload.version, ServiceRequestStatus.PENDING_APPROVAL
-        )
+        self._require_version_status(item, payload.version, ServiceRequestStatus.PENDING_APPROVAL)
         item.status = ServiceRequestStatus.REJECTED.value
         item.result_summary = payload.reason
         item.finished_at = datetime.now(UTC)
@@ -886,9 +868,7 @@ class AdminSelfService:
         await self._session.commit()
         return await self._response(item)
 
-    async def create_security_group(
-        self, payload: SecurityGroupCreate
-    ) -> SecurityGroupResponse:
+    async def create_security_group(self, payload: SecurityGroupCreate) -> SecurityGroupResponse:
         require_service_role(self._principal, UserRole.SUPER_ADMIN)
         if payload.organization_id is not None:
             organization = await self._session.get(Organization, payload.organization_id)
@@ -972,9 +952,7 @@ class AdminSelfService:
                 )
             )
         group_value = item.input_snapshot.get("security_group_id")
-        if request_type is ServiceRequestType.SECURITY_GROUP_APPLY and isinstance(
-            group_value, str
-        ):
+        if request_type is ServiceRequestType.SECURITY_GROUP_APPLY and isinstance(group_value, str):
             await self._session.execute(
                 delete(WorkloadSecurityGroup).where(
                     WorkloadSecurityGroup.workload_id == item.workload_id
@@ -988,9 +966,7 @@ class AdminSelfService:
                 )
             )
 
-    async def _reserve_resize(
-        self, item: ServiceRequest, workload: Workload
-    ) -> None:
+    async def _reserve_resize(self, item: ServiceRequest, workload: Workload) -> None:
         if item.request_type != ServiceRequestType.RESIZE.value:
             return
         await reserve_quota(
@@ -999,9 +975,7 @@ class AdminSelfService:
             service_request_id=item.id,
             vcpu=max(
                 0,
-                self._snapshot_int(
-                    item.input_snapshot, "cpu_cores", workload.cpu_cores or 0
-                )
+                self._snapshot_int(item.input_snapshot, "cpu_cores", workload.cpu_cores or 0)
                 - (workload.cpu_cores or 0),
             ),
             memory_bytes=max(
@@ -1015,17 +989,13 @@ class AdminSelfService:
             ),
             disk_bytes=max(
                 0,
-                self._snapshot_int(
-                    item.input_snapshot, "disk_bytes", workload.disk_bytes or 0
-                )
+                self._snapshot_int(item.input_snapshot, "disk_bytes", workload.disk_bytes or 0)
                 - (workload.disk_bytes or 0),
             ),
         )
 
     @staticmethod
-    def _snapshot_int(
-        snapshot: dict[str, object], key: str, default: int
-    ) -> int:
+    def _snapshot_int(snapshot: dict[str, object], key: str, default: int) -> int:
         value = snapshot.get(key, default)
         if isinstance(value, int) and not isinstance(value, bool):
             return value
@@ -1035,9 +1005,7 @@ class AdminSelfService:
             "The approved request snapshot is invalid.",
         )
 
-    async def _current_owner(
-        self, item: ServiceRequest
-    ) -> tuple[Workload, WorkloadAssignment]:
+    async def _current_owner(self, item: ServiceRequest) -> tuple[Workload, WorkloadAssignment]:
         row = (
             await self._session.execute(
                 select(Workload, WorkloadAssignment)

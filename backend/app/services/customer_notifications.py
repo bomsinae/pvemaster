@@ -93,9 +93,7 @@ class CustomerNotificationPreferenceService:
                 )
             )
         ).all()
-        by_key = {
-            (item.organization_id, item.event_type): item for item in preferences
-        }
+        by_key = {(item.organization_id, item.event_type): item for item in preferences}
         required = {(item.organization_id, item.event_type) for item in policies}
         items: list[CustomerNotificationPreferenceResponse] = []
         for organization_id, organization_name in memberships:

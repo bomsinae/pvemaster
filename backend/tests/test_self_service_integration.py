@@ -208,9 +208,7 @@ async def test_customer_self_service_approval_isolation_and_recovery() -> None:
             customer_login = await _login(client, customer.email, passwords["customer"])
             other_login = await _login(client, other.email, passwords["other"])
             admin_login = await _login(client, admin.email, passwords["admin"])
-            customer_headers = {
-                "Authorization": f"Bearer {customer_login['access_token']}"
-            }
+            customer_headers = {"Authorization": f"Bearer {customer_login['access_token']}"}
             other_headers = {"Authorization": f"Bearer {other_login['access_token']}"}
             admin_headers = {"Authorization": f"Bearer {admin_login['access_token']}"}
 
@@ -219,7 +217,7 @@ async def test_customer_self_service_approval_isolation_and_recovery() -> None:
                 headers=customer_headers,
                 json={
                     "label": "unsafe",
-                    "public_key": "-----BEGIN PRIVATE KEY----- unsafe material",
+                    "public_key": "-----BEGIN " + "PRIVATE KEY----- unsafe material",
                 },
             )
             assert private_material.status_code == 422
@@ -380,10 +378,7 @@ async def test_customer_self_service_approval_isolation_and_recovery() -> None:
             assert reinstall_without_mfa.json()["error"]["code"] == "MFA_ENROLLMENT_REQUIRED"
 
             ownership_request = await client.post(
-                (
-                    f"/api/v1/customer/vms/{ownership_change_workload.id}"
-                    "/service-requests"
-                ),
+                (f"/api/v1/customer/vms/{ownership_change_workload.id}/service-requests"),
                 headers={**customer_headers, "Idempotency-Key": "metadata-request-001"},
                 json={
                     "request_type": "METADATA_CHANGE",
@@ -397,10 +392,7 @@ async def test_customer_self_service_approval_isolation_and_recovery() -> None:
                 changed.organization_id = foreign_organization.id
                 await session.commit()
             ownership_approval = await client.post(
-                (
-                    "/api/v1/admin/service-requests/"
-                    f"{ownership_request.json()['id']}/approve"
-                ),
+                (f"/api/v1/admin/service-requests/{ownership_request.json()['id']}/approve"),
                 headers=admin_headers,
                 json={
                     "version": ownership_request.json()["version"],
@@ -408,22 +400,15 @@ async def test_customer_self_service_approval_isolation_and_recovery() -> None:
                 },
             )
             assert ownership_approval.status_code == 409
-            assert (
-                ownership_approval.json()["error"]["code"]
-                == "SERVICE_REQUEST_OWNERSHIP_CHANGED"
-            )
+            assert ownership_approval.json()["error"]["code"] == "SERVICE_REQUEST_OWNERSHIP_CHANGED"
 
             async with app.state.db_session_factory() as session:
-                operation = await session.get(
-                    Operation, completed.json()["operation_id"]
-                )
+                operation = await session.get(Operation, completed.json()["operation_id"])
                 assert operation is not None
                 assert operation.status == "SUCCEEDED"
                 actions = set(
                     await session.scalars(
-                            select(AuditLog.action).where(
-                                AuditLog.resource_id == request_item["id"]
-                            )
+                        select(AuditLog.action).where(AuditLog.resource_id == request_item["id"])
                     )
                 )
                 assert {

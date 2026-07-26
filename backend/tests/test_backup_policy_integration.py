@@ -131,9 +131,7 @@ async def test_policy_dispatch_is_timezone_aware_idempotent_and_skippable() -> N
                     schedule="0 2 * * *",
                     timezone="Asia/Seoul",
                     retention_reference="daily-30",
-                    assignments=[
-                        BackupPolicyAssignmentRequest(workload_id=workload.id)
-                    ],
+                    assignments=[BackupPolicyAssignmentRequest(workload_id=workload.id)],
                 )
             )
             policy = await session.get(BackupPolicy, created.id)

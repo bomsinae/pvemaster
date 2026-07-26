@@ -225,10 +225,7 @@ async def list_customer_jobs(
     started_at: datetime | None = None,
     ended_at: datetime | None = None,
 ) -> CustomerJobListResponse:
-    if any(
-        value is not None and value.tzinfo is None
-        for value in (started_at, ended_at)
-    ):
+    if any(value is not None and value.tzinfo is None for value in (started_at, ended_at)):
         raise AppError(422, "INVALID_TIME_RANGE", "The time range must include a timezone.")
     if started_at and ended_at and started_at > ended_at:
         raise AppError(422, "INVALID_TIME_RANGE", "The time range is invalid.")

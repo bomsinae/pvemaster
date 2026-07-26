@@ -159,9 +159,7 @@ async def create_customer_service_request(
                 "MFA_ENROLLMENT_REQUIRED",
                 "Enroll MFA before requesting a reinstall or restore.",
                 details={
-                    "action": (
-                        f"customer_service_request:{payload.request_type.value.lower()}"
-                    )
+                    "action": (f"customer_service_request:{payload.request_type.value.lower()}")
                 },
             )
         await require_step_up(
@@ -221,9 +219,7 @@ async def cancel_customer_service_request(
     session: SessionDependency,
     principal: PrincipalDependency,
 ) -> ServiceRequestResponse:
-    return await _customer_service(request, session, principal).cancel(
-        request_id, payload.version
-    )
+    return await _customer_service(request, session, principal).cancel(request_id, payload.version)
 
 
 @admin_router.get("/service-requests", response_model=ServiceRequestListResponse)

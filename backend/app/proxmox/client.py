@@ -346,9 +346,7 @@ class ProxmoxClient:
             raise self._invalid_response()
         return data
 
-    async def get_guest_snapshots(
-        self, *, kind: str, node: str, vmid: int
-    ) -> list[dict[str, Any]]:
+    async def get_guest_snapshots(self, *, kind: str, node: str, vmid: int) -> list[dict[str, Any]]:
         guest_type = self._guest_type(kind)
         data = await self._request_data(
             f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}/{vmid}/snapshot",
@@ -448,9 +446,7 @@ class ProxmoxClient:
         )
         return self._require_object_list(data)
 
-    async def update_ha_resource(
-        self, *, resource_id: str, state: str, group: str | None
-    ) -> None:
+    async def update_ha_resource(self, *, resource_id: str, state: str, group: str | None) -> None:
         payload = {"state": state}
         if group:
             payload["group"] = group

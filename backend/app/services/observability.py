@@ -642,9 +642,7 @@ class ObservabilityService:
             )
         due_verifications = (
             await self._session.scalars(
-                select(BackupVerification).where(
-                    BackupVerification.status.in_(["DUE", "FAILED"])
-                )
+                select(BackupVerification).where(BackupVerification.status.in_(["DUE", "FAILED"]))
             )
         ).all()
         for verification in due_verifications:

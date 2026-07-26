@@ -42,15 +42,11 @@ async def quota_state(
     quota = await session.scalar(quota_query.execution_options(populate_existing=True))
     limits = {
         "vcpu": quota.max_vcpu if quota else DEFAULT_QUOTA_LIMITS["vcpu"],
-        "memory_bytes": (
-            quota.max_memory_bytes if quota else DEFAULT_QUOTA_LIMITS["memory_bytes"]
-        ),
+        "memory_bytes": (quota.max_memory_bytes if quota else DEFAULT_QUOTA_LIMITS["memory_bytes"]),
         "disk_bytes": quota.max_disk_bytes if quota else DEFAULT_QUOTA_LIMITS["disk_bytes"],
         "vms": quota.max_vms if quota else DEFAULT_QUOTA_LIMITS["vms"],
         "ips": quota.max_ips if quota else DEFAULT_QUOTA_LIMITS["ips"],
-        "backup_bytes": (
-            quota.max_backup_bytes if quota else DEFAULT_QUOTA_LIMITS["backup_bytes"]
-        ),
+        "backup_bytes": (quota.max_backup_bytes if quota else DEFAULT_QUOTA_LIMITS["backup_bytes"]),
     }
     used_vcpu, used_memory, used_disk, used_vms = (
         await session.execute(
@@ -103,10 +99,7 @@ async def quota_state(
             )
         )
     ).one()
-    reserved = {
-        key: int(value or 0)
-        for key, value in zip(QUOTA_KEYS, reserved_row, strict=True)
-    }
+    reserved = {key: int(value or 0) for key, value in zip(QUOTA_KEYS, reserved_row, strict=True)}
     return limits, usage, reserved
 
 
@@ -161,9 +154,7 @@ async def reserve_quota(
             details={
                 "resources": exceeded,
                 "limits": {key: limits[key] for key in exceeded},
-                "committed": {
-                    key: usage[key] + committed_reserved[key] for key in exceeded
-                },
+                "committed": {key: usage[key] + committed_reserved[key] for key in exceeded},
             },
         )
     if existing is not None:
@@ -203,16 +194,12 @@ async def finish_quota_reservation(
         raise ValueError("invalid quota reservation status")
     filters = []
     if provisioning_request_id is not None:
-        filters.append(
-            QuotaReservation.provisioning_request_id == provisioning_request_id
-        )
+        filters.append(QuotaReservation.provisioning_request_id == provisioning_request_id)
     if service_request_id is not None:
         filters.append(QuotaReservation.service_request_id == service_request_id)
     if len(filters) != 1:
         raise ValueError("exactly one quota reservation request is required")
-    item = await session.scalar(
-        select(QuotaReservation).where(*filters).with_for_update()
-    )
+    item = await session.scalar(select(QuotaReservation).where(*filters).with_for_update())
     if item is not None and item.status == "ACTIVE":
         item.status = status
         item.finished_at = datetime.now(UTC)

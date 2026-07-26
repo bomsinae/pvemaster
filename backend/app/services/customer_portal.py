@@ -114,9 +114,7 @@ class CustomerPortalService:
         return CustomerVmDetailResponse(
             **summary.model_dump(),
             recent_jobs=jobs,
-            recent_state_changes=await self._state_changes(
-                workload.id, assignment.assigned_at
-            ),
+            recent_state_changes=await self._state_changes(workload.id, assignment.assigned_at),
             recent_backup=await self._recent_backup(
                 workload.id,
                 assignment.organization_id,
@@ -351,9 +349,7 @@ class CustomerPortalService:
         if ended_at is not None:
             filters.append(Operation.requested_at <= ended_at)
         total = int(
-            await self._session.scalar(
-                select(func.count()).select_from(Operation).where(*filters)
-            )
+            await self._session.scalar(select(func.count()).select_from(Operation).where(*filters))
             or 0
         )
         operations = await self._session.scalars(
@@ -566,9 +562,7 @@ class CustomerPortalService:
             scheduled_for=run.scheduled_for,
         )
 
-    async def _upcoming_maintenance(
-        self, workload: Workload
-    ) -> list[CustomerMaintenance]:
+    async def _upcoming_maintenance(self, workload: Workload) -> list[CustomerMaintenance]:
         now = datetime.now(UTC)
         rows = (
             await self._session.scalars(

@@ -75,6 +75,22 @@ npm run build
 
 실제 PVE는 단위·통합 테스트에서 호출하지 않는다. staging 점검에서는 최소 권한 전용 token, 등록된 CA, 별도 테스트 VMID/IP 대역을 사용한다.
 
+전체 로컬 release gate는 저장소 루트에서 다음 명령으로 실행한다.
+
+```bash
+./scripts/verify-release.sh
+```
+
+이 명령은 secret scan, backend format/lint/type/test/migration drift, frontend
+lint/type/mock/build와 Chromium·Firefox·WebKit 여정을 차례로 실행한다. 설정한 `.env`로
+Compose 렌더링까지 확인하려면 `VERIFY_COMPOSE_CONFIG=1`을 사용한다. 로컬 gate 통과는
+실제 staging PVE 시험이나 운영 승인 결과를 대신하지 않는다.
+
+API는 모든 응답에 `nosniff`, frame 차단, referrer·권한 제한과 `no-store`를 적용한다.
+`ENVIRONMENT=production`에서는 HSTS도 적용한다. 프론트엔드는 frame 차단,
+cross-origin 격리와 브라우저 권한 제한 헤더를 적용한다. TLS 종료 reverse proxy는
+HTTPS redirect와 HSTS가 최종 응답에서도 유지되는지 배포 후 확인한다.
+
 ## 정기 점검
 
 - 매일: worker/queue/cluster 경보, 실패한 프로비저닝, manual review 확인.
@@ -109,5 +125,9 @@ npm run build
 활성화 전 staging에서 해당 PVE token의 최소 ACL, storage/network/guest capability,
 step-up MFA와 customer downtime 알림 절차를 확인한다. Firewall/SDN flag는 현재
 read-only 투영만 활성화하며 변경 권한을 token에 추가하지 않는다.
+
+긴급 중지는 관련 flag 하나만 `false`로 바꾸고 backend를 재기동한다. 이미 제출된
+PVE task는 flag 변경으로 취소되지 않으므로 Operation 센터에서 UPID의 실제 상태를
+확인하고 재조정한다. DB 행이나 queue를 직접 삭제하지 않는다.
 - 복구 작업은 전원을 켜지 않은 상태로 완료된다. inventory를 갱신한 뒤 NIC, IP와 조직 할당을 검토하고 수동으로 기동한다.
 - PVE API token에 VM.Allocate, Datastore.AllocateSpace와 복구 원본을 읽을 권한이 없으면 작업은 권한 오류로 종료된다.

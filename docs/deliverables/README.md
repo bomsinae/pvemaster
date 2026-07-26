@@ -52,4 +52,4 @@ docs/
 | 11 — 조직 관리자, 팀 권한, Quota와 승인 | 구현·로컬 검증 완료 | [설계 결정](11-organization-rbac-quota/design.md), [운영 runbook](11-organization-rbac-quota/runbook.md), [검증 보고서](11-organization-rbac-quota/verification-report.md) |
 | 12 — 관리자 고급 PVE 운영 | 구현·로컬 검증 완료 | [설계 결정](12-advanced-pve-operations/design.md), [운영 runbook](12-advanced-pve-operations/runbook.md), [검증 보고서](12-advanced-pve-operations/verification-report.md) |
 | 13 — 상용 호스팅 기능 | 정책상 보류 | [착수 결정](13-commercial-hosting/decision.md) |
-| 14 — 출시 Hardening과 운영 인수 | 예정 | — |
+| 14 — 출시 Hardening과 운영 인수 | 로컬 hardening 완료·staging 승인 대기 | [Staging 검증 계획](14-release-hardening/staging-test-plan.md), [운영 인수](14-release-hardening/operations-handover.md), [검증 보고서](14-release-hardening/verification-report.md) |

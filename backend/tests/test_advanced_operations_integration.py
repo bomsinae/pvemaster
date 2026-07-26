@@ -84,9 +84,7 @@ class FakeAdvancedApi:
         del kind, node, vmid, target_node, online, target_storage, target_network
         return "UPID:migrate"
 
-    async def update_ha_resource(
-        self, *, resource_id: str, state: str, group: str | None
-    ) -> None:
+    async def update_ha_resource(self, *, resource_id: str, state: str, group: str | None) -> None:
         del resource_id, state, group
 
     async def configure_guest_advanced(
@@ -177,9 +175,7 @@ async def test_advanced_preview_conflict_execution_and_ambiguous_timeout() -> No
                 settings=settings,
                 cipher=CredentialCipher(settings.app_secret_key.get_secret_value()),
                 principal=principal,
-                publisher=lambda operation_id, task_id: published.append(
-                    (operation_id, task_id)
-                ),
+                publisher=lambda operation_id, task_id: published.append((operation_id, task_id)),
                 request_id="advanced-test",
                 source_ip="127.0.0.1",
             )
@@ -199,9 +195,10 @@ async def test_advanced_preview_conflict_execution_and_ambiguous_timeout() -> No
             )
             capabilities = service.capabilities()
             assert all(item.enabled for item in capabilities.items)
-            assert next(
-                item for item in capabilities.items if item.feature == "FIREWALL_SDN"
-            ).mode == "READ_ONLY"
+            assert (
+                next(item for item in capabilities.items if item.feature == "FIREWALL_SDN").mode
+                == "READ_ONLY"
+            )
 
             blocked = await service.preview(
                 AdvancedPreviewRequest(

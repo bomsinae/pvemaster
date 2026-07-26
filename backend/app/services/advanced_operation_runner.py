@@ -113,11 +113,7 @@ class AdvancedOperationRunner:
         }:
             return
         actor = await self._session.get(User, operation.requested_by_id)
-        if (
-            actor is None
-            or not actor.is_active
-            or actor.role != UserRole.SUPER_ADMIN.value
-        ):
+        if actor is None or not actor.is_active or actor.role != UserRole.SUPER_ADMIN.value:
             await self._finish(
                 operation,
                 intent,
@@ -146,9 +142,7 @@ class AdvancedOperationRunner:
         await self._session.commit()
 
         first_target = intent.target_snapshot[0]
-        first_workload = await self._session.get(
-            Workload, UUID(str(first_target["workload_id"]))
-        )
+        first_workload = await self._session.get(Workload, UUID(str(first_target["workload_id"])))
         if first_workload is None:
             await self._finish(
                 operation, intent, actor, OperationStatus.FAILED, "WORKLOAD_NOT_FOUND"
@@ -199,9 +193,7 @@ class AdvancedOperationRunner:
                     await self._session.commit()
                 if not await self._poll(operation, intent, actor, workload, task, client):
                     return
-            await self._finish(
-                operation, intent, actor, OperationStatus.SUCCEEDED, None
-            )
+            await self._finish(operation, intent, actor, OperationStatus.SUCCEEDED, None)
 
     async def _submit(
         self,
@@ -241,9 +233,7 @@ class AdvancedOperationRunner:
                 node=workload.node,
                 vmid=workload.vmid,
                 target_node=str(options["target_node"]),
-                online=(
-                    intent.feature == "MIGRATION" and intent.action == "LIVE"
-                )
+                online=(intent.feature == "MIGRATION" and intent.action == "LIVE")
                 or workload.power_state.upper() == "RUNNING",
                 target_storage=self._optional_string(options.get("target_storage")),
                 target_network=self._optional_string(options.get("target_network")),
@@ -281,9 +271,7 @@ class AdvancedOperationRunner:
         task: PveTask,
         client: AdvancedApi,
     ) -> bool:
-        deadline = datetime.now(UTC) + timedelta(
-            seconds=self._settings.pve_task_timeout_seconds
-        )
+        deadline = datetime.now(UTC) + timedelta(seconds=self._settings.pve_task_timeout_seconds)
         while (
             datetime.now(UTC) < deadline
             and task.poll_attempts < self._settings.pve_task_max_poll_attempts
@@ -299,9 +287,7 @@ class AdvancedOperationRunner:
                     await self._sleep(self._settings.pve_task_poll_interval_seconds)
                     continue
                 task.status = "FAILED"
-                await self._finish(
-                    operation, intent, actor, OperationStatus.FAILED, exc.code
-                )
+                await self._finish(operation, intent, actor, OperationStatus.FAILED, exc.code)
                 return False
             if status.get("status") == "running":
                 await self._session.commit()
@@ -320,14 +306,10 @@ class AdvancedOperationRunner:
             await self._session.commit()
             return True
         task.status = "TIMEOUT"
-        await self._finish(
-            operation, intent, actor, OperationStatus.TIMEOUT, "PVE_TASK_TIMEOUT"
-        )
+        await self._finish(operation, intent, actor, OperationStatus.TIMEOUT, "PVE_TASK_TIMEOUT")
         return False
 
-    async def _complete_target(
-        self, intent: AdvancedOperationIntent, workload: Workload
-    ) -> None:
+    async def _complete_target(self, intent: AdvancedOperationIntent, workload: Workload) -> None:
         if intent.feature == "MIGRATION" or (
             intent.feature == "NODE_MAINTENANCE" and intent.action == "DRAIN"
         ):
@@ -335,11 +317,7 @@ class AdvancedOperationRunner:
             workload.observed_at = datetime.now(UTC)
             workload.version += 1
         if intent.feature == "BULK":
-            workload.power_state = (
-                "STOPPED"
-                if intent.action in {"STOP", "SHUTDOWN"}
-                else "RUNNING"
-            )
+            workload.power_state = "STOPPED" if intent.action in {"STOP", "SHUTDOWN"} else "RUNNING"
             workload.observed_at = datetime.now(UTC)
         observed = dict(intent.observed_state)
         observed[str(workload.id)] = {
@@ -351,9 +329,7 @@ class AdvancedOperationRunner:
         intent.current_target_index += 1
         await self._session.commit()
 
-    async def _validate_target(
-        self, target: dict[str, object]
-    ) -> Workload | None:
+    async def _validate_target(self, target: dict[str, object]) -> Workload | None:
         workload = await self._session.get(Workload, UUID(str(target["workload_id"])))
         if (
             workload is None

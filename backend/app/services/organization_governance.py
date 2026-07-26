@@ -115,9 +115,7 @@ class OrganizationGovernanceService:
         )
         return [self._member_response(*row) for row in rows.all()]
 
-    async def list_members(
-        self, organization_id: UUID
-    ) -> list[OrganizationMembershipResponse]:
+    async def list_members(self, organization_id: UUID) -> list[OrganizationMembershipResponse]:
         await self._require_permission(organization_id, "MEMBER_READ")
         rows = await self._session.execute(
             select(OrganizationMember, Organization, User)
@@ -204,9 +202,7 @@ class OrganizationGovernanceService:
         await self._session.refresh(item)
         return self._invitation_response(item, token=token)
 
-    async def list_invitations(
-        self, organization_id: UUID
-    ) -> list[OrganizationInvitationResponse]:
+    async def list_invitations(self, organization_id: UUID) -> list[OrganizationInvitationResponse]:
         await self._require_permission(organization_id, "MEMBER_READ")
         items = await self._session.scalars(
             select(OrganizationInvitation)
@@ -326,8 +322,7 @@ class OrganizationGovernanceService:
         current_role = OrganizationRole(item.organization_role)
         if actor_role is not OrganizationRole.ORG_OWNER and (
             current_role is OrganizationRole.ORG_OWNER
-            or payload.organization_role
-            in {OrganizationRole.ORG_OWNER, OrganizationRole.ORG_ADMIN}
+            or payload.organization_role in {OrganizationRole.ORG_OWNER, OrganizationRole.ORG_ADMIN}
         ):
             raise self._forbidden()
         if payload.organization_role is OrganizationRole.ORG_OWNER and (
@@ -390,9 +385,7 @@ class OrganizationGovernanceService:
         await self._require_permission(organization_id, "QUOTA_READ")
         return await self._quota_response(organization_id, persist_snapshot=True)
 
-    async def approval_policies(
-        self, organization_id: UUID
-    ) -> list[ApprovalPolicyResponse]:
+    async def approval_policies(self, organization_id: UUID) -> list[ApprovalPolicyResponse]:
         await self._require_permission(organization_id, "APPROVAL_POLICY_READ")
         items = await self._session.scalars(
             select(ApprovalPolicy)
@@ -489,9 +482,7 @@ class OrganizationGovernanceService:
                 "The last organization owner cannot be removed or demoted.",
             )
 
-    async def _member_response_by_id(
-        self, membership_id: UUID
-    ) -> OrganizationMembershipResponse:
+    async def _member_response_by_id(self, membership_id: UUID) -> OrganizationMembershipResponse:
         row = (
             await self._session.execute(
                 select(OrganizationMember, Organization, User)
@@ -546,9 +537,7 @@ class OrganizationGovernanceService:
             .where(OrganizationQuota.organization_id == organization_id)
             .execution_options(populate_existing=True)
         )
-        limits, usage, reserved = await quota_state(
-            self._session, organization_id, lock=False
-        )
+        limits, usage, reserved = await quota_state(self._session, organization_id, lock=False)
         captured_at = datetime.now(UTC)
         if persist_snapshot:
             self._session.add(
@@ -564,9 +553,7 @@ class OrganizationGovernanceService:
                 )
             )
             await self._session.commit()
-        remaining = {
-            key: max(0, limits[key] - usage[key] - reserved[key]) for key in limits
-        }
+        remaining = {key: max(0, limits[key] - usage[key] - reserved[key]) for key in limits}
         return OrganizationQuotaResponse(
             organization_id=organization_id,
             limits=QuotaValues(**limits),
@@ -617,9 +604,7 @@ class AdminOrganizationGovernanceService(OrganizationGovernanceService):
         organization = await self._session.get(Organization, organization_id)
         if organization is None:
             raise AppError(404, "ORGANIZATION_NOT_FOUND", "The organization was not found.")
-        _, usage, reserved = await quota_state(
-            self._session, organization_id, lock=True
-        )
+        _, usage, reserved = await quota_state(self._session, organization_id, lock=True)
         requested_limits = {
             "vcpu": payload.max_vcpu,
             "memory_bytes": payload.max_memory_bytes,
@@ -629,9 +614,7 @@ class AdminOrganizationGovernanceService(OrganizationGovernanceService):
             "backup_bytes": payload.max_backup_bytes,
         }
         below_commitment = [
-            key
-            for key, value in requested_limits.items()
-            if value < usage[key] + reserved[key]
+            key for key, value in requested_limits.items() if value < usage[key] + reserved[key]
         ]
         if below_commitment:
             raise AppError(

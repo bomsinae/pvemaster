@@ -230,7 +230,5 @@ class ApprovalStep(Base):
     approver_role: Mapped[str] = mapped_column(String(32), nullable=False)
     decision: Mapped[str | None] = mapped_column(String(20))
     reason: Mapped[str | None] = mapped_column(String(500))
-    decided_by_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
+    decided_by_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

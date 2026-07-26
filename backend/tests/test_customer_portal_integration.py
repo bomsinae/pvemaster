@@ -502,9 +502,7 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
                 created_rollups = await WorkloadMetricService(
                     session=session,
                     settings=settings,
-                    cipher=CredentialCipher(
-                        settings.app_secret_key.get_secret_value()
-                    ),
+                    cipher=CredentialCipher(settings.app_secret_key.get_secret_value()),
                 ).downsample_and_retain(now=datetime.now(UTC))
                 assert created_rollups >= 4
                 resolutions = set(
