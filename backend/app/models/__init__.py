@@ -1,4 +1,12 @@
 from app.models import event_capture as _event_capture  # noqa: E402,F401
+from app.models.alerting import (
+    Alert,
+    AlertEvent,
+    MaintenanceWindow,
+    NotificationChannel,
+    NotificationDelivery,
+    NotificationRule,
+)
 from app.models.auth import (
     AuditLog,
     LoginThrottle,
@@ -58,6 +66,8 @@ from app.models.scheduling import (
 
 __all__ = [
     "AuditLog",
+    "Alert",
+    "AlertEvent",
     "BackupRun",
     "BackupTarget",
     "RestoreRun",
@@ -79,6 +89,10 @@ __all__ = [
     "IpPoolExclusion",
     "LoginThrottle",
     "MaintenanceRun",
+    "MaintenanceWindow",
+    "NotificationChannel",
+    "NotificationDelivery",
+    "NotificationRule",
     "Organization",
     "OrganizationMember",
     "Operation",

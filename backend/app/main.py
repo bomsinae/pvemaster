@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
 from app.api.accounts import router as accounts_router
+from app.api.alerting import router as alerting_router
 from app.api.auth import router as auth_router
 from app.api.backups import router as backups_router
 from app.api.clusters import router as clusters_router
@@ -29,6 +30,7 @@ from app.db import create_engine, create_session_factory
 from app.health import check_readiness
 from app.security.credentials import CredentialCipher
 from app.security.mfa import MfaSecretCipher
+from app.security.notification_config import NotificationConfigCipher
 from app.security.passwords import PasswordManager
 from app.security.tokens import TokenManager
 
@@ -84,6 +86,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.readiness_check = check_readiness
     app.state.credential_cipher = CredentialCipher(app_settings.app_secret_key.get_secret_value())
     app.state.mfa_cipher = MfaSecretCipher(app_settings.app_secret_key.get_secret_value())
+    app.state.notification_cipher = NotificationConfigCipher(
+        app_settings.app_secret_key.get_secret_value()
+    )
     app.state.password_manager = PasswordManager()
     app.state.token_manager = TokenManager(app_settings)
     app.state.proxmox_transport = None
@@ -115,6 +120,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(alerting_router)
     app.include_router(backups_router)
     app.include_router(accounts_router)
     app.include_router(clusters_router)

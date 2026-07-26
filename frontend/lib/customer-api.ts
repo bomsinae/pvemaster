@@ -57,6 +57,16 @@ export type CustomerVmDetail = CustomerVm & {
   recent_jobs: CustomerJob[];
 };
 
+export type CustomerAlert = {
+  id: string;
+  type: string;
+  severity: string;
+  status: string;
+  message: string;
+  workload_id: string | null;
+  last_seen_at: string;
+};
+
 type Fetcher = typeof fetch;
 
 export class CustomerApiError extends Error {
@@ -219,6 +229,17 @@ export async function listCustomerVms(
     `${apiBaseUrl}/api/v1/customer/vms`, accessToken, {}, fetcher,
   );
   return (await parseResponse<{ items: CustomerVm[] }>(response)).items;
+}
+
+export async function listCustomerAlerts(
+  apiBaseUrl: string,
+  accessToken: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerAlert[]> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/alerts`, accessToken, {}, fetcher,
+  );
+  return (await parseResponse<{ items: CustomerAlert[] }>(response)).items;
 }
 
 export async function getCustomerVm(

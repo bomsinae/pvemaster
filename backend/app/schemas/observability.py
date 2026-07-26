@@ -82,6 +82,8 @@ class OperationalAlert(BaseModel):
     severity: str
     resource_type: str
     resource_id: str | None = None
+    organization_id: UUID | None = None
+    workload_id: UUID | None = None
     message: str
     value: int | None = None
     threshold: int | None = None

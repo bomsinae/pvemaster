@@ -5,10 +5,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AuthSession,
   CustomerPowerAction,
+  CustomerAlert,
   CustomerApiError,
   CustomerVm,
   getCustomerJob,
   listCustomerJobs,
+  listCustomerAlerts,
   listCustomerVms,
   requestPowerAction,
 } from "@/lib/customer-api";
@@ -117,6 +119,7 @@ export function CustomerPortal({
 }) {
   const [session, setSession] = useState<AuthSession | null>(initialSession);
   const [vms, setVms] = useState<CustomerVm[]>([]);
+  const [alerts, setAlerts] = useState<CustomerAlert[]>([]);
   const [query, setQuery] = useState("");
   const [powerFilter, setPowerFilter] = useState<CustomerPowerFilter>("ALL");
   const [organizationFilter, setOrganizationFilter] = useState("ALL");
@@ -132,11 +135,13 @@ export function CustomerPortal({
   const actionDialogRef = useRef<HTMLElement>(null);
 
   const refreshList = useCallback(async (activeSession: AuthSession) => {
-    const [items, jobs] = await Promise.all([
+    const [items, jobs, customerAlerts] = await Promise.all([
       listCustomerVms(apiBaseUrl, activeSession.accessToken),
       listCustomerJobs(apiBaseUrl, activeSession.accessToken),
+      listCustomerAlerts(apiBaseUrl, activeSession.accessToken).catch(() => []),
     ]);
     setVms(items);
+    setAlerts(customerAlerts);
     setJobsByVmId(() =>
       jobs.reduce<CustomerJobsByVmId>(
         (current, job) => current[job.vm_id] ? current : upsertCustomerJob(current, job),
@@ -278,6 +283,7 @@ export function CustomerPortal({
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="오류 닫기">×</button></div>}
 
       <div className="customer-workspace">
+        {alerts.some((item) => item.status !== "RESOLVED") && <section className="customer-alert-feed" aria-labelledby="customer-alert-title"><div><p className="eyebrow">Notifications</p><h2 id="customer-alert-title">운영 알림</h2></div>{alerts.filter((item) => item.status !== "RESOLVED").slice(0, 5).map((item) => <article key={item.id}><strong>{item.type}</strong><p>{item.message}</p><time>{formatTime(item.last_seen_at)}</time></article>)}</section>}
         <section className="customer-inventory" aria-labelledby="customer-inventory-title">
           <div className="customer-inventory-heading">
             <div>

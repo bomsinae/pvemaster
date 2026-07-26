@@ -596,4 +596,19 @@ PVE 개별 클러스터 장애는 전체 API readiness를 실패시키지 않고
 
 보호 API는 `403 STEP_UP_REQUIRED`의 `details.action`을 반환한다. 클라이언트는
 해당 action으로 발급한 token을 `X-Step-Up-Token`에 넣어 원 요청을 한 번만
-재시도한다. 다른 action, 사용자, epoch 또는 만료된 token은 동일하게 거부한다.
+  재시도한다. 다른 action, 사용자, epoch 또는 만료된 token은 동일하게 거부한다.
+
+## 19. Alert, maintenance와 notification API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/admin/alerts`, `/admin/alerts/{id}` | ADMIN | 지속 경보와 event 이력 |
+| POST | `/admin/alerts/{id}/{action}` | ADMIN | acknowledge/assign/silence/resolve |
+| GET | `/customer/alerts`, `/customer/alerts/{id}` | CUSTOMER + 현재 조직 | 허용된 조직/VM 경보 |
+| GET/POST/PUT/DELETE | `/admin/maintenance-windows` | ADMIN | 전달 suppress 기간 |
+| GET/POST/PUT/DELETE | `/admin/notification-channels` | ADMIN | 암호화 channel 관리 |
+| POST | `/admin/notification-channels/{id}/test` | ADMIN | 실제 test delivery |
+| GET/POST/PUT/DELETE | `/admin/notification-rules` | ADMIN | event/severity/quiet/escalation 규칙 |
+
+Alert action은 body의 `version`이 현재 값과 다르면 `409 ALERT_VERSION_CONFLICT`다.
+Channel 응답 schema에는 endpoint, recipient, secret이 존재하지 않는다.

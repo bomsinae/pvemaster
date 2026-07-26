@@ -194,6 +194,12 @@ PVE API token은 일반적으로 token ID와 secret으로 나뉜다.
 
 ## 8. 감사 로깅
 
+Notification channel 구성은 PVE credential/MFA와 분리된 HKDF context의 AES-GCM으로
+암호화한다. Webhook은 HTTPS, public 목적지 allowlist, DNS 재검증, redirect/proxy
+금지 정책을 통과해야 하며 delivery UUID를 멱등 key로 사용한다. 고객 payload와 API
+조회에는 현재 조직 범위의 일반화된 사건만 포함하고 cluster/node/UPID/endpoint를
+노출하지 않는다.
+
 ### 감사 대상
 
 - 로그인 성공/실패, 로그아웃, MFA 등록/해제/실패.

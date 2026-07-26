@@ -336,6 +336,19 @@ API 트랜잭션에서 operation과 outbox를 함께 commit하고 별도 dispatc
 완료·skip 행은 기본 7일 보존하고 실패 행은 incident 연결을 위해 별도 정책으로
 보존한다.
 
+## Alert와 notification
+
+- `alerts`는 fingerprint unique로 현재 incident 상태, 횟수, 담당자, silence와
+  first/last/resolved 시각을 유지한다.
+- `alert_events`는 OPEN/REPEAT/REOPEN/ACKNOWLEDGE/ASSIGN/SILENCE/RESOLVE의 append
+  이력이다.
+- `notification_channels`는 system 또는 organization scope이며 구성은 암호문,
+  nonce, key version만 저장한다.
+- `notification_rules`는 event/severity, quiet hours와 escalation을 channel에 연결한다.
+- `notification_deliveries`는 `(alert_event_id, channel_id)` unique로 중복 전송을
+  방지하고 시도 횟수, 다음 시도와 안전한 오류 코드만 저장한다.
+- `maintenance_windows`는 대상과 시간 범위, notification suppress 정책을 보관한다.
+
 ## 9.1 PBS 워크로드 백업
 
 ### `backup_targets`

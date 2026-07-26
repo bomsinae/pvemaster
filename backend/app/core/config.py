@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     webauthn_rp_id: str = "localhost"
     webauthn_rp_name: str = "PVE Master"
     webauthn_origin: str = "http://localhost:3000"
+    notification_webhook_allowed_hosts: list[str] = Field(default_factory=list)
+    notification_webhook_allowed_networks: list[str] = Field(default_factory=list)
+    notification_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    notification_max_attempts: int = Field(default=5, ge=1, le=10)
+    smtp_host: str | None = None
+    smtp_port: int = Field(default=465, ge=1, le=65535)
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_from_address: str | None = None
+    smtp_use_tls: bool = True
     jwt_issuer: str = "pve-master"
     jwt_audience: str = "pve-master-api"
     pve_connect_timeout_seconds: float = Field(default=5.0, gt=0, le=60)

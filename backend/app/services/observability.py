@@ -12,8 +12,14 @@ from sqlalchemy.orm import aliased
 
 from app.core.config import Settings
 from app.models.auth import AuditLog, Organization, User, UserRole
+from app.models.backup import BackupRun
 from app.models.cluster import Cluster
-from app.models.inventory import FindingSeverity, FindingStatus, ReconciliationFinding
+from app.models.inventory import (
+    FindingSeverity,
+    FindingStatus,
+    ReconciliationFinding,
+    WorkloadChangeEvent,
+)
 from app.models.ipam import IpAddress, IpAddressState, IpPool, IpPoolExclusion
 from app.models.operation import Operation, Workload
 from app.models.provisioning import ProvisioningRequest, ProvisioningStatus
@@ -208,6 +214,14 @@ class ObservabilityService:
             stale_inventory_clusters=stale_clusters,
             alerts=alerts,
         )
+
+    async def evaluate_alerts(self) -> list[OperationalAlert]:
+        """Compute the current control-plane signals without requiring a dashboard principal."""
+        worker = await self._worker_status()
+        queue = await self._queue_status()
+        clusters = await self._cluster_statuses()
+        scheduler = await self._scheduler_status()
+        return await self._alerts(worker, queue, clusters, scheduler)
 
     async def prometheus_metrics(self) -> str:
         worker = await self._worker_status()
@@ -467,6 +481,16 @@ class ObservabilityService:
                         message="The Proxmox cluster is not connected.",
                     )
                 )
+                if cluster.error_code in {"PVE_AUTH_FAILED", "PVE_PERMISSION_DENIED"}:
+                    alerts.append(
+                        OperationalAlert(
+                            code="CLUSTER_CREDENTIAL_REJECTED",
+                            severity="critical",
+                            resource_type="cluster",
+                            resource_id=str(cluster.cluster_id),
+                            message="The cluster credential was rejected or lacks permission.",
+                        )
+                    )
         critical_findings = await self._session.scalar(
             select(func.count())
             .select_from(ReconciliationFinding)
@@ -544,6 +568,84 @@ class ObservabilityService:
                         threshold=self._settings.ip_pool_low_available_threshold,
                     )
                 )
+        alerts.extend(await self._incident_alerts())
+        return alerts
+
+    async def _incident_alerts(self) -> list[OperationalAlert]:
+        incident_cutoff = datetime.now(UTC) - timedelta(hours=24)
+        alerts: list[OperationalAlert] = []
+        failed_operations = (
+            await self._session.execute(
+                select(Operation, Workload.organization_id)
+                .outerjoin(Workload, Workload.id == Operation.workload_id)
+                .where(
+                    Operation.status.in_(
+                        [
+                            "FAILED",
+                            "TIMEOUT",
+                            "NEEDS_ATTENTION",
+                        ]
+                    ),
+                    Operation.requested_at >= incident_cutoff,
+                )
+            )
+        ).all()
+        for operation, organization_id in failed_operations:
+            alerts.append(
+                OperationalAlert(
+                    code="OPERATION_REQUIRES_ATTENTION",
+                    severity="critical" if operation.status == "NEEDS_ATTENTION" else "warning",
+                    resource_type="operation",
+                    resource_id=str(operation.id),
+                    organization_id=organization_id,
+                    workload_id=operation.workload_id,
+                    message="An operation failed or requires manual review.",
+                )
+            )
+        failed_backups = (
+            await self._session.scalars(
+                select(BackupRun).where(
+                    BackupRun.status.in_(["FAILED", "TIMEOUT", "NEEDS_ATTENTION"]),
+                    BackupRun.created_at >= incident_cutoff,
+                )
+            )
+        ).all()
+        for backup in failed_backups:
+            alerts.append(
+                OperationalAlert(
+                    code="BACKUP_FAILED",
+                    severity="critical",
+                    resource_type="backup",
+                    resource_id=str(backup.id),
+                    organization_id=backup.organization_id,
+                    workload_id=backup.workload_id,
+                    message="A workload backup failed or needs review.",
+                )
+            )
+        change_cutoff = datetime.now(UTC) - timedelta(minutes=10)
+        change_events = (
+            await self._session.execute(
+                select(WorkloadChangeEvent, Workload.organization_id)
+                .join(Workload, Workload.id == WorkloadChangeEvent.workload_id)
+                .where(
+                    WorkloadChangeEvent.observed_at >= change_cutoff,
+                    WorkloadChangeEvent.kind.in_(["POWER_STATE_CHANGED", "MISSING"]),
+                    Workload.organization_id.is_not(None),
+                )
+            )
+        ).all()
+        for event, organization_id in change_events:
+            alerts.append(
+                OperationalAlert(
+                    code="CUSTOMER_VM_STATE_CHANGED",
+                    severity="info",
+                    resource_type="workload",
+                    resource_id=str(event.workload_id),
+                    organization_id=organization_id,
+                    workload_id=event.workload_id,
+                    message="A managed VM state changed.",
+                )
+            )
         return alerts
 
     async def _open_finding_count(self) -> int:

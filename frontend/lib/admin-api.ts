@@ -451,6 +451,50 @@ export type OperationsStatus = {
   }>;
 };
 
+export type PersistentAlert = {
+  id: string;
+  type: string;
+  severity: string;
+  status: string;
+  resource_type: string;
+  resource_id: string | null;
+  message: string;
+  occurrence_count: number;
+  assigned_to_id: string | null;
+  acknowledged_at: string | null;
+  silenced_until: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+  version: number;
+  events: Array<{
+    id: string;
+    event_type: string;
+    actor_user_id: string | null;
+    note: string | null;
+    created_at: string;
+  }>;
+};
+
+export type MaintenanceWindow = {
+  id: string;
+  name: string;
+  target_type: string;
+  target_id: string | null;
+  starts_at: string;
+  ends_at: string;
+  suppress_notifications: boolean;
+};
+
+export type NotificationChannel = {
+  id: string;
+  name: string;
+  type: string;
+  organization_id: string | null;
+  is_enabled: boolean;
+  configured: boolean;
+};
+
 export type InventoryFreshness = {
   cluster_id: string;
   cluster_name: string;
@@ -1325,6 +1369,75 @@ export async function listAuditLogs(
     base, `/api/v1/admin/audit-logs?limit=${limit}&offset=${offset}`, token, {}, fetcher,
   );
 }
+
+export async function listAlerts(base: string, token: string, fetcher?: Fetcher) {
+  return (await api<{ items: PersistentAlert[] }>(
+    base, "/api/v1/admin/alerts", token, {}, fetcher,
+  )).items;
+}
+
+export const actOnAlert = (
+  base: string,
+  token: string,
+  alert: PersistentAlert,
+  action: "acknowledge" | "resolve" | "silence",
+  payload: { note?: string; silenced_until?: string } = {},
+  fetcher?: Fetcher,
+) => api<PersistentAlert>(
+  base,
+  `/api/v1/admin/alerts/${encodeURIComponent(alert.id)}/${action}`,
+  token,
+  {
+    method: "POST",
+    body: JSON.stringify({ ...payload, version: alert.version }),
+  },
+  fetcher,
+);
+
+export async function listMaintenanceWindows(base: string, token: string, fetcher?: Fetcher) {
+  return api<MaintenanceWindow[]>(
+    base, "/api/v1/admin/maintenance-windows", token, {}, fetcher,
+  );
+}
+
+export const createMaintenanceWindow = (
+  base: string,
+  token: string,
+  payload: Record<string, unknown>,
+  fetcher?: Fetcher,
+) => api<MaintenanceWindow>(base, "/api/v1/admin/maintenance-windows", token, {
+  method: "POST",
+  body: JSON.stringify(payload),
+}, fetcher);
+
+export async function listNotificationChannels(base: string, token: string, fetcher?: Fetcher) {
+  return api<NotificationChannel[]>(
+    base, "/api/v1/admin/notification-channels", token, {}, fetcher,
+  );
+}
+
+export const createNotificationChannel = (
+  base: string,
+  token: string,
+  payload: Record<string, unknown>,
+  fetcher?: Fetcher,
+) => api<NotificationChannel>(base, "/api/v1/admin/notification-channels", token, {
+  method: "POST",
+  body: JSON.stringify(payload),
+}, fetcher);
+
+export const testNotificationChannel = (
+  base: string,
+  token: string,
+  channelId: string,
+  fetcher?: Fetcher,
+) => api<{ status: string; last_error_code: string | null }>(
+  base,
+  `/api/v1/admin/notification-channels/${encodeURIComponent(channelId)}/test`,
+  token,
+  { method: "POST" },
+  fetcher,
+);
 
 export async function endSession(base: string, session: SessionLike, fetcher?: Fetcher) {
   await (fetcher ?? fetch)(`${base}/api/v1/auth/logout`, {

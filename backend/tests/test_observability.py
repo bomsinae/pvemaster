@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.auth import AuditLog, UserRole
-from app.schemas.observability import QueueStatus, WorkerStatus
+from app.schemas.observability import OperationalAlert, QueueStatus, WorkerStatus
 from app.security.access import Principal
 from app.services.audit import add_audit_event, sanitize_audit_value
 from app.services.observability import ObservabilityService
@@ -41,6 +41,9 @@ class InventoryAlertService(ObservabilityService):
 
     async def _stale_cluster_count(self) -> int:
         return 0
+
+    async def _incident_alerts(self) -> list[OperationalAlert]:
+        return []
 
 
 def test_audit_values_mask_sensitive_fields_recursively() -> None:

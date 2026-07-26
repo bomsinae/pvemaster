@@ -8,6 +8,7 @@ export const adminSections = [
   "networks",
   "provisioning",
   "operations",
+  "alerts",
   "audit",
 ] as const;
 

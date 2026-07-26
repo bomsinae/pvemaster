@@ -62,6 +62,7 @@ import {
   getAdminWorkloadJob,
   importClusterWorkloads,
   listAuditLogs,
+  listAlerts,
   listBackups,
   listBackupTargets,
   listClusters,
@@ -119,6 +120,7 @@ import { generateSshRsaKeyPair } from "@/lib/ssh-keypair";
 import { VmConsoleModal } from "./vm-console-modal";
 import { ClusterMetricsPanel } from "./cluster-metrics";
 import { OperationCenterView } from "./operation-center-view";
+import { AlertCenterView } from "./alert-center-view";
 import { SecurityCenterDialog } from "./security-center-dialog";
 import { StepUpDialog } from "./step-up-dialog";
 import { useDialogFocus } from "./use-dialog-focus";
@@ -140,6 +142,7 @@ const sectionLabels: Record<Section, string> = {
   networks: "IP 주소 관리",
   provisioning: "프로비저닝",
   operations: "Operation 센터",
+  alerts: "경보와 알림",
   audit: "감사 로그",
 };
 
@@ -308,7 +311,7 @@ export function AdminDashboard({
   const navigation = useMemo<Section[]>(
     () => isSuperAdmin
       ? [...adminSections]
-      : ["overview", "clusters", "inventory", "vms", "backups", "access", "operations"],
+      : ["overview", "clusters", "inventory", "vms", "backups", "access", "operations", "alerts"],
     [isSuperAdmin],
   );
 
@@ -507,6 +510,8 @@ export function AdminDashboard({
         setAuditPageSize(result.limit);
         auditOffsetRef.current = result.offset;
         auditPageSizeRef.current = result.limit;
+      } else if (next === "alerts") {
+        await listAlerts(apiBaseUrl, token);
       }
     } catch (caught) {
       setError(readableError(caught));
@@ -1439,6 +1444,7 @@ export function AdminDashboard({
         {section === "networks" && <NetworksView pools={pools} clusters={clusters} onCreate={() => { setEditingPool(null); setForm("pool"); }} onEdit={(pool) => { setEditingPool(pool); setForm("pool"); }} onDelete={(pool) => { setEditingPool(pool); setForm("pool-delete"); }} />}
         {section === "provisioning" && <ProvisioningView products={products} templates={templates} workloads={workloads} nodes={provisioningNodes} clusters={clusters} requests={requests} onCreateProduct={() => { setEditingProduct(null); setForm("product"); }} onEditProduct={(product) => { setEditingProduct(product); setForm("product"); }} onDeleteProduct={(product) => { setEditingProduct(product); setEditingTemplate(null); setForm("product-delete"); }} onCreateTemplate={() => { setEditingTemplate(null); setForm("template"); }} onEditTemplate={(template) => { setEditingTemplate(template); setForm("template"); }} onDeleteTemplate={(template) => { setEditingTemplate(template); setEditingProduct(null); setForm("template-delete"); }} onCreateNode={() => { setEditingProvisioningNode(null); setForm("node"); }} onEditNode={(node) => { setEditingProvisioningNode(node); setForm("node"); }} />}
         {section === "operations" && <OperationCenterView apiBaseUrl={apiBaseUrl} token={token} />}
+        {section === "alerts" && <AlertCenterView apiBaseUrl={apiBaseUrl} token={token} />}
         {section === "audit" && <AuditView audits={audits} total={auditTotal} offset={auditOffset} pageSize={auditPageSize} loading={loading} onPageChange={(offset) => { void loadSection("audit", offset); }} onPageSizeChange={(limit) => { void loadSection("audit", 0, limit); }} />}
       </section>
 

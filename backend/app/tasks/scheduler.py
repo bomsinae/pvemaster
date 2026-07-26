@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
+from redis.asyncio import Redis
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,8 @@ from app.models.cluster import Cluster, ClusterCredential
 from app.models.provisioning import ProvisioningRequest, ProvisioningStatus
 from app.models.scheduling import RunStatus, SyncRun
 from app.security.credentials import CredentialCipher
+from app.security.notification_config import NotificationConfigCipher
+from app.services.alerting import AlertingService
 from app.services.backup_metadata import BackupMetadataReconciler
 from app.services.maintenance import (
     operation_watchdog_callback,
@@ -21,6 +24,7 @@ from app.services.maintenance import (
     retention_callback,
     run_maintenance_job,
 )
+from app.services.observability import ObservabilityService
 from app.services.outbox import BACKUP_EVENT, POWER_EVENT, RESTORE_EVENT
 from app.services.reconciliation import create_sync_run
 from app.tasks.backup import enqueue_backup_operation, enqueue_restore_operation
@@ -168,6 +172,23 @@ def reconcile_backup_metadata() -> int:
 
 
 async def _check_control_plane_state(session: AsyncSession) -> int:
+    settings = get_settings()
+    redis = Redis.from_url(settings.redis_url.get_secret_value())
+    try:
+        current_alerts = await ObservabilityService(
+            session=session,
+            redis=redis,
+            settings=settings,
+        ).evaluate_alerts()
+    finally:
+        await redis.aclose()
+    alerting = AlertingService(
+        session=session,
+        settings=settings,
+        cipher=NotificationConfigCipher(settings.app_secret_key.get_secret_value()),
+    )
+    changed = await alerting.sync(current_alerts)
+    await alerting.deliver_due()
     stale_before = datetime.now(UTC) - timedelta(minutes=5)
     missing_credentials = await session.scalar(
         select(func.count())
@@ -230,4 +251,4 @@ async def _check_control_plane_state(session: AsyncSession) -> int:
             "CONTROL_PLANE_STATE_DEGRADED",
             "Scheduled control-plane checks found degraded state.",
         )
-    return 0
+    return changed
