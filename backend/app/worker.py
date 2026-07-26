@@ -76,6 +76,14 @@ celery_app.conf.update(
             "task": "app.tasks.scheduler.reconcile_backup_verifications",
             "schedule": 300.0,
         },
+        "collect-workload-metrics": {
+            "task": "app.tasks.scheduler.collect_workload_metrics",
+            "schedule": 60.0,
+        },
+        "retain-workload-metrics": {
+            "task": "app.tasks.scheduler.retain_workload_metrics",
+            "schedule": 300.0,
+        },
         "run-data-retention": {
             "task": "app.tasks.scheduler.run_retention",
             "schedule": 86400.0,

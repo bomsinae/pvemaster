@@ -16,6 +16,11 @@ for (const viewport of [
     const bodyWidth = await page.locator("body").evaluate((element) => element.scrollWidth);
     expect(bodyWidth).toBeLessThanOrEqual(viewport.width);
     await expect(page.getByRole("button", { name: "시작", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /customer-web-01.*상세 보기/ }).click();
+    await expect(page.getByRole("heading", { name: "customer-web-01" })).toBeVisible();
+    const detailBodyWidth = await page.locator("body").evaluate((element) => element.scrollWidth);
+    expect(detailBodyWidth).toBeLessThanOrEqual(viewport.width);
+    await expect(page.getByRole("img", { name: "CPU 성능 그래프" })).toBeVisible();
   });
 }
 
@@ -32,7 +37,6 @@ test("API failure is announced and a refresh recovers the session", async ({ pag
   await expect(page.locator(".error-banner[role='alert']")).toContainText("가상 머신 목록 조회 시간이 초과되었습니다.");
 
   await page.reload();
-  await loginAs(page, "customer");
   await expect(page.getByText("customer-web-01", { exact: true })).toBeVisible();
 });
 

@@ -43,6 +43,7 @@ from app.models.ipam import (
     IpPool,
     IpPoolExclusion,
 )
+from app.models.metrics import WorkloadMetric
 from app.models.operation import (
     Operation,
     OperationAssignment,
@@ -127,5 +128,6 @@ __all__ = [
     "Template",
     "SyncRun",
     "Workload",
+    "WorkloadMetric",
     "WorkloadAssignment",
 ]

@@ -23,6 +23,7 @@ export type CustomerVm = {
   cpu_cores: number | null;
   memory_bytes: number | null;
   disk_bytes: number | null;
+  uptime_seconds?: number | null;
   assigned_ip_addresses: string[];
   observed_at: string;
   is_stale?: boolean;
@@ -55,6 +56,52 @@ export type CustomerJob = {
 
 export type CustomerVmDetail = CustomerVm & {
   recent_jobs: CustomerJob[];
+  recent_state_changes: Array<{
+    id: number;
+    change_type: string;
+    summary: string;
+    observed_at: string;
+  }>;
+  recent_backup: {
+    status: string;
+    completed_at: string | null;
+    scheduled_for: string | null;
+  } | null;
+  upcoming_maintenance: Array<{
+    id: string;
+    name: string;
+    starts_at: string;
+    ends_at: string;
+  }>;
+};
+
+export type CustomerMetricRange = "day" | "month" | "year";
+
+export type CustomerMetricPoint = {
+  time: string;
+  sample_count: number;
+  cpu_avg: number | null;
+  cpu_max: number | null;
+  memory_used_avg: number | null;
+  memory_used_max: number | null;
+  disk_read_avg: number | null;
+  disk_read_max: number | null;
+  disk_write_avg: number | null;
+  disk_write_max: number | null;
+  network_receive_avg: number | null;
+  network_receive_max: number | null;
+  network_transmit_avg: number | null;
+  network_transmit_max: number | null;
+};
+
+export type CustomerMetricSeries = {
+  vm_id: string;
+  range: CustomerMetricRange;
+  resolution_seconds: number;
+  assignment_started_at: string;
+  observed_at: string;
+  partial: boolean;
+  items: CustomerMetricPoint[];
 };
 
 export type CustomerAlert = {
@@ -255,6 +302,22 @@ export async function getCustomerVm(
     fetcher,
   );
   return parseResponse<CustomerVmDetail>(response);
+}
+
+export async function getCustomerVmMetrics(
+  apiBaseUrl: string,
+  accessToken: string,
+  vmId: string,
+  range: CustomerMetricRange,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerMetricSeries> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/vms/${encodeURIComponent(vmId)}/metrics?range=${range}`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return parseResponse<CustomerMetricSeries>(response);
 }
 
 export async function requestPowerAction(

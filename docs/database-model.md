@@ -482,3 +482,23 @@ DB trigger가 모든 UPDATE를 차단하고 DELETE는 retention transaction flag
 - 원본 `backup_run_id`, 선택적 `restore_run_id`, 상태, due/started/finished, 안전한 오류
   코드와 결과 요약을 저장한다.
 - snapshot이 PBS에서 prune되어도 run과 검증 이력은 삭제하지 않는다.
+
+## 16. 고객 workload 성능 지표
+
+### `workload_metrics`
+
+- `workload_id`, 수집 당시 `organization_id`, `resolution_seconds`, `bucket_at`을
+  복합 유일 키로 사용한다.
+- CPU, memory used, disk read/write, network receive/transmit의 평균과 최대,
+  `sample_count`를 저장한다. 수집되지 않은 값은 0으로 대체하지 않고 NULL로 둔다.
+- 고객 query용 `(organization_id, workload_id, resolution_seconds, bucket_at)`
+  인덱스를 둔다.
+- raw 1분 값은 24시간, 5분 rollup은 30일, 1시간 rollup은 365일 보존한다.
+- rollup 평균은 `sample_count` 가중 평균, 최대는 원 구간의 최댓값이다. 같은 bucket
+  재실행은 upsert되어 중복 행을 만들지 않는다.
+- 수집 시 현재 미회수 assignment의 조직 snapshot을 저장하며 assignment 시작 전
+  PVE 점은 버린다. 재할당 후 새 조직 query가 과거 조직 점을 읽지 않는다.
+
+`workloads.uptime_seconds`는 inventory 관측 시 갱신되는 nullable 값이다. metric
+보존 삭제는 workload와 operation 이력을 삭제하지 않으며 scheduler의 별도
+maintenance 작업으로 실행한다.

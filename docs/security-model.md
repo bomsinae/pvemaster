@@ -259,6 +259,11 @@ Notification channel 구성은 PVE credential/MFA와 분리된 HKDF context의 A
 - policy 변경·skip과 restore drill에는 최근 MFA 기반 step-up을 요구하고, schedule
   dispatch는 생성자가 여전히 활성 SUPER_ADMIN인지 다시 확인한다.
 - 고객 backup/snapshot API는 과거 소유권 경계 검증이 별도 승인되기 전까지 deny한다.
+- 고객 VM 상세, 작업 이력과 metric은 활성 멤버십·현재 조직·미회수 assignment를
+  매 요청에 재검사한다. metric에는 수집 당시 조직 snapshot과 assignment 시작 시각을
+  함께 적용해 재할당 전 값을 차단한다.
+- 고객 작업 실패 문구는 허용된 일반화 메시지만 반환하고 PVE 응답, UPID,
+  cluster/node, endpoint를 노출하지 않는다.
 
 ## 11. 출시 전 보안 완료 조건
 

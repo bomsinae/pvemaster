@@ -31,6 +31,7 @@ type MockState = {
   syncRunPolls: number;
   customerListCalls: number;
   findingStatus: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+  browserSessionStored: boolean;
   requests: Array<{ method: string; path: string }>;
 };
 
@@ -103,6 +104,7 @@ function customerVm(state: MockState, stale = false) {
     cpu_cores: item.cpu_cores,
     memory_bytes: item.memory_bytes,
     disk_bytes: item.disk_bytes,
+    uptime_seconds: 176_400,
     assigned_ip_addresses: item.assigned_ip_addresses,
     observed_at: item.observed_at,
     is_stale: stale,
@@ -213,6 +215,7 @@ export async function installApiMock(
     syncRunPolls: 0,
     customerListCalls: 0,
     findingStatus: "OPEN",
+    browserSessionStored: false,
     requests: [],
   };
 
@@ -228,14 +231,23 @@ export async function installApiMock(
       return;
     }
     if (path === "/api/auth/session" && method === "PUT") {
-      await json(route, apiError("SESSION_NOT_FOUND", "저장된 세션이 없습니다."), 401);
+      if (!state.browserSessionStored) {
+        await json(route, apiError("SESSION_NOT_FOUND", "저장된 세션이 없습니다."), 401);
+        return;
+      }
+      await json(route, {
+        access_token: `${state.role.toLowerCase()}-access`,
+        refresh_token: "",
+      });
       return;
     }
     if (path === "/api/auth/session" && method === "POST") {
+      state.browserSessionStored = true;
       await route.fulfill({ status: 204, headers: corsHeaders });
       return;
     }
     if (path === "/api/auth/session" && method === "DELETE") {
+      state.browserSessionStored = false;
       await route.fulfill({ status: 204, headers: corsHeaders });
       return;
     }
@@ -519,6 +531,93 @@ export async function installApiMock(
           started_at: observedAt,
           finished_at: observedAt,
         }] : [],
+        total: state.jobPolls > 0 ? 1 : 0,
+        limit: Number(url.searchParams.get("limit") ?? 25),
+        offset: Number(url.searchParams.get("offset") ?? 0),
+      });
+      return;
+    }
+    if (path === `/api/v1/customer/vms/${ids.workload}/metrics`) {
+      const range = url.searchParams.get("range") ?? "day";
+      await json(route, {
+        vm_id: ids.workload,
+        range,
+        resolution_seconds: range === "day" ? 60 : range === "month" ? 300 : 3600,
+        assignment_started_at: "2026-07-20T00:00:00Z",
+        observed_at: observedAt,
+        partial: true,
+        items: [
+          {
+            time: "2026-07-24T05:30:00Z",
+            sample_count: 1,
+            cpu_avg: 0.21,
+            cpu_max: 0.35,
+            memory_used_avg: 3_221_225_472,
+            memory_used_max: 3_758_096_384,
+            disk_read_avg: null,
+            disk_read_max: null,
+            disk_write_avg: 65_536,
+            disk_write_max: 131_072,
+            network_receive_avg: 98_304,
+            network_receive_max: 196_608,
+            network_transmit_avg: null,
+            network_transmit_max: null,
+          },
+          {
+            time: observedAt,
+            sample_count: 1,
+            cpu_avg: 0.28,
+            cpu_max: 0.42,
+            memory_used_avg: 3_489_660_928,
+            memory_used_max: 4_026_531_840,
+            disk_read_avg: 32_768,
+            disk_read_max: 65_536,
+            disk_write_avg: 81_920,
+            disk_write_max: 163_840,
+            network_receive_avg: 114_688,
+            network_receive_max: 229_376,
+            network_transmit_avg: 57_344,
+            network_transmit_max: 114_688,
+          },
+        ],
+      });
+      return;
+    }
+    if (path === `/api/v1/customer/vms/${ids.workload}`) {
+      await json(route, {
+        ...customerVm(state, options.staleCustomerInventory),
+        recent_jobs: state.jobPolls > 0 ? [{
+          id: ids.job,
+          job_id: ids.job,
+          vm_id: ids.workload,
+          action: "start",
+          action_mode: "STANDARD",
+          status: "SUCCEEDED",
+          result: { final_power_state: "RUNNING" },
+          error_code: null,
+          error_summary: null,
+          retryable: false,
+          requested_at: observedAt,
+          started_at: observedAt,
+          finished_at: observedAt,
+        }] : [],
+        recent_state_changes: [{
+          id: 1,
+          change_type: "POWER_STATE",
+          summary: "전원 상태가 실행 중으로 변경되었습니다.",
+          observed_at: observedAt,
+        }],
+        recent_backup: {
+          status: "SUCCEEDED",
+          completed_at: "2026-07-24T04:00:00Z",
+          scheduled_for: null,
+        },
+        upcoming_maintenance: [{
+          id: "maintenance-1",
+          name: "호스트 보안 업데이트",
+          starts_at: "2026-07-28T01:00:00Z",
+          ends_at: "2026-07-28T02:00:00Z",
+        }],
       });
       return;
     }

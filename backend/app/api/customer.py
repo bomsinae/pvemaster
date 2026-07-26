@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, cast
 from uuid import UUID
 
@@ -5,11 +6,14 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
+from app.core.errors import AppError
 from app.dependencies import PrincipalDependency, get_db_session
-from app.models.operation import PowerAction
+from app.models.operation import OperationStatus, PowerAction
 from app.schemas.customer import (
     CustomerJobListResponse,
     CustomerJobResponse,
+    CustomerMetricRange,
+    CustomerMetricSeriesResponse,
     CustomerPowerActionRequest,
     CustomerVmDetailResponse,
     CustomerVmListResponse,
@@ -199,10 +203,35 @@ async def list_customer_jobs(
     session: SessionDependency,
     principal: PrincipalDependency,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0, le=100_000)] = 0,
+    vm_id: UUID | None = None,
+    job_status: Annotated[OperationStatus | None, Query(alias="status")] = None,
+    started_at: datetime | None = None,
+    ended_at: datetime | None = None,
 ) -> CustomerJobListResponse:
+    if any(
+        value is not None and value.tzinfo is None
+        for value in (started_at, ended_at)
+    ):
+        raise AppError(422, "INVALID_TIME_RANGE", "The time range must include a timezone.")
+    if started_at and ended_at and started_at > ended_at:
+        raise AppError(422, "INVALID_TIME_RANGE", "The time range is invalid.")
+    if started_at and started_at < datetime.now(UTC) - timedelta(days=365):
+        raise AppError(422, "TIME_RANGE_TOO_LARGE", "The maximum history range is 365 days.")
     response.headers["Cache-Control"] = "no-store"
+    items, total = await _service(request, session, principal).list_jobs(
+        limit=limit,
+        offset=offset,
+        vm_id=vm_id,
+        status=job_status,
+        started_at=started_at,
+        ended_at=ended_at,
+    )
     return CustomerJobListResponse(
-        items=await _service(request, session, principal).list_jobs(limit=limit)
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -216,3 +245,19 @@ async def get_customer_job(
 ) -> CustomerJobResponse:
     response.headers["Cache-Control"] = "no-store"
     return await _service(request, session, principal).get_job(job_id)
+
+
+@router.get(
+    "/vms/{vm_id}/metrics",
+    response_model=CustomerMetricSeriesResponse,
+)
+async def get_customer_vm_metrics(
+    vm_id: UUID,
+    request: Request,
+    response: Response,
+    session: SessionDependency,
+    principal: PrincipalDependency,
+    range: CustomerMetricRange = "day",
+) -> CustomerMetricSeriesResponse:
+    response.headers["Cache-Control"] = "private, max-age=30"
+    return await _service(request, session, principal).metrics(vm_id, range)

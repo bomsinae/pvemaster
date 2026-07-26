@@ -629,3 +629,23 @@ Channel 응답 schema에는 endpoint, recipient, secret이 존재하지 않는�
 정책 변경과 skip에는 action-bound step-up MFA를 적용한다. Schedule은 5-field cron과
 IANA timezone을 함께 저장하며 API 응답은 UTC `next_run_at`을 반환한다. 고객 backup
 API는 제품 정책상 계속 제공하지 않는다.
+
+## 21. 고객 VM 이력과 성능 지표 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/customer/vms/{vm_id}` | CUSTOMER + 현재 조직/할당 | 사양, uptime, 최근 본인 작업, 상태 변화, 백업 상태와 유지보수 |
+| GET | `/customer/vms/{vm_id}/metrics` | CUSTOMER + 현재 조직/할당 | `day`, `month`, `year` 범위의 안전한 집계 지표 |
+| GET | `/customer/jobs` | CUSTOMER + 현재 조직/할당 + 요청자 | 페이지네이션과 VM·상태·기간 필터 |
+| GET | `/customer/jobs/{job_id}` | CUSTOMER + 현재 조직/할당 + 요청자 | 고객 작업 상세 |
+
+작업 목록은 `limit` 1–100, `offset` 0–100000을 허용하고 최대 조회 기간은 365일이다.
+시간 파라미터는 timezone을 포함해야 한다. metric 해상도는 24시간 1분, 30일 5분,
+365일 1시간이며 응답은 최대 10000개 점으로 제한한다. 모든 조회는 현재 활성
+멤버십, 현재 workload 조직과 미회수 assignment를 같은 DB query 경계에서 다시
+검사한다. assignment 시작 전 또는 다른 조직 snapshot의 metric과 operation은
+반환하지 않는다.
+
+고객 응답에는 조직 UUID, cluster/node, VMID, PVE UPID·endpoint와 내부 오류 원문이
+없다. metric 응답은 누락 값을 `null`, 예상 구간 대비 부족 여부를 `partial`로
+표현하고 shared cache를 사용하지 않는다.

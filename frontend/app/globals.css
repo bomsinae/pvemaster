@@ -5568,6 +5568,250 @@ h1 {
   }
 }
 
+.customer-vm-identity button {
+  display: grid;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.customer-vm-identity button small {
+  color: var(--accent);
+}
+
+.customer-global-notice {
+  position: fixed;
+  z-index: 90;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 14px 16px;
+  border: 1px solid var(--accent);
+  background: var(--surface);
+  box-shadow: 0 16px 48px rgb(25 39 29 / 18%);
+}
+
+.customer-global-notice button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.customer-vm-detail {
+  display: grid;
+  gap: 24px;
+}
+
+.customer-vm-detail-header,
+.customer-metric-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.customer-vm-detail-header h1,
+.customer-metric-toolbar h2 {
+  margin: 0;
+}
+
+.customer-vm-detail-header > div {
+  display: grid;
+  gap: 6px;
+}
+
+.customer-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border-block: 1px solid var(--line);
+}
+
+.customer-detail-facts article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 18px;
+  border-right: 1px solid var(--line);
+}
+
+.customer-detail-facts article:last-child {
+  border-right: 0;
+}
+
+.customer-detail-facts small,
+.customer-metric-chart small,
+.customer-detail-grid time,
+.customer-detail-grid span {
+  color: var(--muted);
+}
+
+.customer-detail-facts strong {
+  overflow-wrap: anywhere;
+}
+
+.customer-metric-toolbar > div {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.customer-metric-toolbar nav {
+  display: flex;
+  border: 1px solid var(--line);
+}
+
+.customer-metric-toolbar nav button {
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+}
+
+.customer-metric-toolbar nav button:last-child {
+  border-right: 0;
+}
+
+.customer-metric-toolbar nav button.active {
+  background: var(--accent);
+  color: white;
+}
+
+.customer-metric-grid,
+.customer-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.customer-metric-chart,
+.customer-detail-grid > section {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+}
+
+.customer-metric-chart header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.customer-metric-chart header span {
+  display: grid;
+  gap: 3px;
+}
+
+.customer-metric-chart svg {
+  width: 100%;
+  height: 132px;
+  overflow: visible;
+}
+
+.customer-metric-chart svg line {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.customer-metric-chart svg path {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.customer-metric-chart footer {
+  display: flex;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.customer-metric-chart footer span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.customer-metric-chart footer i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.customer-metric-empty {
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  min-height: 132px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.customer-detail-grid > section {
+  align-content: start;
+}
+
+.customer-detail-grid h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.customer-detail-grid article {
+  display: grid;
+  gap: 5px;
+  padding-block: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.customer-detail-grid p {
+  margin: 0;
+  color: var(--muted);
+}
+
+@media (max-width: 1000px) {
+  .customer-detail-facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .customer-detail-facts article:nth-child(3) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .customer-vm-detail-header,
+  .customer-metric-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .customer-detail-facts,
+  .customer-metric-grid,
+  .customer-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-detail-facts article {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .customer-detail-facts article:last-child {
+    border-bottom: 0;
+  }
+
+  .customer-metric-toolbar nav button {
+    flex: 1;
+  }
+}
+
 .backup-workspace {
   display: grid;
   gap: 1.5rem;

@@ -1,5 +1,5 @@
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
 from uuid import uuid4
 
@@ -7,7 +7,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
-from sqlalchemy import delete, text
+from sqlalchemy import delete, select, text
 
 from app.core.config import Settings
 from app.main import create_app
@@ -29,8 +29,11 @@ from app.models.ipam import (
     IpAllocationStatus,
     IpPool,
 )
+from app.models.metrics import WorkloadMetric
 from app.models.operation import Operation, PveTask, Workload, WorkloadAssignment
+from app.security.credentials import CredentialCipher
 from app.security.passwords import PasswordManager
+from app.services.workload_metrics import WorkloadMetricService
 
 pytestmark = pytest.mark.skipif(
     "AUTH_TEST_DATABASE_URL" not in os.environ,
@@ -45,6 +48,7 @@ async def _clear(app: FastAPI) -> None:
             AuditLog,
             PveTask,
             Operation,
+            WorkloadMetric,
             WorkloadAssignment,
             IpAllocation,
             Workload,
@@ -149,6 +153,7 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
             cpu_cores=4,
             memory_bytes=8_589_934_592,
             disk_bytes=107_374_182_400,
+            uptime_seconds=86_400,
             is_template=False,
             is_present=True,
             organization_id=organization_a.id,
@@ -254,6 +259,58 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
             ]
         )
         await session.flush()
+        assignment_started_at = datetime.now(UTC) - timedelta(minutes=30)
+        session.add_all(
+            [
+                WorkloadAssignment(
+                    workload_id=vm_a.id,
+                    organization_id=organization_a.id,
+                    assigned_by_id=admin.id,
+                    assigned_at=assignment_started_at,
+                ),
+                WorkloadAssignment(
+                    workload_id=vm_b.id,
+                    organization_id=organization_b.id,
+                    assigned_by_id=admin.id,
+                    assigned_at=assignment_started_at,
+                ),
+                WorkloadAssignment(
+                    workload_id=vm_c.id,
+                    organization_id=organization_c.id,
+                    assigned_by_id=admin.id,
+                    assigned_at=assignment_started_at,
+                ),
+                WorkloadMetric(
+                    workload_id=vm_a.id,
+                    organization_id=organization_a.id,
+                    resolution_seconds=60,
+                    bucket_at=datetime.now(UTC) - timedelta(minutes=10),
+                    sample_count=1,
+                    cpu_avg=0.25,
+                    cpu_max=0.4,
+                    memory_used_avg=4_294_967_296,
+                    memory_used_max=5_368_709_120,
+                ),
+                WorkloadMetric(
+                    workload_id=vm_a.id,
+                    organization_id=organization_a.id,
+                    resolution_seconds=60,
+                    bucket_at=datetime.now(UTC) - timedelta(hours=1),
+                    sample_count=1,
+                    cpu_avg=0.95,
+                    cpu_max=0.99,
+                ),
+                WorkloadMetric(
+                    workload_id=vm_a.id,
+                    organization_id=organization_b.id,
+                    resolution_seconds=60,
+                    bucket_at=datetime.now(UTC) - timedelta(minutes=5),
+                    sample_count=1,
+                    cpu_avg=0.75,
+                    cpu_max=0.8,
+                ),
+            ]
+        )
         session.add(ip_address)
         await session.flush()
         session.add(ip_allocation)
@@ -294,10 +351,27 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
             assert own.json()["organization_name"] == "Organization A"
             assert own.json()["memory_bytes"] == 8_589_934_592
             assert own.json()["disk_bytes"] == 107_374_182_400
+            assert own.json()["uptime_seconds"] == 86_400
             assert own.json()["assigned_ip_addresses"] == ["192.0.2.24"]
             assert "cluster_id" not in own.text
             assert "node" not in own.text
             assert foreign.status_code == missing.status_code == 404
+
+            metrics = await client.get(
+                f"/api/v1/customer/vms/{vm_a.id}/metrics?range=day",
+                headers=headers_a,
+            )
+            foreign_metrics = await client.get(
+                f"/api/v1/customer/vms/{vm_b.id}/metrics?range=day",
+                headers=headers_a,
+            )
+            assert metrics.status_code == 200
+            assert [item["cpu_avg"] for item in metrics.json()["items"]] == [0.25]
+            assert metrics.json()["assignment_started_at"] is not None
+            assert "organization_id" not in metrics.text
+            assert "cluster" not in metrics.text
+            assert "node" not in metrics.text
+            assert foreign_metrics.status_code == 404
             assert foreign.json()["error"]["code"] == missing.json()["error"]["code"]
 
             own_console = await client.post(
@@ -372,8 +446,29 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
             own_jobs = await client.get("/api/v1/customer/jobs", headers=headers_a)
             assert own_jobs.status_code == 200
             assert own_jobs.json()["items"][0]["id"] == accepted.json()["id"]
+            assert own_jobs.json()["total"] == 1
+            assert own_jobs.json()["limit"] == 50
+            assert own_jobs.json()["offset"] == 0
             assert "cluster_id" not in own_jobs.text
             assert "node" not in own_jobs.text
+            filtered_jobs = await client.get(
+                f"/api/v1/customer/jobs?vm_id={vm_a.id}&status=QUEUED&limit=1&offset=0",
+                headers=headers_a,
+            )
+            assert filtered_jobs.status_code == 200
+            assert filtered_jobs.json()["total"] == 1
+            too_old = (datetime.now(UTC) - timedelta(days=366)).isoformat()
+            oversized_history = await client.get(
+                f"/api/v1/customer/jobs?started_at={too_old}",
+                headers=headers_a,
+            )
+            assert oversized_history.status_code == 422
+            timezone_missing = await client.get(
+                "/api/v1/customer/jobs?started_at=2026-07-26T12:00:00",
+                headers=headers_a,
+            )
+            assert timezone_missing.status_code == 422
+            assert timezone_missing.json()["error"]["code"] == "INVALID_TIME_RANGE"
 
             updated_detail = await client.get(f"/api/v1/customer/vms/{vm_a.id}", headers=headers_a)
             assert updated_detail.json()["recent_jobs"][0]["id"] == accepted.json()["id"]
@@ -404,6 +499,24 @@ async def test_customer_portal_prevents_cross_organization_idor() -> None:
             assert len(published) == 2
 
             async with app.state.db_session_factory() as session:
+                created_rollups = await WorkloadMetricService(
+                    session=session,
+                    settings=settings,
+                    cipher=CredentialCipher(
+                        settings.app_secret_key.get_secret_value()
+                    ),
+                ).downsample_and_retain(now=datetime.now(UTC))
+                assert created_rollups >= 4
+                resolutions = set(
+                    await session.scalars(
+                        select(WorkloadMetric.resolution_seconds).where(
+                            WorkloadMetric.workload_id == vm_a.id,
+                            WorkloadMetric.organization_id == organization_a.id,
+                        )
+                    )
+                )
+                assert resolutions == {60, 300, 3600}
+
                 reassigned = await session.get(Workload, vm_a.id, with_for_update=True)
                 assert reassigned is not None
                 reassigned.organization_id = organization_b.id

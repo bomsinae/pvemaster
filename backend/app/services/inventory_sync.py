@@ -345,6 +345,7 @@ class ScheduledInventorySyncRunner:
                     cpu_cores=guest.maxcpu,
                     memory_bytes=guest.maxmem,
                     disk_bytes=guest.maxdisk,
+                    uptime_seconds=guest.uptime,
                     is_template=bool(guest.template),
                     is_present=True,
                     sync_generation=run.generation,
@@ -371,6 +372,7 @@ class ScheduledInventorySyncRunner:
                 workload.cpu_cores = guest.maxcpu
                 workload.memory_bytes = guest.maxmem
                 workload.disk_bytes = guest.maxdisk
+                workload.uptime_seconds = guest.uptime
                 workload.is_template = bool(guest.template)
                 workload.is_present = True
                 workload.missing_since = None

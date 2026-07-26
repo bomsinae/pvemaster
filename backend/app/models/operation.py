@@ -77,6 +77,7 @@ class Workload(Base):
     cpu_cores: Mapped[int | None] = mapped_column(Integer)
     memory_bytes: Mapped[int | None] = mapped_column(BigInteger)
     disk_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    uptime_seconds: Mapped[int | None] = mapped_column(BigInteger)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_present: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sync_generation: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)

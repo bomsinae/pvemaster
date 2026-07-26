@@ -22,6 +22,29 @@ test("customer sees only an assigned VM and completes a power operation", async 
   await expect(page.getByLabel("가상 머신 목록").getByText("실행 중", { exact: true })).toBeVisible();
 });
 
+test("customer opens a refresh-safe VM detail with sparse metrics and history", async ({ page }) => {
+  await installApiMock(page);
+  await loginAs(page, "customer");
+
+  await page.getByRole("button", { name: /customer-web-01.*상세 보기/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/customer/vms/${ids.workload}$`));
+  await expect(page.getByRole("heading", { name: "customer-web-01" })).toBeVisible();
+  await expect(page.getByText("2일 1시간")).toBeVisible();
+  await expect(page.getByText("일부 구간 누락")).toBeVisible();
+  await expect(page.getByRole("img", { name: "CPU 성능 그래프" })).toBeVisible();
+  await expect(page.getByText("수집된 값 없음")).toHaveCount(0);
+  await expect(page.getByText("전원 상태가 실행 중으로 변경되었습니다.")).toBeVisible();
+  await expect(page.getByText("호스트 보안 업데이트")).toBeVisible();
+
+  await page.getByRole("button", { name: "30일" }).click();
+  await expect(page.getByRole("button", { name: "30일" })).toHaveAttribute("aria-pressed", "true");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "customer-web-01" })).toBeVisible();
+  await page.getByRole("button", { name: "VM 목록으로" }).click();
+  await expect(page).toHaveURL("/");
+  await expect(page.getByRole("heading", { name: "가상 머신" })).toBeVisible();
+});
+
 test("customer isolation hides foreign and former ownership and rejects inactive organizations", async ({ page }) => {
   await installApiMock(page);
   await loginAs(page, "customer");

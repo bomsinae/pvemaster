@@ -131,6 +131,22 @@ class ProxmoxClient:
         )
         return self._require_object_list(data)
 
+    async def get_guest_rrd_data(
+        self,
+        *,
+        kind: str,
+        node: str,
+        vmid: int,
+        timeframe: str,
+    ) -> list[dict[str, Any]]:
+        guest_type = self._guest_type(kind)
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}/{vmid}/rrddata",
+            params={"timeframe": timeframe, "cf": "AVERAGE"},
+            expected_type=list,
+        )
+        return self._require_object_list(data)
+
     async def get_guests(self) -> list[dict[str, Any]]:
         data = await self._request_data(
             "/api2/json/cluster/resources",

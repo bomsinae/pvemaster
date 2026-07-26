@@ -7,7 +7,12 @@ import {
   CustomerPowerAction,
   CustomerAlert,
   CustomerApiError,
+  CustomerMetricRange,
+  CustomerMetricSeries,
   CustomerVm,
+  CustomerVmDetail,
+  getCustomerVm,
+  getCustomerVmMetrics,
   getCustomerJob,
   listCustomerJobs,
   listCustomerAlerts,
@@ -25,6 +30,7 @@ import { SecurityCenterDialog } from "./security-center-dialog";
 import { StepUpDialog } from "./step-up-dialog";
 import { useDialogFocus } from "./use-dialog-focus";
 import { VmConsoleModal } from "./vm-console-modal";
+import { CustomerVmDetailView } from "./customer-vm-detail";
 
 const actionLabels: Record<CustomerPowerAction, string> = {
   start: "시작",
@@ -120,6 +126,11 @@ export function CustomerPortal({
   const [session, setSession] = useState<AuthSession | null>(initialSession);
   const [vms, setVms] = useState<CustomerVm[]>([]);
   const [alerts, setAlerts] = useState<CustomerAlert[]>([]);
+  const [selectedDetail, setSelectedDetail] = useState<CustomerVmDetail | null>(null);
+  const [detailMetrics, setDetailMetrics] = useState<CustomerMetricSeries | null>(null);
+  const [metricRange, setMetricRange] = useState<CustomerMetricRange>("day");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
   const [powerFilter, setPowerFilter] = useState<CustomerPowerFilter>("ALL");
   const [organizationFilter, setOrganizationFilter] = useState("ALL");
@@ -150,6 +161,29 @@ export function CustomerPortal({
     );
   }, [apiBaseUrl]);
 
+  const loadDetail = useCallback(async (
+    activeSession: AuthSession,
+    vmId: string,
+    range: CustomerMetricRange,
+  ) => {
+    setDetailLoading(true);
+    try {
+      const [detail, metrics] = await Promise.all([
+        getCustomerVm(apiBaseUrl, activeSession.accessToken, vmId),
+        getCustomerVmMetrics(apiBaseUrl, activeSession.accessToken, vmId, range),
+      ]);
+      setSelectedDetail(detail);
+      setDetailMetrics(metrics);
+      setError("");
+    } catch (caught) {
+      setSelectedDetail(null);
+      setDetailMetrics(null);
+      setError(errorMessage(caught));
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [apiBaseUrl]);
+
   useEffect(() => {
     if (!session) return;
     const timer = window.setTimeout(() => {
@@ -159,6 +193,25 @@ export function CustomerPortal({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [refreshList, session]);
+
+  useEffect(() => {
+    if (!session) return;
+    const restoreRoute = () => {
+      const match = window.location.pathname.match(/^\/customer\/vms\/([^/]+)$/);
+      if (!match) {
+        setSelectedDetail(null);
+        setDetailMetrics(null);
+        return;
+      }
+      void loadDetail(session, decodeURIComponent(match[1]), metricRange);
+    };
+    const timer = window.setTimeout(restoreRoute, 0);
+    window.addEventListener("popstate", restoreRoute);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", restoreRoute);
+    };
+  }, [loadDetail, metricRange, session]);
 
   useEffect(() => {
     if (!session) return;
@@ -188,14 +241,21 @@ export function CustomerPortal({
           setError(errorMessage(failedPoll.reason));
         }
         if (polledJobs.some((job) => terminalStatuses.has(job.status))) {
+          const completed = polledJobs.find((job) => terminalStatuses.has(job.status));
+          if (completed) {
+            setNotice(`${actionLabels[completed.action]} 작업이 ${completed.status} 상태로 완료됐습니다.`);
+          }
           await refreshList(session);
+          if (selectedDetail && completed?.vm_id === selectedDetail.id) {
+            await loadDetail(session, selectedDetail.id, metricRange);
+          }
         }
       } catch (caught) {
         setError(errorMessage(caught));
       }
     }, 1500);
     return () => window.clearTimeout(timer);
-  }, [apiBaseUrl, jobsByVmId, refreshList, session]);
+  }, [apiBaseUrl, jobsByVmId, loadDetail, metricRange, refreshList, selectedDetail, session]);
 
   async function runAction() {
     if (!session || !pendingVm || !pendingAction) return;
@@ -239,6 +299,18 @@ export function CustomerPortal({
     if (!openConsoleWindow(vm.id)) setConsoleVm(vm);
   }
 
+  function openDetail(vm: CustomerVm) {
+    if (!session) return;
+    window.history.pushState({}, "", `/customer/vms/${encodeURIComponent(vm.id)}`);
+    void loadDetail(session, vm.id, metricRange);
+  }
+
+  function closeDetail() {
+    window.history.pushState({}, "", "/");
+    setSelectedDetail(null);
+    setDetailMetrics(null);
+  }
+
   async function endSession() {
     if (!session) return;
     try {
@@ -246,6 +318,8 @@ export function CustomerPortal({
     } finally {
       setSession(null);
       setVms([]);
+      setSelectedDetail(null);
+      setDetailMetrics(null);
       setOrganizationFilter("ALL");
       setPendingVm(null);
       setConsoleVm(null);
@@ -281,8 +355,17 @@ export function CustomerPortal({
       </header>
 
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="오류 닫기">×</button></div>}
+      {notice && <div className="customer-global-notice" role="status" aria-live="polite"><span>{notice}</span><button type="button" onClick={() => setNotice("")} aria-label="알림 닫기">×</button></div>}
 
       <div className="customer-workspace">
+        {selectedDetail ? <CustomerVmDetailView
+          detail={selectedDetail}
+          metrics={detailMetrics}
+          range={metricRange}
+          loading={detailLoading}
+          onRange={setMetricRange}
+          onClose={closeDetail}
+        /> : <>
         {alerts.some((item) => item.status !== "RESOLVED") && <section className="customer-alert-feed" aria-labelledby="customer-alert-title"><div><p className="eyebrow">Notifications</p><h2 id="customer-alert-title">운영 알림</h2></div>{alerts.filter((item) => item.status !== "RESOLVED").slice(0, 5).map((item) => <article key={item.id}><strong>{item.type}</strong><p>{item.message}</p><time>{formatTime(item.last_seen_at)}</time></article>)}</section>}
         <section className="customer-inventory" aria-labelledby="customer-inventory-title">
           <div className="customer-inventory-heading">
@@ -338,7 +421,7 @@ export function CustomerPortal({
                     key={vm.id}
                     className="customer-vm-row"
                   >
-                    <span className="customer-vm-identity" data-label="가상 머신"><strong>{vm.name}</strong><small>{vm.id.slice(0, 8)}</small></span>
+                    <span className="customer-vm-identity" data-label="가상 머신"><button type="button" onClick={() => openDetail(vm)}><strong>{vm.name}</strong><small>상세 보기</small></button></span>
                     <strong className="customer-organization-badge" data-label="조직"><span aria-hidden="true" />{vm.organization_name}</strong>
                     <span className="customer-vm-status" data-label="상태"><span className={`status-pip ${vm.power_state.toLowerCase()}`} aria-hidden="true" />{vm.is_stale ? "확인 필요" : running ? "실행 중" : "중지됨"}</span>
                     <span className={vm.assigned_ip_addresses.length ? "customer-vm-ip" : "customer-vm-muted"} data-label="IP 주소">{vm.assigned_ip_addresses.length ? vm.assigned_ip_addresses.join(", ") : "미할당"}</span>
@@ -375,6 +458,7 @@ export function CustomerPortal({
             </div>
           </div>
         </section>
+        </>}
 
       </div>
 

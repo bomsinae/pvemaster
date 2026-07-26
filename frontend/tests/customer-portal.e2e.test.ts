@@ -5,6 +5,7 @@ import {
   changePassword,
   getCustomerJob,
   getCustomerVm,
+  getCustomerVmMetrics,
   listCustomerJobs,
   listCustomerVms,
   login,
@@ -47,8 +48,40 @@ test("mock login to customer power operation flow", async () => {
     }
     if (url.endsWith("/customer/vms")) return response({ items: [vm] });
     if (url.endsWith("/customer/jobs")) return response({ items: [] });
+    if (url.endsWith(`/customer/vms/${vm.id}/metrics?range=day`)) {
+      return response({
+        vm_id: vm.id,
+        range: "day",
+        resolution_seconds: 60,
+        assignment_started_at: "2026-07-14T11:00:00Z",
+        observed_at: "2026-07-14T12:00:00Z",
+        partial: true,
+        items: [{
+          time: "2026-07-14T12:00:00Z",
+          sample_count: 1,
+          cpu_avg: 0.2,
+          cpu_max: 0.3,
+          memory_used_avg: null,
+          memory_used_max: null,
+          disk_read_avg: null,
+          disk_read_max: null,
+          disk_write_avg: null,
+          disk_write_max: null,
+          network_receive_avg: null,
+          network_receive_max: null,
+          network_transmit_avg: null,
+          network_transmit_max: null,
+        }],
+      });
+    }
     if (url.endsWith(`/customer/vms/${vm.id}`)) {
-      return response({ ...vm, recent_jobs: [] });
+      return response({
+        ...vm,
+        recent_jobs: [],
+        recent_state_changes: [],
+        recent_backup: null,
+        upcoming_maintenance: [],
+      });
     }
     if (url.endsWith(`/customer/vms/${vm.id}/actions/start`)) {
       assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer mock-access-token");
@@ -98,6 +131,13 @@ test("mock login to customer power operation flow", async () => {
     fetcher,
   );
   const detail = await getCustomerVm("http://api.test", session.accessToken, listing[0].id, fetcher);
+  const metrics = await getCustomerVmMetrics(
+    "http://api.test",
+    session.accessToken,
+    listing[0].id,
+    "day",
+    fetcher,
+  );
   const accepted = await requestPowerAction(
     "http://api.test",
     session.accessToken,
@@ -117,10 +157,13 @@ test("mock login to customer power operation flow", async () => {
   assert.equal(detail.memory_bytes, 8_589_934_592);
   assert.equal(detail.disk_bytes, 107_374_182_400);
   assert.deepEqual(detail.assigned_ip_addresses, ["192.0.2.24"]);
+  assert.equal(metrics.partial, true);
+  assert.equal(metrics.items[0].cpu_avg, 0.2);
+  assert.equal(metrics.items[0].memory_used_avg, null);
   assert.equal(running.status, "RUNNING");
   assert.equal(finished.status, "SUCCEEDED");
   assert.equal(finished.result.final_power_state, "RUNNING");
-  assert.equal(requests.length, 7);
+  assert.equal(requests.length, 8);
 });
 
 test("customer VM inventory searches names and IP addresses and filters power state", () => {

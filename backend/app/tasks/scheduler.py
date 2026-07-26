@@ -28,6 +28,7 @@ from app.services.maintenance import (
 from app.services.observability import ObservabilityService
 from app.services.outbox import BACKUP_EVENT, POWER_EVENT, RESTORE_EVENT
 from app.services.reconciliation import create_sync_run
+from app.services.workload_metrics import WorkloadMetricService
 from app.tasks.backup import enqueue_backup_operation, enqueue_restore_operation
 from app.tasks.inventory import enqueue_inventory_sync
 from app.tasks.power import enqueue_power_operation
@@ -204,6 +205,34 @@ def reconcile_backup_verifications() -> int:
         return changed + await service.mark_due_verifications()
 
     return _run("backup_verification_reconciliation", callback)
+
+
+@celery_app.task(name="app.tasks.scheduler.collect_workload_metrics")  # type: ignore[untyped-decorator]
+def collect_workload_metrics() -> int:
+    settings = get_settings()
+
+    async def callback(session: AsyncSession) -> int:
+        return await WorkloadMetricService(
+            session=session,
+            settings=settings,
+            cipher=CredentialCipher(settings.app_secret_key.get_secret_value()),
+        ).collect()
+
+    return _run("workload_metric_collection", callback)
+
+
+@celery_app.task(name="app.tasks.scheduler.retain_workload_metrics")  # type: ignore[untyped-decorator]
+def retain_workload_metrics() -> int:
+    settings = get_settings()
+
+    async def callback(session: AsyncSession) -> int:
+        return await WorkloadMetricService(
+            session=session,
+            settings=settings,
+            cipher=CredentialCipher(settings.app_secret_key.get_secret_value()),
+        ).downsample_and_retain()
+
+    return _run("workload_metric_retention", callback)
 
 
 async def _check_control_plane_state(session: AsyncSession) -> int:
