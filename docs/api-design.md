@@ -699,3 +699,28 @@ step-up을 요구한다.
 충돌을 다시 검사한다. 실패는 삭제하지 않고 `NEEDS_ATTENTION`으로 보존한다.
 동일 고객의 idempotency key 재전송은 같은 응답을 반환하고 다른 payload 재사용은
 409다. 응답에는 cluster/node/VMID/PVE endpoint·UPID와 private material이 없다.
+
+## 24. 조직 RBAC, Quota와 승인 정책 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/customer/organizations` | CUSTOMER | 활성·미만료 조직 멤버십과 permission allowlist |
+| GET/PATCH/DELETE | `/customer/organizations/{id}/members[/{membership_id}]` | 조직 역할별 권한 | 구성원 조회·역할 변경·제거 |
+| GET/POST | `/customer/organizations/{id}/invitations` | `MEMBER_READ` / `MEMBER_INVITE` | 초대 목록·생성 |
+| DELETE | `/customer/organizations/{id}/invitations/{invitation_id}` | `MEMBER_INVITE` | 미사용 초대 폐기 |
+| POST | `/customer/organization-invitations/accept` | CUSTOMER | 본인 이메일의 1회 초대 수락 |
+| GET | `/customer/organizations/{id}/quota` | `QUOTA_READ` | 현재 사용·예약·잔여 quota |
+| GET | `/customer/organizations/{id}/approval-policies` | `POLICY_READ` | 요청 유형별 유효 승인 정책 |
+| GET | `/customer/organizations/{id}/activity` | `ACTIVITY_READ` | 조직 범위 감사 활동 |
+| GET/PUT | `/admin/organizations/{id}/quota` | ADMIN / SUPER_ADMIN | 사용·예약을 고려한 quota 조회·변경 |
+| GET/PUT | `/admin/organizations/{id}/approval-policies` | ADMIN / SUPER_ADMIN | 승인 정책 조회·변경 |
+
+조직 역할은 `ORG_OWNER`, `ORG_ADMIN`, `ORG_OPERATOR`, `ORG_VIEWER`,
+`BILLING_VIEWER`이며 응답의 `permissions`가 서버 allowlist의 최종 결과다. 역할·quota·
+정책 변경은 `version`을 비교하고 오래된 요청은 409로 거부한다. 마지막
+`ORG_OWNER`를 강등하거나 제거할 수 없다.
+
+초대 생성 응답만 `accept_token`을 한 번 반환하며 목록에는 항상 `null`이다. 서버에는
+hash만 저장하고 로그인 이메일 일치, 만료, revoke, replay를 검사한다. Provisioning과
+증설은 조직 row lock과 같은 transaction에서 quota reservation을 만들며 초과 시
+`409 ORGANIZATION_QUOTA_EXCEEDED`를 반환한다.

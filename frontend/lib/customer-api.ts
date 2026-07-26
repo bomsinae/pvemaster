@@ -193,6 +193,71 @@ export type CustomerSecurityGroup = {
   description: string;
 };
 
+export type OrganizationRole =
+  | "ORG_OWNER"
+  | "ORG_ADMIN"
+  | "ORG_OPERATOR"
+  | "ORG_VIEWER"
+  | "BILLING_VIEWER";
+
+export type CustomerOrganizationMembership = {
+  id: string;
+  organization_id: string;
+  organization_name: string;
+  user_id: string;
+  email: string;
+  display_name: string;
+  organization_role: OrganizationRole;
+  status: "ACTIVE" | "SUSPENDED";
+  expires_at: string | null;
+  created_at: string;
+  version: number;
+  permissions: string[];
+};
+
+export type CustomerOrganizationInvitation = {
+  id: string;
+  organization_id: string;
+  email: string;
+  organization_role: OrganizationRole;
+  expires_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  accept_token: string | null;
+};
+
+export type QuotaValues = {
+  vcpu: number;
+  memory_bytes: number;
+  disk_bytes: number;
+  vms: number;
+  ips: number;
+  backup_bytes: number;
+};
+
+export type CustomerOrganizationQuota = {
+  organization_id: string;
+  limits: QuotaValues;
+  usage: QuotaValues;
+  reserved: QuotaValues;
+  remaining: QuotaValues;
+  version: number;
+  updated_at: string | null;
+  captured_at: string;
+};
+
+export type CustomerOrganizationActivity = {
+  id: string;
+  created_at: string;
+  action: string;
+  outcome: string;
+  actor_user_id: string | null;
+  resource_type: string | null;
+  resource_id: string | null;
+  summary: Record<string, unknown> | null;
+};
+
 export type CustomerServiceRequestPreview = {
   request_type: CustomerServiceRequestType;
   requires_approval: boolean;
@@ -664,6 +729,164 @@ export async function listCustomerSecurityGroups(
     fetcher,
   );
   return (await parseResponse<{ items: CustomerSecurityGroup[] }>(response)).items;
+}
+
+export async function listCustomerOrganizations(
+  apiBaseUrl: string,
+  accessToken: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerOrganizationMembership[]> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/organizations`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return parseResponse<CustomerOrganizationMembership[]>(response);
+}
+
+export async function listCustomerOrganizationMembers(
+  apiBaseUrl: string,
+  accessToken: string,
+  organizationId: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerOrganizationMembership[]> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/organizations/${encodeURIComponent(organizationId)}/members`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return parseResponse<CustomerOrganizationMembership[]>(response);
+}
+
+export async function updateCustomerOrganizationMember(
+  apiBaseUrl: string,
+  accessToken: string,
+  organizationId: string,
+  member: CustomerOrganizationMembership,
+  organizationRole: OrganizationRole,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerOrganizationMembership> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(member.id)}`,
+    accessToken,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        organization_role: organizationRole,
+        version: member.version,
+      }),
+    },
+    fetcher,
+  );
+  return parseResponse<CustomerOrganizationMembership>(response);
+}
+
+export async function removeCustomerOrganizationMember(
+  apiBaseUrl: string,
+  accessToken: string,
+  organizationId: string,
+  memberId: string,
+  fetcher: Fetcher = fetch,
+): Promise<void> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(memberId)}`,
+    accessToken,
+    { method: "DELETE" },
+    fetcher,
+  );
+  if (!response.ok) await parseResponse<never>(response);
+}
+
+export async function inviteCustomerOrganizationMember(
+  apiBaseUrl: string,
+  accessToken: string,
+  organizationId: string,
+  email: string,
+  organizationRole: OrganizationRole,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerOrganizationInvitation> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/organizations/${encodeURIComponent(organizationId)}/invitations`,
+    accessToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        organization_role: organizationRole,
+        expires_in_hours: 72,
+      }),
+    },
+    fetcher,
+  );
+  return parseResponse<CustomerOrganizationInvitation>(response);
+}
+
+export async function acceptCustomerOrganizationInvitation(
+  apiBaseUrl: string,
+  accessToken: string,
+  token: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerOrganizationMembership> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/organization-invitations/accept`,
+    accessToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    },
+    fetcher,
+  );
+  return parseResponse<CustomerOrganizationMembership>(response);
+}
+
+export async function listCustomerOrganizationInvitations(
+  apiBaseUrl: string,
+  accessToken: string,
+  organizationId: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerOrganizationInvitation[]> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/organizations/${encodeURIComponent(organizationId)}/invitations`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return parseResponse<CustomerOrganizationInvitation[]>(response);
+}
+
+export async function getCustomerOrganizationQuota(
+  apiBaseUrl: string,
+  accessToken: string,
+  organizationId: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerOrganizationQuota> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/organizations/${encodeURIComponent(organizationId)}/quota`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return parseResponse<CustomerOrganizationQuota>(response);
+}
+
+export async function listCustomerOrganizationActivity(
+  apiBaseUrl: string,
+  accessToken: string,
+  organizationId: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerOrganizationActivity[]> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/organizations/${encodeURIComponent(organizationId)}/activity`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return parseResponse<CustomerOrganizationActivity[]>(response);
 }
 
 export async function logout(

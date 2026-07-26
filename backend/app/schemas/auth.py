@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
-from app.models.auth import UserRole
+from app.models.auth import OrganizationRole, UserRole
 
 Password = Annotated[SecretStr, Field(min_length=12, max_length=1024)]
 
@@ -257,6 +257,7 @@ class OrganizationListResponse(BaseModel):
 
 class OrganizationMemberCreate(BaseModel):
     user_id: UUID
+    organization_role: OrganizationRole = OrganizationRole.ORG_OPERATOR
 
 
 class OrganizationMemberResponse(BaseModel):
@@ -265,7 +266,11 @@ class OrganizationMemberResponse(BaseModel):
     id: UUID
     organization_id: UUID
     user_id: UUID
+    organization_role: OrganizationRole
+    status: str
+    expires_at: datetime | None
     created_at: datetime
+    version: int
 
 
 class OrganizationMemberDetailResponse(OrganizationMemberResponse):

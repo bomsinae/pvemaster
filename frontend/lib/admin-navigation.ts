@@ -5,6 +5,7 @@ export const adminSections = [
   "vms",
   "backups",
   "access",
+  "governance",
   "networks",
   "provisioning",
   "service_requests",

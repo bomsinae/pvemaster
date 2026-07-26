@@ -28,6 +28,7 @@ from app.schemas.customer import (
 )
 from app.security.access import Principal, require_service_role
 from app.services.audit import add_audit_event
+from app.services.organization_access import active_membership_conditions
 
 EVENT_TYPES: tuple[CustomerNotificationEvent, ...] = (
     "VM_DOWN",
@@ -66,7 +67,10 @@ class CustomerNotificationPreferenceService:
                     OrganizationMember.organization_id == Organization.id,
                 )
                 .where(
-                    OrganizationMember.user_id == self._principal.user_id,
+                    *active_membership_conditions(
+                        user_id=self._principal.user_id,
+                        organization_id=Organization.id,
+                    ),
                     Organization.is_active.is_(True),
                 )
                 .order_by(Organization.name)
@@ -133,7 +137,10 @@ class CustomerNotificationPreferenceService:
             )
             .where(
                 Organization.id == payload.organization_id,
-                OrganizationMember.user_id == self._principal.user_id,
+                *active_membership_conditions(
+                    user_id=self._principal.user_id,
+                    organization_id=Organization.id,
+                ),
                 Organization.is_active.is_(True),
             )
         )
@@ -229,7 +236,10 @@ async def queue_customer_notification(
     recipient_user_id: UUID | None = None,
 ) -> int:
     filters = [
-        OrganizationMember.organization_id == organization_id,
+        *active_membership_conditions(
+            user_id=User.id,
+            organization_id=organization_id,
+        ),
         Organization.is_active.is_(True),
         User.is_active.is_(True),
         User.deleted_at.is_(None),
@@ -393,8 +403,10 @@ async def _enabled(
         select(OrganizationMember.id)
         .join(Organization, Organization.id == OrganizationMember.organization_id)
         .where(
-            OrganizationMember.user_id == user_id,
-            OrganizationMember.organization_id == organization_id,
+            *active_membership_conditions(
+                user_id=user_id,
+                organization_id=organization_id,
+            ),
             Organization.is_active.is_(True),
         )
     )

@@ -12,6 +12,7 @@ from app.models.auth import (
     LoginThrottle,
     Organization,
     OrganizationMember,
+    OrganizationRole,
     RefreshToken,
     User,
     UserRole,
@@ -58,6 +59,13 @@ from app.models.operation import (
     PveTask,
     Workload,
     WorkloadAssignment,
+)
+from app.models.organization_governance import (
+    ApprovalPolicy,
+    OrganizationInvitation,
+    OrganizationQuota,
+    QuotaReservation,
+    QuotaUsageSnapshot,
 )
 from app.models.provisioning import (
     Product,
@@ -125,6 +133,12 @@ __all__ = [
     "NotificationRule",
     "Organization",
     "OrganizationMember",
+    "OrganizationRole",
+    "OrganizationInvitation",
+    "OrganizationQuota",
+    "QuotaReservation",
+    "QuotaUsageSnapshot",
+    "ApprovalPolicy",
     "OrganizationNotificationPolicy",
     "OrganizationServiceQuota",
     "Operation",

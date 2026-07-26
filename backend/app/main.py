@@ -20,6 +20,8 @@ from app.api.ipam import router as ipam_router
 from app.api.observability import router as observability_router
 from app.api.operation_center import router as operation_center_router
 from app.api.operations import router as operations_router
+from app.api.organization_governance import admin_router as admin_governance_router
+from app.api.organization_governance import customer_router as customer_governance_router
 from app.api.provisioning import router as provisioning_router
 from app.api.self_service import admin_router as admin_self_service_router
 from app.api.self_service import customer_router as customer_self_service_router
@@ -128,6 +130,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(clusters_router)
     app.include_router(console_router)
     app.include_router(customer_router)
+    app.include_router(customer_governance_router)
     app.include_router(customer_self_service_router)
     app.include_router(operations_router)
     app.include_router(observability_router)
@@ -136,5 +139,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(inventory_router)
     app.include_router(provisioning_router)
     app.include_router(admin_self_service_router)
+    app.include_router(admin_governance_router)
     app.include_router(workloads_router)
     return app

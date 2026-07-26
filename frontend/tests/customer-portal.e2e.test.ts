@@ -7,14 +7,18 @@ import {
   createCustomerSshKey,
   getCustomerJob,
   getCustomerNotificationPreferences,
+  getCustomerOrganizationQuota,
   getCustomerVm,
   getCustomerVmMetrics,
   listCustomerJobs,
+  listCustomerOrganizationMembers,
+  listCustomerOrganizations,
   listCustomerServiceRequests,
   listCustomerVms,
   login,
   requestPowerAction,
   updateCustomerNotificationPreference,
+  updateCustomerOrganizationMember,
 } from "../lib/customer-api.ts";
 import { filterCustomerVms, upsertCustomerJob } from "../lib/customer-portal-state.ts";
 import {
@@ -421,6 +425,63 @@ test("customer self-service keeps public keys and approval requests VM-scoped", 
     input: { cpu_cores: 6 },
   });
   assert.equal(requests[1].key, "self-service-idempotency");
+});
+
+test("organization governance client preserves scope, role version, and reservations", async () => {
+  const requests: Array<{ url: string; method?: string; body?: unknown }> = [];
+  const membership = {
+    id: "member-1",
+    organization_id: "organization-1",
+    organization_name: "Acme",
+    user_id: "user-1",
+    email: "owner@example.test",
+    display_name: "Owner",
+    organization_role: "ORG_OWNER" as const,
+    status: "ACTIVE" as const,
+    expires_at: null,
+    created_at: "2026-07-26T00:00:00Z",
+    version: 3,
+    permissions: ["MEMBER_READ", "MEMBER_ROLE_WRITE", "QUOTA_READ"],
+  };
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      method: init?.method,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    if (String(input).endsWith("/quota")) {
+      return response({
+        organization_id: membership.organization_id,
+        limits: { vcpu: 10, memory_bytes: 10, disk_bytes: 10, vms: 10, ips: 10, backup_bytes: 10 },
+        usage: { vcpu: 4, memory_bytes: 4, disk_bytes: 4, vms: 1, ips: 1, backup_bytes: 4 },
+        reserved: { vcpu: 2, memory_bytes: 2, disk_bytes: 0, vms: 1, ips: 1, backup_bytes: 0 },
+        remaining: { vcpu: 4, memory_bytes: 4, disk_bytes: 6, vms: 8, ips: 8, backup_bytes: 6 },
+        version: 1,
+        updated_at: null,
+        captured_at: "2026-07-26T00:00:00Z",
+      });
+    }
+    if (init?.method === "PATCH") return response({ ...membership, organization_role: "ORG_ADMIN", version: 4 });
+    return response([membership]);
+  };
+
+  assert.equal((await listCustomerOrganizations("http://api.test", "token", fetcher))[0].organization_role, "ORG_OWNER");
+  assert.equal((await listCustomerOrganizationMembers(
+    "http://api.test", "token", membership.organization_id, fetcher,
+  ))[0].id, membership.id);
+  const quota = await getCustomerOrganizationQuota(
+    "http://api.test", "token", membership.organization_id, fetcher,
+  );
+  await updateCustomerOrganizationMember(
+    "http://api.test", "token", membership.organization_id, membership, "ORG_ADMIN", fetcher,
+  );
+
+  assert.equal(quota.reserved.vcpu, 2);
+  assert.ok(requests.every((item) => !item.url.includes("organization-2")));
+  assert.deepEqual(requests.at(-1)?.body, {
+    organization_role: "ORG_ADMIN",
+    version: 3,
+  });
 });
 
 test("customer password change exposes a safe API error code", async () => {

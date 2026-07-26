@@ -27,6 +27,10 @@ from app.proxmox.client import ProxmoxClient
 from app.security.credentials import CredentialCipher, EncryptedCredential
 from app.services.audit import add_audit_event
 from app.services.customer_notifications import queue_customer_notification
+from app.services.organization_access import (
+    WORKLOAD_OPERATE_ROLES,
+    active_membership_conditions,
+)
 
 Sleep = Callable[[float], Awaitable[None]]
 RETRYABLE_ERROR_CODES = {"CLUSTER_UNREACHABLE", "PVE_UPSTREAM_ERROR", "PVE_TIMEOUT"}
@@ -146,8 +150,11 @@ class PowerOperationRunner:
                     Organization.id == OrganizationMember.organization_id,
                 )
                 .where(
-                    OrganizationMember.user_id == actor.id,
-                    OrganizationMember.organization_id == operation.organization_id,
+                    *active_membership_conditions(
+                        user_id=actor.id,
+                        organization_id=operation.organization_id,
+                        roles=WORKLOAD_OPERATE_ROLES,
+                    ),
                     Organization.is_active.is_(True),
                 )
             )

@@ -3804,6 +3804,244 @@ body,
   }
 }
 
+.customer-organization-dialog {
+  width: min(1180px, calc(100vw - 32px));
+  max-height: min(860px, calc(100vh - 32px));
+  overflow: auto;
+}
+
+.organization-picker {
+  display: grid;
+  gap: 6px;
+  margin: 18px 0;
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.organization-picker select,
+.organization-accept-form input,
+.organization-invite-form input,
+.organization-invite-form select,
+.organization-member-list select,
+.admin-quota-form input,
+.approval-policy-form input,
+.approval-policy-form select,
+.organization-governance-hero select {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
+.organization-governance-grid,
+.organization-governance-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.organization-governance-grid > section,
+.organization-governance-admin-grid > section {
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 94%, var(--accent) 6%);
+  padding: 18px;
+}
+
+.organization-governance-grid h3,
+.organization-governance-admin-grid h3 {
+  margin: 0 0 14px;
+}
+
+.organization-quota-list,
+.admin-quota-usage {
+  display: grid;
+  gap: 8px;
+}
+
+.organization-quota-list > div,
+.admin-quota-usage p {
+  display: grid;
+  grid-template-columns: 1fr repeat(3, auto);
+  gap: 12px;
+  align-items: center;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 9px 0;
+  font-size: 12px;
+}
+
+.organization-quota-list em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.organization-member-list,
+.pending-invitations,
+.organization-activity-list,
+.approval-policy-list {
+  display: grid;
+  gap: 8px;
+}
+
+.organization-member-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px auto;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 8px 0;
+}
+
+.organization-member-list article div {
+  display: grid;
+  gap: 2px;
+}
+
+.organization-member-list small,
+.pending-invitations small {
+  color: var(--muted);
+}
+
+.organization-invite-form,
+.organization-accept-form,
+.admin-quota-form,
+.approval-policy-form {
+  display: grid;
+  gap: 10px;
+}
+
+.organization-accept-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  margin: 0 0 18px;
+  max-width: 620px;
+}
+
+.organization-invite-form {
+  grid-template-columns: minmax(0, 1fr) 170px auto;
+  align-items: end;
+}
+
+.organization-invite-form label,
+.organization-accept-form label,
+.admin-quota-form label,
+.approval-policy-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.invitation-token {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  border-left: 3px solid #d7b35f;
+  background: color-mix(in srgb, #d7b35f 8%, transparent);
+  padding: 12px;
+}
+
+.invitation-token code {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.pending-invitations p,
+.organization-activity-list p,
+.approval-policy-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 8px 0;
+  font-size: 12px;
+}
+
+.organization-governance-admin {
+  padding: 28px 32px 48px;
+}
+
+.organization-governance-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 20px;
+}
+
+.organization-governance-hero h2 {
+  margin: 4px 0;
+  font-size: clamp(24px, 3vw, 38px);
+}
+
+.organization-governance-hero p {
+  color: var(--muted);
+}
+
+.organization-governance-hero label {
+  display: grid;
+  gap: 6px;
+  min-width: 260px;
+}
+
+.organization-governance-admin-grid > section > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.admin-quota-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.admin-quota-form button {
+  grid-column: 1 / -1;
+}
+
+.approval-policy-form {
+  margin-top: 18px;
+}
+
+.approval-policy-form .checkbox-field {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.admin-inline-status {
+  min-height: 24px;
+  color: var(--muted);
+}
+
+@media (max-width: 900px) {
+  .organization-governance-grid,
+  .organization-governance-admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .organization-invite-form,
+  .organization-accept-form,
+  .admin-quota-form {
+    grid-template-columns: 1fr;
+  }
+
+  .organization-governance-hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .organization-member-list article {
+    grid-template-columns: 1fr;
+  }
+}
+
 .inventory-reconciliation {
   display: grid;
   gap: 3rem;

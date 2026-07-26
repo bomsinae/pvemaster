@@ -32,6 +32,7 @@ import { useDialogFocus } from "./use-dialog-focus";
 import { VmConsoleModal } from "./vm-console-modal";
 import { CustomerVmDetailView } from "./customer-vm-detail";
 import { CustomerNotificationDialog } from "./customer-notification-dialog";
+import { CustomerOrganizationDialog } from "./customer-organization-dialog";
 import { CustomerSelfServiceDialog } from "./customer-self-service-dialog";
 
 const actionLabels: Record<CustomerPowerAction, string> = {
@@ -144,6 +145,7 @@ export function CustomerPortal({
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
+  const [organizationDialogOpen, setOrganizationDialogOpen] = useState(false);
   const [selfServiceVm, setSelfServiceVm] = useState<CustomerVm | null>(null);
   const [loading, setLoading] = useState(Boolean(initialSession));
   const [error, setError] = useState("");
@@ -329,6 +331,7 @@ export function CustomerPortal({
       setConsoleVm(null);
       setPasswordDialogOpen(false);
       setNotificationDialogOpen(false);
+      setOrganizationDialogOpen(false);
       setSelfServiceVm(null);
       setJobsByVmId({});
       onSessionEnded?.();
@@ -357,7 +360,7 @@ export function CustomerPortal({
     <main className="portal-shell">
       <header className="portal-header">
         <div className="brand"><span className="brand-mark" aria-hidden="true">PM</span><span>PVE Master</span></div>
-        <div className="portal-session"><span className="state-dot" aria-hidden="true" /><span className="portal-workspace-label">고객 워크스페이스</span>{userEmail && <span className="portal-account" title={userEmail}><small>로그인 계정</small><strong>{userEmail}</strong></span>}<button onClick={() => setSecurityDialogOpen(true)}>보안 설정</button><button onClick={() => setNotificationDialogOpen(true)}>알림 설정</button><button onClick={() => setPasswordDialogOpen(true)}>비밀번호 변경</button><button onClick={endSession}>로그아웃</button></div>
+        <div className="portal-session"><span className="state-dot" aria-hidden="true" /><span className="portal-workspace-label">고객 워크스페이스</span>{userEmail && <span className="portal-account" title={userEmail}><small>로그인 계정</small><strong>{userEmail}</strong></span>}<button onClick={() => setOrganizationDialogOpen(true)}>조직 관리</button><button onClick={() => setSecurityDialogOpen(true)}>보안 설정</button><button onClick={() => setNotificationDialogOpen(true)}>알림 설정</button><button onClick={() => setPasswordDialogOpen(true)}>비밀번호 변경</button><button onClick={endSession}>로그아웃</button></div>
       </header>
 
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="오류 닫기">×</button></div>}
@@ -518,6 +521,13 @@ export function CustomerPortal({
           apiBaseUrl={apiBaseUrl}
           accessToken={session.accessToken}
           onClose={() => setNotificationDialogOpen(false)}
+        />
+      )}
+      {organizationDialogOpen && (
+        <CustomerOrganizationDialog
+          apiBaseUrl={apiBaseUrl}
+          accessToken={session.accessToken}
+          onClose={() => setOrganizationDialogOpen(false)}
         />
       )}
       {selfServiceVm && (

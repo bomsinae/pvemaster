@@ -161,3 +161,19 @@ test("customer previews and submits a controlled metadata change", async ({ page
   await dialog.getByRole("button", { name: "요청 취소" }).click();
   await expect(dialog.getByText("승인 전 요청을 취소했습니다.")).toBeVisible();
 });
+
+test("organization owner reviews quota and creates a one-time invitation", async ({ page }) => {
+  await installApiMock(page);
+  await loginAs(page, "customer");
+
+  await page.getByRole("button", { name: "조직 관리" }).click();
+  await expect(page.getByRole("heading", { name: "조직과 팀 관리" })).toBeVisible();
+  await expect(page.getByText("예약 2", { exact: true })).toBeVisible();
+  await expect(page.getByText("ORGANIZATION_QUOTA_UPDATED")).toBeVisible();
+
+  await page.getByLabel("이메일").fill("new-member@example.test");
+  await page.locator(".organization-invite-form select[name='role']").selectOption("ORG_VIEWER");
+  await page.getByRole("button", { name: "72시간 초대 생성" }).click();
+  await expect(page.getByText("1회 표시 초대 토큰")).toBeVisible();
+  await expect(page.getByText("browser-invitation-token-once")).toBeVisible();
+});

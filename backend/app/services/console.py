@@ -21,6 +21,7 @@ from app.schemas.console import ConsoleSessionResponse
 from app.security.access import Principal
 from app.security.credentials import CredentialCipher, EncryptedCredential
 from app.services.audit import add_audit_event
+from app.services.organization_access import WORKLOAD_READ_ROLES, active_membership_conditions
 
 _CONSUME_SCRIPT = """
 local expected = redis.call('HGET', KEYS[1], 'token_hash')
@@ -373,8 +374,11 @@ async def authorized_console_workload(
     if principal.role == UserRole.CUSTOMER:
         membership = exists(
             select(OrganizationMember.id).where(
-                OrganizationMember.user_id == principal.user_id,
-                OrganizationMember.organization_id == Workload.organization_id,
+                *active_membership_conditions(
+                    user_id=principal.user_id,
+                    organization_id=Workload.organization_id,
+                    roles=WORKLOAD_READ_ROLES,
+                ),
             )
         )
         active_organization = exists(

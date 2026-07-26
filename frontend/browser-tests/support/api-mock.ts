@@ -11,6 +11,7 @@ export const ids = {
   syncRun: "8d8c145f-c7f5-4b65-a85c-aa6c32360271",
   finding: "66c1d306-e05f-4890-8e1e-c30fa3137f9c",
   operation: "2ab92d25-95ed-4af4-aefe-d86902305795",
+  membership: "74f3404e-7702-4f15-a72a-dd1389bfca5d",
 } as const;
 
 type MockOptions = {
@@ -39,6 +40,9 @@ type MockState = {
   customerServiceRequest: boolean;
   customerServiceRequestStatus: string;
   customerServiceRequestVersion: number;
+  organizationQuotaVersion: number;
+  organizationQuotaVcpu: number;
+  approvalPolicyVersion: number;
   requests: Array<{ method: string; path: string }>;
 };
 
@@ -254,6 +258,9 @@ export async function installApiMock(
     customerServiceRequest: options.initialServiceRequest ?? false,
     customerServiceRequestStatus: "PENDING_APPROVAL",
     customerServiceRequestVersion: 1,
+    organizationQuotaVersion: 1,
+    organizationQuotaVcpu: 32,
+    approvalPolicyVersion: 1,
     requests: [],
   };
 
@@ -598,6 +605,133 @@ export async function installApiMock(
       await json(route, { items: [] });
       return;
     }
+    if (
+      path === `/api/v1/admin/organizations/${ids.organization}/quota`
+      && method === "GET"
+    ) {
+      await json(route, {
+        organization_id: ids.organization,
+        limits: {
+          vcpu: state.organizationQuotaVcpu,
+          memory_bytes: 137_438_953_472,
+          disk_bytes: 1_099_511_627_776,
+          vms: 10,
+          ips: 16,
+          backup_bytes: 4_398_046_511_104,
+        },
+        usage: {
+          vcpu: 4,
+          memory_bytes: 8_589_934_592,
+          disk_bytes: 107_374_182_400,
+          vms: 1,
+          ips: 1,
+          backup_bytes: 107_374_182_400,
+        },
+        reserved: {
+          vcpu: 2,
+          memory_bytes: 2_147_483_648,
+          disk_bytes: 0,
+          vms: 1,
+          ips: 1,
+          backup_bytes: 0,
+        },
+        remaining: {
+          vcpu: state.organizationQuotaVcpu - 6,
+          memory_bytes: 126_701_535_232,
+          disk_bytes: 992_137_445_376,
+          vms: 8,
+          ips: 14,
+          backup_bytes: 4_290_672_328_704,
+        },
+        version: state.organizationQuotaVersion,
+        updated_at: observedAt,
+        captured_at: observedAt,
+      });
+      return;
+    }
+    if (
+      path === `/api/v1/admin/organizations/${ids.organization}/quota`
+      && method === "PUT"
+    ) {
+      const body = request.postDataJSON() as { max_vcpu: number };
+      state.organizationQuotaVcpu = body.max_vcpu;
+      state.organizationQuotaVersion += 1;
+      await json(route, {
+        organization_id: ids.organization,
+        limits: {
+          vcpu: state.organizationQuotaVcpu,
+          memory_bytes: 137_438_953_472,
+          disk_bytes: 1_099_511_627_776,
+          vms: 10,
+          ips: 16,
+          backup_bytes: 4_398_046_511_104,
+        },
+        usage: {
+          vcpu: 4,
+          memory_bytes: 8_589_934_592,
+          disk_bytes: 107_374_182_400,
+          vms: 1,
+          ips: 1,
+          backup_bytes: 107_374_182_400,
+        },
+        reserved: {
+          vcpu: 2,
+          memory_bytes: 2_147_483_648,
+          disk_bytes: 0,
+          vms: 1,
+          ips: 1,
+          backup_bytes: 0,
+        },
+        remaining: {
+          vcpu: state.organizationQuotaVcpu - 6,
+          memory_bytes: 126_701_535_232,
+          disk_bytes: 992_137_445_376,
+          vms: 8,
+          ips: 14,
+          backup_bytes: 4_290_672_328_704,
+        },
+        version: state.organizationQuotaVersion,
+        updated_at: observedAt,
+        captured_at: observedAt,
+      });
+      return;
+    }
+    if (
+      path === `/api/v1/admin/organizations/${ids.organization}/approval-policies`
+      && method === "GET"
+    ) {
+      await json(route, [{
+        id: "6fa35c71-1b2b-4fbf-940b-d37fbb9a101f",
+        organization_id: ids.organization,
+        request_type: "RESIZE",
+        requires_approval: true,
+        minimum_role: "ORG_ADMIN",
+        updated_at: observedAt,
+        version: state.approvalPolicyVersion,
+      }]);
+      return;
+    }
+    if (
+      path === `/api/v1/admin/organizations/${ids.organization}/approval-policies`
+      && method === "PUT"
+    ) {
+      const body = request.postDataJSON() as {
+        request_type: string;
+        requires_approval: boolean;
+        minimum_role: string;
+      };
+      state.approvalPolicyVersion += 1;
+      await json(route, {
+        id: "6fa35c71-1b2b-4fbf-940b-d37fbb9a101f",
+        organization_id: ids.organization,
+        request_type: body.request_type,
+        requires_approval: body.requires_approval,
+        minimum_role: body.minimum_role,
+        updated_at: observedAt,
+        version: state.approvalPolicyVersion,
+      });
+      return;
+    }
 
     if (path === "/api/v1/customer/vms") {
       state.customerListCalls += 1;
@@ -609,6 +743,138 @@ export async function installApiMock(
         return;
       }
       await json(route, { items: [customerVm(state, options.staleCustomerInventory)] });
+      return;
+    }
+    if (path === "/api/v1/customer/organizations" && method === "GET") {
+      await json(route, [{
+        id: ids.membership,
+        organization_id: ids.organization,
+        organization_name: "Acme Korea",
+        user_id: "customer-id",
+        email: "customer@example.test",
+        display_name: "Customer",
+        organization_role: "ORG_OWNER",
+        status: "ACTIVE",
+        expires_at: null,
+        created_at: observedAt,
+        version: 1,
+        permissions: [
+          "MEMBER_READ",
+          "MEMBER_INVITE",
+          "MEMBER_ROLE_WRITE",
+          "MEMBER_REMOVE",
+          "QUOTA_READ",
+          "ACTIVITY_READ",
+        ],
+      }]);
+      return;
+    }
+    if (
+      path === `/api/v1/customer/organizations/${ids.organization}/members`
+      && method === "GET"
+    ) {
+      await json(route, [{
+        id: ids.membership,
+        organization_id: ids.organization,
+        organization_name: "Acme Korea",
+        user_id: "customer-id",
+        email: "customer@example.test",
+        display_name: "Customer",
+        organization_role: "ORG_OWNER",
+        status: "ACTIVE",
+        expires_at: null,
+        created_at: observedAt,
+        version: 1,
+        permissions: ["MEMBER_READ", "MEMBER_INVITE", "MEMBER_ROLE_WRITE", "MEMBER_REMOVE"],
+      }]);
+      return;
+    }
+    if (
+      path === `/api/v1/customer/organizations/${ids.organization}/invitations`
+      && method === "GET"
+    ) {
+      await json(route, []);
+      return;
+    }
+    if (
+      path === `/api/v1/customer/organizations/${ids.organization}/invitations`
+      && method === "POST"
+    ) {
+      const body = request.postDataJSON() as {
+        email: string;
+        organization_role: string;
+      };
+      await json(route, {
+        id: "743b5316-d822-423b-9307-54d3c401681c",
+        organization_id: ids.organization,
+        email: body.email,
+        organization_role: body.organization_role,
+        expires_at: "2026-07-29T01:00:00Z",
+        accepted_at: null,
+        revoked_at: null,
+        created_at: observedAt,
+        accept_token: "browser-invitation-token-once",
+      }, 201);
+      return;
+    }
+    if (
+      path === `/api/v1/customer/organizations/${ids.organization}/quota`
+      && method === "GET"
+    ) {
+      await json(route, {
+        organization_id: ids.organization,
+        limits: {
+          vcpu: 32,
+          memory_bytes: 137_438_953_472,
+          disk_bytes: 1_099_511_627_776,
+          vms: 10,
+          ips: 16,
+          backup_bytes: 4_398_046_511_104,
+        },
+        usage: {
+          vcpu: 4,
+          memory_bytes: 8_589_934_592,
+          disk_bytes: 107_374_182_400,
+          vms: 1,
+          ips: 1,
+          backup_bytes: 107_374_182_400,
+        },
+        reserved: {
+          vcpu: 2,
+          memory_bytes: 2_147_483_648,
+          disk_bytes: 0,
+          vms: 1,
+          ips: 1,
+          backup_bytes: 0,
+        },
+        remaining: {
+          vcpu: 26,
+          memory_bytes: 126_701_535_232,
+          disk_bytes: 992_137_445_376,
+          vms: 8,
+          ips: 14,
+          backup_bytes: 4_290_672_328_704,
+        },
+        version: 1,
+        updated_at: observedAt,
+        captured_at: observedAt,
+      });
+      return;
+    }
+    if (
+      path === `/api/v1/customer/organizations/${ids.organization}/activity`
+      && method === "GET"
+    ) {
+      await json(route, [{
+        id: "4a8220cf-c990-4b49-af1a-1f4fe2f9a472",
+        created_at: observedAt,
+        action: "ORGANIZATION_QUOTA_UPDATED",
+        outcome: "SUCCEEDED",
+        actor_user_id: "admin-id",
+        resource_type: "organization_quota",
+        resource_id: ids.organization,
+        summary: null,
+      }]);
       return;
     }
     if (path === "/api/v1/customer/jobs") {

@@ -39,6 +39,11 @@ from app.schemas.customer import (
 )
 from app.security.access import Principal, require_service_role
 from app.services.audit import add_audit_event
+from app.services.organization_access import (
+    WORKLOAD_OPERATE_ROLES,
+    WORKLOAD_READ_ROLES,
+    active_membership_conditions,
+)
 from app.services.outbox import (
     POWER_EVENT,
     add_operation_event,
@@ -140,7 +145,7 @@ class CustomerPortalService:
                 code="CUSTOMER_ACTION_FORBIDDEN",
                 message="This power action is not available to customers.",
             )
-        workload = await self._owned_vm(vm_id)
+        workload = await self._owned_vm(vm_id, roles=WORKLOAD_OPERATE_ROLES)
         sync_intervals = await self._cluster_sync_intervals([workload])
         sync_interval_seconds = sync_intervals.get(workload.cluster_id)
         if sync_interval_seconds is None:
@@ -269,8 +274,11 @@ class CustomerPortalService:
         )
         membership = exists(
             select(OrganizationMember.id).where(
-                OrganizationMember.user_id == self._principal.user_id,
-                OrganizationMember.organization_id == Operation.organization_id,
+                *active_membership_conditions(
+                    user_id=self._principal.user_id,
+                    organization_id=Operation.organization_id,
+                    roles=WORKLOAD_READ_ROLES,
+                ),
             )
         )
         active_organization = exists(
@@ -312,8 +320,11 @@ class CustomerPortalService:
         )
         membership = exists(
             select(OrganizationMember.id).where(
-                OrganizationMember.user_id == self._principal.user_id,
-                OrganizationMember.organization_id == Operation.organization_id,
+                *active_membership_conditions(
+                    user_id=self._principal.user_id,
+                    organization_id=Operation.organization_id,
+                    roles=WORKLOAD_READ_ROLES,
+                ),
             )
         )
         active_organization = exists(
@@ -422,11 +433,16 @@ class CustomerPortalService:
             )
         )
 
-    def _owned_workloads_query(self) -> Select[tuple[Workload]]:
+    def _owned_workloads_query(
+        self, *, roles: tuple[str, ...] = WORKLOAD_READ_ROLES
+    ) -> Select[tuple[Workload]]:
         membership = exists(
             select(OrganizationMember.id).where(
-                OrganizationMember.user_id == self._principal.user_id,
-                OrganizationMember.organization_id == Workload.organization_id,
+                *active_membership_conditions(
+                    user_id=self._principal.user_id,
+                    organization_id=Workload.organization_id,
+                    roles=roles,
+                ),
             )
         )
         active_organization = exists(
@@ -459,9 +475,11 @@ class CustomerPortalService:
             current_assignment,
         )
 
-    async def _owned_vm(self, vm_id: UUID) -> Workload:
+    async def _owned_vm(
+        self, vm_id: UUID, *, roles: tuple[str, ...] = WORKLOAD_READ_ROLES
+    ) -> Workload:
         workload = await self._session.scalar(
-            self._owned_workloads_query().where(Workload.id == vm_id)
+            self._owned_workloads_query(roles=roles).where(Workload.id == vm_id)
         )
         if workload is None:
             raise self._not_found()

@@ -27,6 +27,14 @@ class UserRole(StrEnum):
     CUSTOMER = "CUSTOMER"
 
 
+class OrganizationRole(StrEnum):
+    ORG_OWNER = "ORG_OWNER"
+    ORG_ADMIN = "ORG_ADMIN"
+    ORG_OPERATOR = "ORG_OPERATOR"
+    ORG_VIEWER = "ORG_VIEWER"
+    BILLING_VIEWER = "BILLING_VIEWER"
+
+
 class MfaMethodType(StrEnum):
     TOTP = "TOTP"
     WEBAUTHN = "WEBAUTHN"
@@ -79,7 +87,24 @@ class Organization(Base):
 
 class OrganizationMember(Base):
     __tablename__ = "organization_members"
-    __table_args__ = (UniqueConstraint("organization_id", "user_id"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "user_id"),
+        CheckConstraint(
+            "organization_role IN "
+            "('ORG_OWNER','ORG_ADMIN','ORG_OPERATOR','ORG_VIEWER','BILLING_VIEWER')",
+            name="ck_organization_members_role",
+        ),
+        CheckConstraint(
+            "status IN ('ACTIVE','SUSPENDED')",
+            name="ck_organization_members_status",
+        ),
+        Index(
+            "ix_organization_members_active",
+            "organization_id",
+            "status",
+            "expires_at",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     organization_id: Mapped[UUID] = mapped_column(
@@ -89,9 +114,18 @@ class OrganizationMember(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     added_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    organization_role: Mapped[str] = mapped_column(
+        String(24), nullable=False, default=OrganizationRole.ORG_OPERATOR.value
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
 class RefreshToken(Base):

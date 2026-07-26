@@ -36,6 +36,11 @@ from app.schemas.self_service import (
 )
 from app.security.access import Principal, require_service_role
 from app.services.audit import add_audit_event
+from app.services.organization_access import (
+    WORKLOAD_OPERATE_ROLES,
+    active_membership_conditions,
+)
+from app.services.quota import finish_quota_reservation, reserve_quota
 
 DEFAULT_MAX_CPU = 64
 DEFAULT_MAX_MEMORY = 512 * 1024**3
@@ -73,7 +78,11 @@ class CustomerSelfService:
             .where(
                 SshPublicKey.owner_user_id == self._principal.user_id,
                 SshPublicKey.revoked_at.is_(None),
-                OrganizationMember.user_id == self._principal.user_id,
+                *active_membership_conditions(
+                    user_id=self._principal.user_id,
+                    organization_id=SshPublicKey.organization_id,
+                    roles=WORKLOAD_OPERATE_ROLES,
+                ),
                 Organization.is_active.is_(True),
             )
             .order_by(SshPublicKey.created_at.desc())
@@ -286,7 +295,11 @@ class CustomerSelfService:
             .join(Workload, Workload.id == ServiceRequest.workload_id)
             .where(
                 ServiceRequest.requested_by_id == self._principal.user_id,
-                OrganizationMember.user_id == self._principal.user_id,
+                *active_membership_conditions(
+                    user_id=self._principal.user_id,
+                    organization_id=ServiceRequest.organization_id,
+                    roles=WORKLOAD_OPERATE_ROLES,
+                ),
                 Organization.is_active.is_(True),
                 Workload.organization_id == ServiceRequest.organization_id,
             )
@@ -474,7 +487,11 @@ class CustomerSelfService:
                     Workload.is_template.is_(False),
                     WorkloadAssignment.revoked_at.is_(None),
                     WorkloadAssignment.organization_id == Workload.organization_id,
-                    OrganizationMember.user_id == self._principal.user_id,
+                    *active_membership_conditions(
+                        user_id=self._principal.user_id,
+                        organization_id=Workload.organization_id,
+                        roles=WORKLOAD_OPERATE_ROLES,
+                    ),
                     Organization.is_active.is_(True),
                 )
             )
@@ -498,7 +515,11 @@ class CustomerSelfService:
                 ServiceRequest.id == request_id,
                 ServiceRequest.requested_by_id == self._principal.user_id,
                 Workload.organization_id == ServiceRequest.organization_id,
-                OrganizationMember.user_id == self._principal.user_id,
+                *active_membership_conditions(
+                    user_id=self._principal.user_id,
+                    organization_id=ServiceRequest.organization_id,
+                    roles=WORKLOAD_OPERATE_ROLES,
+                ),
                 Organization.is_active.is_(True),
             )
         )
@@ -516,7 +537,11 @@ class CustomerSelfService:
             SshPublicKey.id == key_id,
             SshPublicKey.owner_user_id == self._principal.user_id,
             SshPublicKey.revoked_at.is_(None),
-            OrganizationMember.user_id == self._principal.user_id,
+            *active_membership_conditions(
+                user_id=self._principal.user_id,
+                organization_id=SshPublicKey.organization_id,
+                roles=WORKLOAD_OPERATE_ROLES,
+            ),
             Organization.is_active.is_(True),
         ]
         if organization_id is not None:
@@ -711,6 +736,7 @@ class AdminSelfService:
             )
             item.input_snapshot = validated
             item.impact_snapshot = {"messages": impacts, "modified_on_approval": True}
+        await self._reserve_resize(item, workload)
         operation = Operation(
             operation_type="SERVICE_REQUEST",
             action=item.request_type.lower()[:16],
@@ -795,7 +821,8 @@ class AdminSelfService:
                 ServiceRequestStatus.NEEDS_ATTENTION.value,
             }:
                 raise AppError(409, "SERVICE_REQUEST_STATE_CONFLICT", "Execution cannot start.")
-            await self._current_owner(item)
+            workload, _ = await self._current_owner(item)
+            await self._reserve_resize(item, workload)
             conflict = await self._session.scalar(
                 select(Operation.id).where(
                     Operation.workload_id == item.workload_id,
@@ -833,6 +860,11 @@ class AdminSelfService:
                 operation.error_code = None
                 operation.error_summary = None
                 await self._apply_success(item)
+                await finish_quota_reservation(
+                    self._session,
+                    status="CONSUMED",
+                    service_request_id=item.id,
+                )
                 action = "SERVICE_REQUEST_EXECUTION_SUCCEEDED"
             else:
                 item.status = ServiceRequestStatus.NEEDS_ATTENTION.value
@@ -840,6 +872,11 @@ class AdminSelfService:
                 operation.status = OperationStatus.NEEDS_ATTENTION.value
                 operation.error_code = item.error_code
                 operation.error_summary = payload.summary
+                await finish_quota_reservation(
+                    self._session,
+                    status="RELEASED",
+                    service_request_id=item.id,
+                )
                 action = "SERVICE_REQUEST_EXECUTION_FAILED"
         item.result_summary = payload.summary
         item.version += 1
@@ -898,6 +935,18 @@ class AdminSelfService:
 
     async def _apply_success(self, item: ServiceRequest) -> None:
         request_type = ServiceRequestType(item.request_type)
+        if request_type is ServiceRequestType.RESIZE:
+            workload = await self._session.get(Workload, item.workload_id)
+            if workload is None:
+                raise AppError(409, "VM_NOT_FOUND", "The VM was not found.")
+            for key in ("cpu_cores", "memory_bytes", "disk_bytes"):
+                if key in item.input_snapshot:
+                    setattr(
+                        workload,
+                        key,
+                        self._snapshot_int(item.input_snapshot, key, 0),
+                    )
+            workload.version += 1
         key_value = item.input_snapshot.get("ssh_key_id")
         if request_type in {
             ServiceRequestType.SSH_KEY_ADD,
@@ -938,6 +987,53 @@ class AdminSelfService:
                     applied_by_request_id=item.id,
                 )
             )
+
+    async def _reserve_resize(
+        self, item: ServiceRequest, workload: Workload
+    ) -> None:
+        if item.request_type != ServiceRequestType.RESIZE.value:
+            return
+        await reserve_quota(
+            self._session,
+            item.organization_id,
+            service_request_id=item.id,
+            vcpu=max(
+                0,
+                self._snapshot_int(
+                    item.input_snapshot, "cpu_cores", workload.cpu_cores or 0
+                )
+                - (workload.cpu_cores or 0),
+            ),
+            memory_bytes=max(
+                0,
+                self._snapshot_int(
+                    item.input_snapshot,
+                    "memory_bytes",
+                    workload.memory_bytes or 0,
+                )
+                - (workload.memory_bytes or 0),
+            ),
+            disk_bytes=max(
+                0,
+                self._snapshot_int(
+                    item.input_snapshot, "disk_bytes", workload.disk_bytes or 0
+                )
+                - (workload.disk_bytes or 0),
+            ),
+        )
+
+    @staticmethod
+    def _snapshot_int(
+        snapshot: dict[str, object], key: str, default: int
+    ) -> int:
+        value = snapshot.get(key, default)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        raise AppError(
+            500,
+            "SERVICE_REQUEST_SNAPSHOT_INVALID",
+            "The approved request snapshot is invalid.",
+        )
 
     async def _current_owner(
         self, item: ServiceRequest

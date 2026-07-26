@@ -44,6 +44,7 @@ from app.security.notification_config import (
 from app.security.webhooks import WebhookEndpointPolicy
 from app.services.audit import add_audit_event
 from app.services.customer_notifications import queue_customer_notification
+from app.services.organization_access import active_membership_conditions
 
 
 class AlertingService:
@@ -166,7 +167,10 @@ class AlertingService:
                 select(OrganizationMember.organization_id)
                 .join(Organization, Organization.id == OrganizationMember.organization_id)
                 .where(
-                    OrganizationMember.user_id == principal.user_id,
+                    *active_membership_conditions(
+                        user_id=principal.user_id,
+                        organization_id=OrganizationMember.organization_id,
+                    ),
                     Organization.is_active.is_(True),
                 )
             )
@@ -669,7 +673,10 @@ class AlertingService:
                     select(OrganizationMember.organization_id)
                     .join(Organization, Organization.id == OrganizationMember.organization_id)
                     .where(
-                        OrganizationMember.user_id == principal.user_id,
+                        *active_membership_conditions(
+                            user_id=principal.user_id,
+                            organization_id=OrganizationMember.organization_id,
+                        ),
                         Organization.is_active.is_(True),
                     )
                 )

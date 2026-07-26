@@ -22,6 +22,7 @@ from app.models.auth import (
 )
 from app.models.cluster import Cluster
 from app.models.operation import Operation, Workload, WorkloadAssignment
+from app.models.organization_governance import QuotaReservation
 from app.models.self_service import (
     ApprovalStep,
     OrganizationServiceQuota,
@@ -46,6 +47,7 @@ async def _clear(app: FastAPI) -> None:
             WorkloadSecurityGroup,
             WorkloadSshPublicKey,
             ApprovalStep,
+            QuotaReservation,
             ServiceRequest,
             OrganizationServiceQuota,
             SecurityGroup,

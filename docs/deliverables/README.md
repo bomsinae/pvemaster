@@ -49,7 +49,7 @@ docs/
 | 8 — 고객 작업 이력, VM 상세와 성능 지표 | 구현·로컬 검증 완료 | [설계 결정](08-customer-history-metrics/design.md), [운영 runbook](08-customer-history-metrics/runbook.md), [검증 보고서](08-customer-history-metrics/verification-report.md) |
 | 9 — 고객 계정 보안과 알림 설정 | 구현·로컬 검증 완료 | [설계 결정](09-customer-security-notifications/design.md), [운영 runbook](09-customer-security-notifications/runbook.md), [검증 보고서](09-customer-security-notifications/verification-report.md) |
 | 10 — 제한된 고객 Self-service | 구현·로컬 검증 완료 | [설계 결정](10-customer-self-service/design.md), [운영 runbook](10-customer-self-service/runbook.md), [검증 보고서](10-customer-self-service/verification-report.md) |
-| 11 — 조직 관리자, 팀 권한, Quota와 승인 | 예정 | — |
+| 11 — 조직 관리자, 팀 권한, Quota와 승인 | 구현·로컬 검증 완료 | [설계 결정](11-organization-rbac-quota/design.md), [운영 runbook](11-organization-rbac-quota/runbook.md), [검증 보고서](11-organization-rbac-quota/verification-report.md) |
 | 12 — 관리자 고급 PVE 운영 | 예정 | — |
 | 13 — 상용 호스팅 기능 | 선택 | — |
 | 14 — 출시 Hardening과 운영 인수 | 예정 | — |

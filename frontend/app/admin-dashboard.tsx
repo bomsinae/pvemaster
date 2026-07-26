@@ -133,6 +133,7 @@ import { AlertCenterView } from "./alert-center-view";
 import { SecurityCenterDialog } from "./security-center-dialog";
 import { StepUpDialog } from "./step-up-dialog";
 import { ServiceRequestCenter } from "./service-request-center";
+import { OrganizationGovernanceView } from "./organization-governance-view";
 import { useDialogFocus } from "./use-dialog-focus";
 
 type Section = AdminSection;
@@ -149,6 +150,7 @@ const sectionLabels: Record<Section, string> = {
   vms: "가상 머신",
   backups: "백업",
   access: "사용자와 조직",
+  governance: "조직 권한과 Quota",
   networks: "IP 주소 관리",
   provisioning: "프로비저닝",
   service_requests: "고객 변경 요청",
@@ -324,7 +326,7 @@ export function AdminDashboard({
   const navigation = useMemo<Section[]>(
     () => isSuperAdmin
       ? [...adminSections]
-      : ["overview", "clusters", "inventory", "vms", "backups", "access", "service_requests", "operations", "alerts"],
+      : ["overview", "clusters", "inventory", "vms", "backups", "access", "governance", "service_requests", "operations", "alerts"],
     [isSuperAdmin],
   );
 
@@ -460,6 +462,8 @@ export function AdminDashboard({
         setWorkloads(nextWorkloads);
         if (!organizationPage.total) setOrganizationMembers([]);
         setSelectedOrganization((current) => current ?? organizationPage.items[0] ?? null);
+      } else if (next === "governance") {
+        setOrganizations(await listOrganizations(apiBaseUrl, token));
       } else if (next === "networks") {
         const [nextPools, nextClusters] = await Promise.all([
           listIpPools(apiBaseUrl, token),
@@ -1556,6 +1560,7 @@ export function AdminDashboard({
           onVerifyMetadata={verifyBackupMetadata}
         />}
         {section === "access" && <AccessView currentUserId={user.id} users={users} organizations={organizations} organizationTotal={organizationTotal} members={organizationMembers} workloads={workloads} selectedOrganization={selectedOrganization} canWrite={isSuperAdmin} saving={saving} onSelectOrganization={(organization) => { setSelectedOrganization(organization); setOrganizations((current) => current.some((item) => item.id === organization.id) ? current : [organization, ...current]); }} onSearchOrganizations={searchOrganizationOptions} onAddMember={addMember} onRemoveMember={removeMember} onAssign={assignToOrganization} onUnassign={unassignFromOrganization} onUser={() => setForm("user")} onResetPassword={(targetUser) => { setPasswordResetUser(targetUser); setForm("user-password-reset"); }} onUserStatus={(targetUser) => { setManagedUser(targetUser); setForm("user-status"); }} onDeleteUser={(targetUser) => { setManagedUser(targetUser); setForm("user-delete"); }} onCreateMember={() => setForm("organization-user")} onOrganization={() => { setEditingOrganization(null); setForm("organization"); }} onEditOrganization={(organization) => { setEditingOrganization(organization); setForm("organization"); }} onActivateOrganization={reactivateOrganization} onDeleteOrganization={(organization) => { setEditingOrganization(organization); setForm("organization-delete"); }} />}
+        {section === "governance" && <OrganizationGovernanceView apiBaseUrl={apiBaseUrl} token={token} organizations={organizations} canWrite={isSuperAdmin} />}
         {section === "networks" && <NetworksView pools={pools} clusters={clusters} onCreate={() => { setEditingPool(null); setForm("pool"); }} onEdit={(pool) => { setEditingPool(pool); setForm("pool"); }} onDelete={(pool) => { setEditingPool(pool); setForm("pool-delete"); }} />}
         {section === "provisioning" && <ProvisioningView products={products} templates={templates} workloads={workloads} nodes={provisioningNodes} clusters={clusters} requests={requests} onCreateProduct={() => { setEditingProduct(null); setForm("product"); }} onEditProduct={(product) => { setEditingProduct(product); setForm("product"); }} onDeleteProduct={(product) => { setEditingProduct(product); setEditingTemplate(null); setForm("product-delete"); }} onCreateTemplate={() => { setEditingTemplate(null); setForm("template"); }} onEditTemplate={(template) => { setEditingTemplate(template); setForm("template"); }} onDeleteTemplate={(template) => { setEditingTemplate(template); setEditingProduct(null); setForm("template-delete"); }} onCreateNode={() => { setEditingProvisioningNode(null); setForm("node"); }} onEditNode={(node) => { setEditingProvisioningNode(node); setForm("node"); }} />}
         {section === "service_requests" && <ServiceRequestCenter apiBaseUrl={apiBaseUrl} token={token} canApprove={isSuperAdmin} />}

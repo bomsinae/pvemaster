@@ -561,6 +561,36 @@ export type AdminServiceRequest = {
   version: number;
 };
 
+export type AdminQuotaValues = {
+  vcpu: number;
+  memory_bytes: number;
+  disk_bytes: number;
+  vms: number;
+  ips: number;
+  backup_bytes: number;
+};
+
+export type AdminOrganizationQuota = {
+  organization_id: string;
+  limits: AdminQuotaValues;
+  usage: AdminQuotaValues;
+  reserved: AdminQuotaValues;
+  remaining: AdminQuotaValues;
+  version: number;
+  updated_at: string | null;
+  captured_at: string;
+};
+
+export type AdminApprovalPolicy = {
+  id: string;
+  organization_id: string;
+  request_type: string;
+  requires_approval: boolean;
+  minimum_role: "ORG_OWNER" | "ORG_ADMIN" | "ORG_OPERATOR";
+  updated_at: string;
+  version: number;
+};
+
 export type InventoryFreshness = {
   cluster_id: string;
   cluster_name: string;
@@ -1652,6 +1682,85 @@ export const updateAdminServiceRequestExecution = (
   {
     method: "POST",
     body: JSON.stringify({ version: request.version, outcome, summary }),
+  },
+  fetcher,
+);
+
+export const getAdminOrganizationQuota = (
+  base: string,
+  token: string,
+  organizationId: string,
+  fetcher?: Fetcher,
+) => api<AdminOrganizationQuota>(
+  base,
+  `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/quota`,
+  token,
+  {},
+  fetcher,
+);
+
+export const updateAdminOrganizationQuota = (
+  base: string,
+  token: string,
+  organizationId: string,
+  quota: AdminOrganizationQuota | null,
+  limits: AdminQuotaValues,
+  fetcher?: Fetcher,
+) => api<AdminOrganizationQuota>(
+  base,
+  `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/quota`,
+  token,
+  {
+    method: "PUT",
+    body: JSON.stringify({
+      max_vcpu: limits.vcpu,
+      max_memory_bytes: limits.memory_bytes,
+      max_disk_bytes: limits.disk_bytes,
+      max_vms: limits.vms,
+      max_ips: limits.ips,
+      max_backup_bytes: limits.backup_bytes,
+      version: quota && quota.version > 0 ? quota.version : null,
+    }),
+  },
+  fetcher,
+);
+
+export async function listAdminApprovalPolicies(
+  base: string,
+  token: string,
+  organizationId: string,
+  fetcher?: Fetcher,
+) {
+  return api<AdminApprovalPolicy[]>(
+    base,
+    `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/approval-policies`,
+    token,
+    {},
+    fetcher,
+  );
+}
+
+export const updateAdminApprovalPolicy = (
+  base: string,
+  token: string,
+  organizationId: string,
+  policy: AdminApprovalPolicy | null,
+  requestType: string,
+  minimumRole: AdminApprovalPolicy["minimum_role"],
+  requiresApproval: boolean,
+  fetcher?: Fetcher,
+) => api<AdminApprovalPolicy>(
+  base,
+  `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/approval-policies`,
+  token,
+  {
+    method: "PUT",
+    body: JSON.stringify({
+      request_type: requestType,
+      requires_approval: requiresApproval,
+      minimum_role: minimumRole,
+      version: policy?.version ?? null,
+    }),
   },
   fetcher,
 );

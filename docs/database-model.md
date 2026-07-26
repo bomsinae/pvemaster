@@ -556,3 +556,32 @@ maintenance 작업으로 실행한다.
 - VM당 최대 vCPU/RAM/disk와 활성 요청 수를 저장한다.
 - 설정 row가 없어도 보수적 서버 기본 상한을 적용한다. 단계 11의 조직 quota
   관리 기능이 이 모델을 확장한다.
+
+## 19. 조직 RBAC와 자원 Governance
+
+### `organization_members`
+
+- 플랫폼 `users.role`과 별도로 조직별 `organization_role`을 저장한다.
+- `status`, `expires_at`, `version`으로 정지·만료·동시 변경을 통제한다.
+- 활성 상태와 만료 조건은 API 조회뿐 아니라 worker 실행 직전에도 다시 검사한다.
+
+### `organization_invitations`
+
+- 조직, 정규화 이메일, 역할, `token_hash`, 만료·수락·폐기 시각을 저장한다.
+- 같은 조직/이메일의 활성 초대는 partial unique index로 하나만 허용한다.
+- 원문 token은 DB에 저장하지 않으며 성공한 수락 후 재사용할 수 없다.
+
+### `organization_quotas`, `quota_usage_snapshots`, `quota_reservations`
+
+- vCPU, RAM, disk, VM 수, IP와 backup byte 상한 및 optimistic `version`을 저장한다.
+- snapshot은 시점별 관측 사용량을 보존하고, API의 현재값은 workload/IP/backup
+  원장과 활성 reservation을 분리해 반환한다.
+- reservation은 provisioning 또는 service request 중 하나만 참조한다. 성공 시
+  `CONSUMED`, 확정 실패 시 `RELEASED`로 전이한다.
+- 예약은 organization row를 먼저 잠근 transaction에서 현재 사용량과 활성 예약을
+  합산한다. 수동 검토처럼 외부 상태가 불명확한 요청은 보수적으로 예약을 유지한다.
+
+### `approval_policies`
+
+- 조직과 요청 유형을 복합 유일 키로 사용한다.
+- 승인 필요 여부, 최소 승인자 조직 역할, 자동 승인 한도와 version을 저장한다.

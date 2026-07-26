@@ -33,6 +33,7 @@ from app.security.access import Principal
 from app.security.credentials import CredentialCipher, EncryptedCredential
 from app.services.audit import add_audit_event
 from app.services.ipam import IpamService
+from app.services.quota import finish_quota_reservation
 
 Sleep = Callable[[float], Awaitable[None]]
 logger = logging.getLogger(__name__)
@@ -242,6 +243,11 @@ class ProvisioningRunner:
             target_type="provisioning_request",
             target_id=request.id,
             details={"target_vmid": request.target_vmid},
+        )
+        await finish_quota_reservation(
+            self._session,
+            status="CONSUMED",
+            provisioning_request_id=request.id,
         )
         await self._session.commit()
 
@@ -736,6 +742,12 @@ class ProvisioningRunner:
             details={"error_code": error.code, "step": step.step_name if step else None},
             error_code=error.code,
         )
+        if not manual_review:
+            await finish_quota_reservation(
+                self._session,
+                status="RELEASED",
+                provisioning_request_id=request.id,
+            )
         await self._session.commit()
 
         if manual_review:

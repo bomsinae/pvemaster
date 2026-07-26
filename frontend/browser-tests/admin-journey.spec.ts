@@ -163,3 +163,16 @@ test("admin approves and tracks a customer service request", async ({ page }) =>
   await page.getByRole("button", { name: "실행 시작" }).click();
   await expect(page.getByText("IN_PROGRESS")).toBeVisible();
 });
+
+test("admin reviews reservations and updates organization quota", async ({ page }) => {
+  const state = await installApiMock(page);
+  await loginAs(page, "admin");
+
+  await page.getByRole("button", { name: "조직 권한과 Quota" }).click();
+  await expect(page.getByRole("heading", { name: "조직 권한과 자원 정책" })).toBeVisible();
+  await expect(page.getByText("4 사용 · 2 예약 / 32")).toBeVisible();
+  await page.getByLabel("vCPU").fill("40");
+  await page.getByRole("button", { name: "Quota 저장" }).click();
+  await expect(page.getByText("조직 quota를 저장했습니다.")).toBeVisible();
+  expect(state.organizationQuotaVcpu).toBe(40);
+});

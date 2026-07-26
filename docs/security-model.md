@@ -285,6 +285,14 @@ Notification channel 구성은 PVE credential/MFA와 분리된 HKDF context의 A
   함께 적용해 재할당 전 값을 차단한다.
 - 고객 작업 실패 문구는 허용된 일반화 메시지만 반환하고 PVE 응답, UPID,
   cluster/node, endpoint를 노출하지 않는다.
+- 플랫폼 역할과 조직 역할을 분리한다. 조직 역할은 명시적 permission allowlist만
+  부여하며 고객 token으로 `/admin` API를 호출할 수 없다.
+- 조직 멤버십의 활성 상태와 만료는 요청과 비동기 실행 시점에 모두 검사한다.
+  마지막 `ORG_OWNER`의 강등·제거는 transaction 안에서 거부한다.
+- 조직 초대 원문은 생성 응답에서 한 번만 노출하고 DB에는 hash만 저장한다. 본인
+  이메일, 만료, 폐기와 replay를 모두 검사한다.
+- quota 검증과 예약은 조직 row lock을 획득한 동일 transaction에서 수행하며,
+  현재 사용량과 모든 활성 예약을 함께 계산해 병렬 초과 예약을 막는다.
 
 ## 11. 출시 전 보안 완료 조건
 

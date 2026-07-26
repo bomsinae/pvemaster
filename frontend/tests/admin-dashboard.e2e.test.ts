@@ -17,6 +17,7 @@ import {
   deleteCluster,
   deleteTemplate,
   getAdminVmJob,
+  getAdminOrganizationQuota,
   getClusterInventory,
   getClusterResourceOverview,
   getClusterRemovalCheck,
@@ -45,6 +46,7 @@ import {
   updateProduct,
   updateIpPool,
   updateOrganization,
+  updateAdminOrganizationQuota,
   updateUserStatus,
   updateTemplate,
   upsertProvisioningNode,
@@ -548,4 +550,40 @@ test("searches a limited organization directory and preserves API failures", asy
     searchOrganizations("http://api.test", "customer-access", { q: "Integration", limit: 10 }, deniedFetcher),
     (error: unknown) => error instanceof AdminApiError && error.status === 403 && error.code === "ROLE_FORBIDDEN",
   );
+});
+
+test("administrator quota client sends optimistic version and exposes reservations", async () => {
+  const requests: Array<{ method?: string; body?: unknown }> = [];
+  const quota = {
+    organization_id: "organization-1",
+    limits: { vcpu: 20, memory_bytes: 20, disk_bytes: 20, vms: 20, ips: 20, backup_bytes: 20 },
+    usage: { vcpu: 4, memory_bytes: 4, disk_bytes: 4, vms: 1, ips: 1, backup_bytes: 4 },
+    reserved: { vcpu: 2, memory_bytes: 2, disk_bytes: 0, vms: 1, ips: 1, backup_bytes: 0 },
+    remaining: { vcpu: 14, memory_bytes: 14, disk_bytes: 16, vms: 18, ips: 18, backup_bytes: 16 },
+    version: 7,
+    updated_at: "2026-07-26T00:00:00Z",
+    captured_at: "2026-07-26T00:00:00Z",
+  };
+  const fetcher: typeof fetch = async (_input, init) => {
+    requests.push({
+      method: init?.method,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return response(quota);
+  };
+
+  const current = await getAdminOrganizationQuota(
+    "http://api.test", "admin-token", quota.organization_id, fetcher,
+  );
+  await updateAdminOrganizationQuota(
+    "http://api.test",
+    "admin-token",
+    quota.organization_id,
+    current,
+    { ...quota.limits, vcpu: 24 },
+    fetcher,
+  );
+  assert.equal(current.reserved.vcpu, 2);
+  assert.equal((requests[1].body as { version: number }).version, 7);
+  assert.equal((requests[1].body as { max_vcpu: number }).max_vcpu, 24);
 });

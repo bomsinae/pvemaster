@@ -8,7 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.errors import AppError
-from app.models.auth import Organization, OrganizationMember, RefreshToken, User, UserRole
+from app.models.auth import (
+    Organization,
+    OrganizationMember,
+    OrganizationRole,
+    RefreshToken,
+    User,
+    UserRole,
+)
 from app.models.operation import WorkloadAssignment
 from app.models.provisioning import ProvisioningRequest
 from app.schemas.auth import (
@@ -474,6 +481,9 @@ class AccountService:
             organization_id=organization.id,
             user_id=user.id,
             added_by_id=self._principal.user_id,
+            organization_role=request.organization_role.value,
+            status="ACTIVE",
+            version=1,
         )
         self._session.add(membership)
         await self._flush_conflict("The user is already an organization member.")
@@ -496,7 +506,11 @@ class AccountService:
                 id=membership.id,
                 organization_id=membership.organization_id,
                 user_id=membership.user_id,
+                organization_role=OrganizationRole(membership.organization_role),
+                status=membership.status,
+                expires_at=membership.expires_at,
                 created_at=membership.created_at,
+                version=membership.version,
                 email=user.email,
                 display_name=user.display_name,
                 role=UserRole(user.role),
@@ -521,6 +535,25 @@ class AccountService:
                 code="ORGANIZATION_MEMBER_NOT_FOUND",
                 message="The organization member was not found.",
             )
+        if membership.organization_role == OrganizationRole.ORG_OWNER.value:
+            other_owner = await self._session.scalar(
+                select(OrganizationMember.id)
+                .where(
+                    OrganizationMember.organization_id == organization_id,
+                    OrganizationMember.id != membership.id,
+                    OrganizationMember.organization_role
+                    == OrganizationRole.ORG_OWNER.value,
+                    OrganizationMember.status == "ACTIVE",
+                    OrganizationMember.expires_at.is_(None),
+                )
+                .with_for_update()
+            )
+            if other_owner is None:
+                raise AppError(
+                    status_code=409,
+                    code="LAST_ORGANIZATION_OWNER",
+                    message="The last organization owner cannot be removed.",
+                )
         await self._session.delete(membership)
         add_audit_event(
             self._session,
