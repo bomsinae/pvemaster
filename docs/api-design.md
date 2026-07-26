@@ -669,3 +669,33 @@ version으로 저장하면 `409 NOTIFICATION_PREFERENCE_VERSION_CONFLICT`를 반
 전달 직전에도 활성 사용자, 현재 조직 멤버십과 유효 설정을 다시 검사하므로 queue
 이후 opt-out 또는 멤버십 회수는 `CANCELLED` 처리한다. 응답에는 전체 이메일 주소,
 메일 본문, 내부 event key나 전달 오류 원문을 포함하지 않는다.
+
+## 23. 제한된 고객 Self-service API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/customer/ssh-keys` | CUSTOMER | 현재 조직 범위의 본인 공개키 |
+| POST | `/customer/vms/{vm_id}/ssh-keys` | CUSTOMER + 현재 할당 | VM 조직 범위 공개키 등록 |
+| DELETE | `/customer/ssh-keys/{key_id}` | CUSTOMER + key 소유 | 사용하지 않는 공개키 revoke |
+| GET | `/customer/vms/{vm_id}/security-groups` | CUSTOMER + 현재 할당 | 적용 요청 가능한 승인 정책 |
+| POST | `/customer/vms/{vm_id}/service-requests/preview` | CUSTOMER + 현재 할당 | quota와 영향 사전 검사 |
+| POST | `/customer/vms/{vm_id}/service-requests` | CUSTOMER + 현재 할당 | 멱등 승인 요청 생성 |
+| GET | `/customer/service-requests[/{id}]` | CUSTOMER + 현재 소유/요청자 | 자기 요청 조회 |
+| POST | `/customer/service-requests/{id}/cancel` | CUSTOMER + 요청자 | 승인 전 version 기반 취소 |
+| GET | `/admin/service-requests[/{id}]` | ADMIN | 승인 queue와 안전한 입력 snapshot |
+| POST | `/admin/service-requests/{id}/approve` | SUPER_ADMIN | 소유권·quota 재검사와 승인 |
+| POST | `/admin/service-requests/{id}/reject` | ADMIN | 사유가 있는 거부 |
+| POST | `/admin/service-requests/{id}/execution` | SUPER_ADMIN | 시작·성공·실패 결과 기록 |
+| GET/POST | `/admin/security-groups` | ADMIN / SUPER_ADMIN | 구조화된 승인 정책 조회·생성 |
+
+요청 유형은 SSH key 추가·교체·삭제, hostname/설명, rDNS, security group, backup,
+별도 대상 restore, 증설과 재설치다. 고객 payload는 유형별 allowlist 필드만 받으며
+임의 Cloud-Init, firewall 문자열, private key와 disk 축소 필드는 존재하지 않는다.
+restore와 재설치는 VM 이름을 포함한 typed confirmation과 등록된 MFA의 action-bound
+step-up을 요구한다.
+
+모든 요청은 승인 전 `PENDING_APPROVAL`이고 이때만 고객 취소가 가능하다. 승인 시
+별도 `SERVICE_REQUEST` operation을 연결하고, 실행 중 소유권 또는 다른 operation
+충돌을 다시 검사한다. 실패는 삭제하지 않고 `NEEDS_ATTENTION`으로 보존한다.
+동일 고객의 idempotency key 재전송은 같은 응답을 반환하고 다른 payload 재사용은
+409다. 응답에는 cluster/node/VMID/PVE endpoint·UPID와 private material이 없다.

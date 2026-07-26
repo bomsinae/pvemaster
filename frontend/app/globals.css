@@ -5568,6 +5568,190 @@ h1 {
   }
 }
 
+.customer-self-service-dialog {
+  width: min(1080px, calc(100vw - 32px));
+  max-height: min(860px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 28px 80px rgb(16 31 26 / 24%);
+}
+
+.customer-self-service-dialog > header,
+.self-service-history article > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.customer-self-service-dialog h2,
+.customer-self-service-dialog h3,
+.customer-self-service-dialog p {
+  margin-top: 0;
+}
+
+.customer-self-service-dialog > header > button {
+  min-width: 42px;
+  min-height: 42px;
+  font-size: 24px;
+}
+
+.self-service-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr);
+  gap: 28px;
+  margin-top: 22px;
+}
+
+.self-service-form,
+.ssh-key-create {
+  display: grid;
+  gap: 14px;
+}
+
+.self-service-form label,
+.ssh-key-create label {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.self-service-form input,
+.self-service-form select,
+.self-service-form textarea,
+.ssh-key-create input,
+.ssh-key-create textarea {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+}
+
+.self-service-form textarea,
+.ssh-key-create textarea {
+  min-height: 78px;
+  resize: vertical;
+}
+
+.self-service-size-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.danger-field {
+  padding: 14px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--line));
+}
+
+.self-service-preview {
+  margin-top: 18px;
+  padding: 18px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+
+.self-service-preview ul {
+  padding-left: 20px;
+}
+
+.ssh-key-create,
+.self-service-history {
+  padding: 18px;
+  border: 1px solid var(--line);
+}
+
+.self-service-history {
+  margin-top: 18px;
+}
+
+.self-service-history article {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+
+.self-service-history article span {
+  font: 600 11px/1 var(--mono);
+  color: var(--muted);
+}
+
+.self-service-message {
+  min-height: 20px;
+  margin: 18px 0 0;
+  color: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .self-service-columns,
+  .self-service-size-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.service-request-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 16px;
+}
+
+.service-request-list article {
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.service-request-list article header,
+.service-request-list article footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.service-request-list article header div {
+  display: grid;
+  gap: 4px;
+}
+
+.service-request-list article header span {
+  font: 600 11px/1 var(--mono);
+  color: var(--accent);
+}
+
+.service-request-list article dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.service-request-list article dl div {
+  min-width: 0;
+}
+
+.service-request-list article dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.service-request-list article dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.service-request-list article time {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .customer-notification-dialog {
   width: min(760px, calc(100vw - 32px));
   max-height: min(820px, calc(100vh - 32px));

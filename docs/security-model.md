@@ -114,6 +114,18 @@ AND organization.is_active = true
 - 강제 `stop`은 현재 조직 소유 QEMU에만 허용하고, UI 위험 재확인과 API의 `confirm_forced=true`를 모두 요구하며 `FORCED` 감사 기록을 남긴다.
 - 관리자 `reset`도 강제 작업으로 표시하며 고객 역할에는 허용하지 않는다.
 - 고객 콘솔은 현재 활성 조직에 할당된 실행 중 워크로드에만 허용한다. 설정 변경, migrate, clone, delete, snapshot은 고객에게 노출하지 않는다.
+- 고객 설정 변경은 PVE 직접 실행 API로 제공하지 않고 유형별 구조화
+  `service_request`로만 접수한다. 고객 생성, 관리자 승인과 실행 직전에 현재
+  assignment·조직·quota를 각각 다시 검사한다.
+- SSH key endpoint는 공개키 형식만 허용하고 private key 표식, 줄바꿈과 비정상
+  encoding을 거부한다. 고객 response에는 내부 조직 UUID를 포함하지 않는다.
+- security group은 임의 명령 문자열 대신 direction/action/protocol/CIDR/port
+  allowlist schema를 사용하며 다른 조직 정책 참조는 404로 숨긴다.
+- vCPU/RAM/disk 변경은 증가만 허용하고 disk 축소를 항상 거부한다. restore는 기존
+  VM 덮어쓰기 대상 필드를 제공하지 않는다.
+- 재설치와 restore 요청은 typed confirmation, MFA 등록과 action-bound step-up을
+  모두 요구한다. 승인 후 취소를 허용하지 않고 실패는 `NEEDS_ATTENTION`으로
+  operation·감사와 함께 보존한다.
 - 콘솔은 REST 인증 후 발급되는 30초 TTL 일회용 token을 WebSocket subprotocol로 전달한다. PVE 단기 콘솔 ticket은 RFB 인증을 위해 `no-store` 응답으로만 전달하며 브라우저 메모리 밖에 보존하지 않는다. access token, PVE ticket과 PVE endpoint를 URL에 넣지 않는다.
 - WebSocket 연결 시 허용 Origin, 역할, 사용자 활성/session epoch, workload 실행 상태를 다시 검사한다. 고객 역할은 조직 활성 상태, 멤버십과 현재 할당도 재검증한다. 사용자·workload 조합별 한 연결과 최대 세션 시간을 강제한다.
 - 대상의 현재 상태를 PVE에서 확인하고 무의미하거나 위험한 전이는 `409`로 거부한다.

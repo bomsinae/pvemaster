@@ -543,6 +543,24 @@ export type NotificationChannel = {
   configured: boolean;
 };
 
+export type AdminServiceRequest = {
+  id: string;
+  request_type: string;
+  vm_id: string;
+  vm_name: string;
+  organization_name: string;
+  input: Record<string, unknown>;
+  impact: { messages?: string[] };
+  status: string;
+  operation_id: string | null;
+  error_code: string | null;
+  result_summary: string | null;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  version: number;
+};
+
 export type InventoryFreshness = {
   cluster_id: string;
   cluster_name: string;
@@ -1585,6 +1603,56 @@ export const testNotificationChannel = (
   `/api/v1/admin/notification-channels/${encodeURIComponent(channelId)}/test`,
   token,
   { method: "POST" },
+  fetcher,
+);
+
+export async function listAdminServiceRequests(
+  base: string,
+  token: string,
+  fetcher?: Fetcher,
+) {
+  return (await api<{ items: AdminServiceRequest[] }>(
+    base,
+    "/api/v1/admin/service-requests",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const decideAdminServiceRequest = (
+  base: string,
+  token: string,
+  request: AdminServiceRequest,
+  decision: "approve" | "reject",
+  reason: string,
+  fetcher?: Fetcher,
+) => api<AdminServiceRequest>(
+  base,
+  `/api/v1/admin/service-requests/${encodeURIComponent(request.id)}/${decision}`,
+  token,
+  {
+    method: "POST",
+    body: JSON.stringify({ version: request.version, reason }),
+  },
+  fetcher,
+);
+
+export const updateAdminServiceRequestExecution = (
+  base: string,
+  token: string,
+  request: AdminServiceRequest,
+  outcome: "START" | "SUCCEEDED" | "FAILED",
+  summary: string,
+  fetcher?: Fetcher,
+) => api<AdminServiceRequest>(
+  base,
+  `/api/v1/admin/service-requests/${encodeURIComponent(request.id)}/execution`,
+  token,
+  {
+    method: "POST",
+    body: JSON.stringify({ version: request.version, outcome, summary }),
+  },
   fetcher,
 );
 

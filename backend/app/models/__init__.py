@@ -76,11 +76,23 @@ from app.models.scheduling import (
     SchedulerLease,
     SyncRun,
 )
+from app.models.self_service import (
+    ApprovalStep,
+    OrganizationServiceQuota,
+    SecurityGroup,
+    ServiceRequest,
+    ServiceRequestStatus,
+    ServiceRequestType,
+    SshPublicKey,
+    WorkloadSecurityGroup,
+    WorkloadSshPublicKey,
+)
 
 __all__ = [
     "AuditLog",
     "Alert",
     "AlertEvent",
+    "ApprovalStep",
     "BackupRun",
     "BackupPolicy",
     "BackupPolicyAssignment",
@@ -114,6 +126,7 @@ __all__ = [
     "Organization",
     "OrganizationMember",
     "OrganizationNotificationPolicy",
+    "OrganizationServiceQuota",
     "Operation",
     "OperationAssignment",
     "OperationEvent",
@@ -131,6 +144,11 @@ __all__ = [
     "RefreshToken",
     "RunStatus",
     "SchedulerLease",
+    "SecurityGroup",
+    "ServiceRequest",
+    "ServiceRequestStatus",
+    "ServiceRequestType",
+    "SshPublicKey",
     "User",
     "UserRole",
     "Template",
@@ -138,4 +156,6 @@ __all__ = [
     "Workload",
     "WorkloadMetric",
     "WorkloadAssignment",
+    "WorkloadSecurityGroup",
+    "WorkloadSshPublicKey",
 ]

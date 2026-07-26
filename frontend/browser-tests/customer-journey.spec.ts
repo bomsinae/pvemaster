@@ -142,3 +142,22 @@ test("customer reviews sessions and changes password without ending the current 
   })).toBeVisible();
   await expect(page.getByRole("heading", { name: "가상 머신" })).toBeVisible();
 });
+
+test("customer previews and submits a controlled metadata change", async ({ page }) => {
+  await installApiMock(page);
+  await loginAs(page, "customer");
+
+  await page.getByRole("button", { name: "변경 요청" }).click();
+  const dialog = page.getByRole("dialog", { name: "customer-web-01 변경 요청" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("요청 유형").selectOption("METADATA_CHANGE");
+  await dialog.getByRole("textbox", { name: "Hostname", exact: true }).fill("customer-web-02");
+  await dialog.getByLabel("요청 사유").fill("서비스 이름 정리");
+  await dialog.getByRole("button", { name: "영향 미리보기" }).click();
+  await expect(dialog.getByText("VM identity 정보가 변경됩니다.")).toBeVisible();
+  await dialog.getByRole("button", { name: "승인 요청 제출" }).click();
+  await expect(dialog.getByText("승인 요청을 접수했습니다.")).toBeVisible();
+  await expect(dialog.getByText("PENDING_APPROVAL")).toBeVisible();
+  await dialog.getByRole("button", { name: "요청 취소" }).click();
+  await expect(dialog.getByText("승인 전 요청을 취소했습니다.")).toBeVisible();
+});

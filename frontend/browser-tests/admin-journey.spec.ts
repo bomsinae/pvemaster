@@ -148,3 +148,18 @@ test("admin reviews backup policy calendar and restore assurance", async ({ page
     path: "/api/v1/admin/backup-verifications",
   });
 });
+
+test("admin approves and tracks a customer service request", async ({ page }) => {
+  await installApiMock(page, { initialServiceRequest: true });
+  await loginAs(page, "admin");
+
+  await page.getByRole("button", { name: "고객 변경 요청" }).click();
+  await expect(page.getByRole("heading", { name: "고객 변경 요청", level: 2 })).toBeVisible();
+  await expect(page.getByText("customer-web-01", { exact: true })).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept("Capacity and ownership verified"));
+  await page.getByRole("button", { name: "승인", exact: true }).click();
+  await expect(page.getByText("APPROVED")).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept("Maintenance window started"));
+  await page.getByRole("button", { name: "실행 시작" }).click();
+  await expect(page.getByText("IN_PROGRESS")).toBeVisible();
+});

@@ -18,6 +18,7 @@ type MockOptions = {
   delayCustomerListMs?: number;
   failCustomerListOnce?: boolean;
   staleCustomerInventory?: boolean;
+  initialServiceRequest?: boolean;
 };
 
 type MockState = {
@@ -35,6 +36,9 @@ type MockState = {
   customerVmDownEmail: boolean;
   customerNotificationVersion: number;
   customerOtherSession: boolean;
+  customerServiceRequest: boolean;
+  customerServiceRequestStatus: string;
+  customerServiceRequestVersion: number;
   requests: Array<{ method: string; path: string }>;
 };
 
@@ -112,6 +116,31 @@ function customerVm(state: MockState, stale = false) {
     observed_at: item.observed_at,
     is_stale: stale,
     stale_reason: stale ? "마지막 전체 동기화가 최신성 기준을 초과했습니다." : null,
+  };
+}
+
+function serviceRequest(state: MockState) {
+  return {
+    id: "6b475ccf-21e9-4ed4-9874-cb16b18c60a3",
+    request_type: "METADATA_CHANGE",
+    vm_id: ids.workload,
+    vm_name: "customer-web-01",
+    organization_name: "Acme Korea",
+    input: { hostname: "customer-web-02" },
+    impact: { messages: ["VM identity 정보가 변경됩니다."] },
+    status: state.customerServiceRequestStatus,
+    operation_id: state.customerServiceRequestStatus === "PENDING_APPROVAL"
+      ? null
+      : ids.operation,
+    error_code: null,
+    result_summary: state.customerServiceRequestStatus === "SUCCEEDED"
+      ? "Inventory sync verified the change."
+      : null,
+    requested_at: observedAt,
+    started_at: null,
+    finished_at: null,
+    version: state.customerServiceRequestVersion,
+    approvals: [],
   };
 }
 
@@ -222,6 +251,9 @@ export async function installApiMock(
     customerVmDownEmail: true,
     customerNotificationVersion: 0,
     customerOtherSession: true,
+    customerServiceRequest: options.initialServiceRequest ?? false,
+    customerServiceRequestStatus: "PENDING_APPROVAL",
+    customerServiceRequestVersion: 1,
     requests: [],
   };
 
@@ -664,6 +696,110 @@ export async function installApiMock(
         required_by_organization: false,
         version: state.customerNotificationVersion,
       });
+      return;
+    }
+    if (path === "/api/v1/customer/ssh-keys" && method === "GET") {
+      await json(route, { items: [] });
+      return;
+    }
+    if (path === `/api/v1/customer/vms/${ids.workload}/ssh-keys` && method === "POST") {
+      await json(route, {
+        id: "5dcfffa8-5f66-47ae-868a-84ef4b57d7ce",
+        label: "Browser key",
+        fingerprint: "SHA256:browser-key",
+        public_key: "ssh-ed25519 AAAA",
+        created_at: observedAt,
+      }, 201);
+      return;
+    }
+    if (path === `/api/v1/customer/vms/${ids.workload}/security-groups`) {
+      await json(route, {
+        items: [{
+          id: "10d772a2-e658-41e0-8494-4e1643d73ff1",
+          name: "web-ingress",
+          description: "Allow HTTPS only",
+        }],
+      });
+      return;
+    }
+    if (
+      path === `/api/v1/customer/vms/${ids.workload}/service-requests/preview`
+      && method === "POST"
+    ) {
+      const body = request.postDataJSON() as {
+        request_type: string;
+        input: Record<string, unknown>;
+      };
+      await json(route, {
+        request_type: body.request_type,
+        requires_approval: true,
+        requires_step_up: false,
+        cancellable_until: "APPROVAL",
+        impacts: ["VM identity 정보가 변경됩니다."],
+        current: { power_state: state.powerState },
+        requested: body.input,
+      });
+      return;
+    }
+    if (
+      path === `/api/v1/customer/vms/${ids.workload}/service-requests`
+      && method === "POST"
+    ) {
+      state.customerServiceRequest = true;
+      state.customerServiceRequestStatus = "PENDING_APPROVAL";
+      state.customerServiceRequestVersion = 1;
+      await json(route, serviceRequest(state), 202);
+      return;
+    }
+    if (path === "/api/v1/customer/service-requests" && method === "GET") {
+      await json(route, {
+        items: state.customerServiceRequest ? [serviceRequest(state)] : [],
+      });
+      return;
+    }
+    if (
+      path === "/api/v1/customer/service-requests/6b475ccf-21e9-4ed4-9874-cb16b18c60a3/cancel"
+      && method === "POST"
+    ) {
+      state.customerServiceRequestStatus = "CANCELLED";
+      state.customerServiceRequestVersion += 1;
+      await json(route, serviceRequest(state));
+      return;
+    }
+    if (path === "/api/v1/admin/service-requests" && method === "GET") {
+      await json(route, {
+        items: state.customerServiceRequest ? [serviceRequest(state)] : [],
+      });
+      return;
+    }
+    if (
+      path === "/api/v1/admin/service-requests/6b475ccf-21e9-4ed4-9874-cb16b18c60a3/approve"
+      && method === "POST"
+    ) {
+      state.customerServiceRequestStatus = "APPROVED";
+      state.customerServiceRequestVersion += 1;
+      await json(route, serviceRequest(state));
+      return;
+    }
+    if (
+      path === "/api/v1/admin/service-requests/6b475ccf-21e9-4ed4-9874-cb16b18c60a3/reject"
+      && method === "POST"
+    ) {
+      state.customerServiceRequestStatus = "REJECTED";
+      state.customerServiceRequestVersion += 1;
+      await json(route, serviceRequest(state));
+      return;
+    }
+    if (
+      path === "/api/v1/admin/service-requests/6b475ccf-21e9-4ed4-9874-cb16b18c60a3/execution"
+      && method === "POST"
+    ) {
+      const body = request.postDataJSON() as { outcome: string };
+      state.customerServiceRequestStatus = body.outcome === "START"
+        ? "IN_PROGRESS"
+        : body.outcome === "SUCCEEDED" ? "SUCCEEDED" : "NEEDS_ATTENTION";
+      state.customerServiceRequestVersion += 1;
+      await json(route, serviceRequest(state));
       return;
     }
     if (path === `/api/v1/customer/vms/${ids.workload}/metrics`) {

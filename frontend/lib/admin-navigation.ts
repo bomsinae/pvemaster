@@ -7,6 +7,7 @@ export const adminSections = [
   "access",
   "networks",
   "provisioning",
+  "service_requests",
   "operations",
   "alerts",
   "audit",

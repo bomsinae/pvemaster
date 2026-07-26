@@ -135,6 +135,74 @@ export type CustomerAlert = {
   last_seen_at: string;
 };
 
+export type CustomerServiceRequestType =
+  | "SSH_KEY_ADD"
+  | "SSH_KEY_REPLACE"
+  | "SSH_KEY_DELETE"
+  | "METADATA_CHANGE"
+  | "RDNS_CHANGE"
+  | "SECURITY_GROUP_APPLY"
+  | "BACKUP_RUN"
+  | "RESTORE_REQUEST"
+  | "RESIZE"
+  | "REINSTALL";
+
+export type CustomerServiceRequest = {
+  id: string;
+  request_type: CustomerServiceRequestType;
+  vm_id: string;
+  vm_name: string;
+  organization_name: string;
+  input: Record<string, unknown>;
+  impact: { messages?: string[] };
+  status:
+    | "PENDING_APPROVAL"
+    | "APPROVED"
+    | "IN_PROGRESS"
+    | "SUCCEEDED"
+    | "REJECTED"
+    | "CANCELLED"
+    | "NEEDS_ATTENTION";
+  operation_id: string | null;
+  error_code: string | null;
+  result_summary: string | null;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  version: number;
+  approvals: Array<{
+    order: number;
+    approver_role: string;
+    decision: string | null;
+    reason: string | null;
+    decided_at: string | null;
+  }>;
+};
+
+export type CustomerSshKey = {
+  id: string;
+  label: string;
+  fingerprint: string;
+  public_key: string;
+  created_at: string;
+};
+
+export type CustomerSecurityGroup = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+export type CustomerServiceRequestPreview = {
+  request_type: CustomerServiceRequestType;
+  requires_approval: boolean;
+  requires_step_up: boolean;
+  cancellable_until: "APPROVAL";
+  impacts: string[];
+  current: Record<string, unknown>;
+  requested: Record<string, unknown>;
+};
+
 type Fetcher = typeof fetch;
 
 export class CustomerApiError extends Error {
@@ -466,6 +534,136 @@ export async function updateCustomerNotificationPreference(
     fetcher,
   );
   return parseResponse<CustomerNotificationPreference>(response);
+}
+
+export async function listCustomerServiceRequests(
+  apiBaseUrl: string,
+  accessToken: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerServiceRequest[]> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/service-requests`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return (await parseResponse<{ items: CustomerServiceRequest[] }>(response)).items;
+}
+
+export async function createCustomerServiceRequest(
+  apiBaseUrl: string,
+  accessToken: string,
+  vmId: string,
+  requestType: CustomerServiceRequestType,
+  input: Record<string, unknown>,
+  idempotencyKey: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerServiceRequest> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/vms/${encodeURIComponent(vmId)}/service-requests`,
+    accessToken,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({ request_type: requestType, input }),
+    },
+    fetcher,
+  );
+  return parseResponse<CustomerServiceRequest>(response);
+}
+
+export async function previewCustomerServiceRequest(
+  apiBaseUrl: string,
+  accessToken: string,
+  vmId: string,
+  requestType: CustomerServiceRequestType,
+  input: Record<string, unknown>,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerServiceRequestPreview> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/vms/${encodeURIComponent(vmId)}/service-requests/preview`,
+    accessToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_type: requestType, input }),
+    },
+    fetcher,
+  );
+  return parseResponse<CustomerServiceRequestPreview>(response);
+}
+
+export async function cancelCustomerServiceRequest(
+  apiBaseUrl: string,
+  accessToken: string,
+  requestId: string,
+  version: number,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerServiceRequest> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/service-requests/${encodeURIComponent(requestId)}/cancel`,
+    accessToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version }),
+    },
+    fetcher,
+  );
+  return parseResponse<CustomerServiceRequest>(response);
+}
+
+export async function listCustomerSshKeys(
+  apiBaseUrl: string,
+  accessToken: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerSshKey[]> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/ssh-keys`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return (await parseResponse<{ items: CustomerSshKey[] }>(response)).items;
+}
+
+export async function createCustomerSshKey(
+  apiBaseUrl: string,
+  accessToken: string,
+  vmId: string,
+  label: string,
+  publicKey: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerSshKey> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/vms/${encodeURIComponent(vmId)}/ssh-keys`,
+    accessToken,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label, public_key: publicKey }),
+    },
+    fetcher,
+  );
+  return parseResponse<CustomerSshKey>(response);
+}
+
+export async function listCustomerSecurityGroups(
+  apiBaseUrl: string,
+  accessToken: string,
+  vmId: string,
+  fetcher: Fetcher = fetch,
+): Promise<CustomerSecurityGroup[]> {
+  const response = await fetchWithAccessToken(
+    `${apiBaseUrl}/api/v1/customer/vms/${encodeURIComponent(vmId)}/security-groups`,
+    accessToken,
+    {},
+    fetcher,
+  );
+  return (await parseResponse<{ items: CustomerSecurityGroup[] }>(response)).items;
 }
 
 export async function logout(

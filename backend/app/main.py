@@ -21,6 +21,8 @@ from app.api.observability import router as observability_router
 from app.api.operation_center import router as operation_center_router
 from app.api.operations import router as operations_router
 from app.api.provisioning import router as provisioning_router
+from app.api.self_service import admin_router as admin_self_service_router
+from app.api.self_service import customer_router as customer_self_service_router
 from app.api.workloads import router as workloads_router
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError, app_error_handler, request_validation_error_handler
@@ -126,11 +128,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(clusters_router)
     app.include_router(console_router)
     app.include_router(customer_router)
+    app.include_router(customer_self_service_router)
     app.include_router(operations_router)
     app.include_router(observability_router)
     app.include_router(operation_center_router)
     app.include_router(ipam_router)
     app.include_router(inventory_router)
     app.include_router(provisioning_router)
+    app.include_router(admin_self_service_router)
     app.include_router(workloads_router)
     return app

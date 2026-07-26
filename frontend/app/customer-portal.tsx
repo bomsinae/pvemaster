@@ -32,6 +32,7 @@ import { useDialogFocus } from "./use-dialog-focus";
 import { VmConsoleModal } from "./vm-console-modal";
 import { CustomerVmDetailView } from "./customer-vm-detail";
 import { CustomerNotificationDialog } from "./customer-notification-dialog";
+import { CustomerSelfServiceDialog } from "./customer-self-service-dialog";
 
 const actionLabels: Record<CustomerPowerAction, string> = {
   start: "시작",
@@ -143,6 +144,7 @@ export function CustomerPortal({
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
   const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
+  const [selfServiceVm, setSelfServiceVm] = useState<CustomerVm | null>(null);
   const [loading, setLoading] = useState(Boolean(initialSession));
   const [error, setError] = useState("");
   const actionDialogRef = useRef<HTMLElement>(null);
@@ -327,6 +329,7 @@ export function CustomerPortal({
       setConsoleVm(null);
       setPasswordDialogOpen(false);
       setNotificationDialogOpen(false);
+      setSelfServiceVm(null);
       setJobsByVmId({});
       onSessionEnded?.();
     }
@@ -435,6 +438,7 @@ export function CustomerPortal({
                     <span className="customer-row-actions" data-label="전원 제어">
                       <span className="customer-row-action-buttons">
                         <button className="console-row-button" disabled={!running || vm.is_stale} onClick={() => openConsole(vm)}>콘솔</button>
+                        <button onClick={() => setSelfServiceVm(vm)}>변경 요청</button>
                         <button disabled={running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "start")}>시작</button>
                         <button disabled={!running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "shutdown")}>정상 종료</button>
                         <button disabled={!running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "reboot")}>재부팅</button>
@@ -514,6 +518,14 @@ export function CustomerPortal({
           apiBaseUrl={apiBaseUrl}
           accessToken={session.accessToken}
           onClose={() => setNotificationDialogOpen(false)}
+        />
+      )}
+      {selfServiceVm && (
+        <CustomerSelfServiceDialog
+          apiBaseUrl={apiBaseUrl}
+          accessToken={session.accessToken}
+          vm={selfServiceVm}
+          onClose={() => setSelfServiceVm(null)}
         />
       )}
       <StepUpDialog apiBaseUrl={apiBaseUrl} accessToken={session.accessToken} />

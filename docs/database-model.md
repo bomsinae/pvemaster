@@ -523,3 +523,36 @@ maintenance 작업으로 실행한다.
 - `(status, next_attempt_at)` 인덱스로 due row를 `SKIP LOCKED` 처리한다.
 - 발송 직전에 사용자 활성 상태, 현재 조직 멤버십, 조직 정책과 고객 opt-out을 다시
   확인한다. 자격을 잃은 row는 삭제하지 않고 `CANCELLED`로 남긴다.
+
+## 18. 제한된 고객 Self-service
+
+### `service_requests`와 `approval_steps`
+
+- request type, 요청자, 조직, workload와 요청 당시 assignment를 고정한다.
+- 유형별 allowlist를 통과한 `input_snapshot`과 변경 영향만 JSON으로 저장한다.
+  private key, 평문 비밀번호, 임의 firewall/Cloud-Init payload는 저장하지 않는다.
+- `(requested_by_id, idempotency_key_hash)`와 request fingerprint로 재전송을
+  멱등 처리한다.
+- 같은 workload/type의 활성 요청은 부분 unique index로 하나만 허용한다.
+- 승인 후 `operations`를 1:1 연결하고 승인자, 역할, 결정 사유와 시각을 보존한다.
+- `PENDING_APPROVAL → APPROVED → IN_PROGRESS → SUCCEEDED`가 정상 흐름이다.
+  거부·승인 전 취소는 terminal이며 실행 실패는 `NEEDS_ATTENTION`으로 남긴다.
+
+### `ssh_public_keys`
+
+- owner, 조직, label, 공개키와 fingerprint, revoke 시각을 저장한다.
+- private material은 schema에서 거부하며 workload 적용 상태는
+  `workload_ssh_public_keys`로 분리한다.
+
+### `security_groups`와 적용
+
+- global 또는 단일 조직 scope 중 하나를 사용한다.
+- rule은 IN/OUT, ACCEPT/DROP, tcp/udp/icmp, 정규화 CIDR과 1–65535 port만 허용한
+  구조화 JSON이다.
+- `workload_security_groups`는 성공한 service request와 적용 상태를 연결한다.
+
+### `organization_service_quotas`
+
+- VM당 최대 vCPU/RAM/disk와 활성 요청 수를 저장한다.
+- 설정 row가 없어도 보수적 서버 기본 상한을 적용한다. 단계 11의 조직 quota
+  관리 기능이 이 모델을 확장한다.

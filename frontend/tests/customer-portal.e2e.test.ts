@@ -3,11 +3,14 @@ import test from "node:test";
 
 import {
   changePassword,
+  createCustomerServiceRequest,
+  createCustomerSshKey,
   getCustomerJob,
   getCustomerNotificationPreferences,
   getCustomerVm,
   getCustomerVmMetrics,
   listCustomerJobs,
+  listCustomerServiceRequests,
   listCustomerVms,
   login,
   requestPowerAction,
@@ -347,6 +350,77 @@ test("customer notification preference uses optimistic versioning", async () => 
     email_enabled: false,
     version: 0,
   });
+});
+
+test("customer self-service keeps public keys and approval requests VM-scoped", async () => {
+  const requests: Array<{ url: string; method?: string; body?: unknown; key?: string | null }> = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      method: init?.method,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      key: new Headers(init?.headers).get("Idempotency-Key"),
+    });
+    if (String(input).endsWith("/ssh-keys")) {
+      return response({
+        id: "key-1",
+        label: "Laptop",
+        fingerprint: "SHA256:test",
+        public_key: "ssh-ed25519 AAAA",
+        created_at: "2026-07-26T00:00:00Z",
+      }, 201);
+    }
+    if (String(input).endsWith("/service-requests") && init?.method === "POST") {
+      return response({
+        id: "request-1",
+        request_type: "RESIZE",
+        vm_id: vm.id,
+        vm_name: vm.name,
+        organization_name: vm.organization_name,
+        input: { cpu_cores: 6 },
+        impact: { messages: ["approval"] },
+        status: "PENDING_APPROVAL",
+        operation_id: null,
+        error_code: null,
+        result_summary: null,
+        requested_at: "2026-07-26T00:00:00Z",
+        started_at: null,
+        finished_at: null,
+        version: 1,
+        approvals: [],
+      }, 202);
+    }
+    return response({ items: [] });
+  };
+
+  await createCustomerSshKey(
+    "http://api.test",
+    "customer-access",
+    vm.id,
+    "Laptop",
+    "ssh-ed25519 AAAA",
+    fetcher,
+  );
+  await createCustomerServiceRequest(
+    "http://api.test",
+    "customer-access",
+    vm.id,
+    "RESIZE",
+    { cpu_cores: 6 },
+    "self-service-idempotency",
+    fetcher,
+  );
+  assert.deepEqual(await listCustomerServiceRequests(
+    "http://api.test",
+    "customer-access",
+    fetcher,
+  ), []);
+  assert.equal(requests[0].url.endsWith(`/customer/vms/${vm.id}/ssh-keys`), true);
+  assert.deepEqual(requests[1].body, {
+    request_type: "RESIZE",
+    input: { cpu_cores: 6 },
+  });
+  assert.equal(requests[1].key, "self-service-idempotency");
 });
 
 test("customer password change exposes a safe API error code", async () => {
