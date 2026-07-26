@@ -27,6 +27,8 @@ type MockState = {
   assigned: boolean;
   powerState: "STOPPED" | "RUNNING";
   jobPolls: number;
+  syncRequested: boolean;
+  syncRunPolls: number;
   customerListCalls: number;
   findingStatus: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
   requests: Array<{ method: string; path: string }>;
@@ -207,6 +209,8 @@ export async function installApiMock(
     assigned: true,
     powerState: "STOPPED",
     jobPolls: 0,
+    syncRequested: false,
+    syncRunPolls: 0,
     customerListCalls: 0,
     findingStatus: "OPEN",
     requests: [],
@@ -279,6 +283,8 @@ export async function installApiMock(
       return;
     }
     if (path === `/api/v1/admin/clusters/${ids.cluster}/sync` && method === "POST") {
+      state.syncRequested = true;
+      state.syncRunPolls = 0;
       await json(route, { operation_id: ids.syncRun, status: "QUEUED" }, 202);
       return;
     }
@@ -297,6 +303,9 @@ export async function installApiMock(
       return;
     }
     if (path === "/api/v1/admin/inventory/sync-runs") {
+      const syncStatus = state.syncRequested && state.syncRunPolls++ === 0
+        ? "RUNNING"
+        : "SUCCEEDED";
       await json(route, {
         items: [{
           id: ids.syncRun,
@@ -305,14 +314,14 @@ export async function installApiMock(
           cluster_name: "staging-pve",
           generation: 7,
           scope: "FULL",
-          status: "SUCCEEDED",
+          status: syncStatus,
           partial_failure: false,
           triggered_by: "SCHEDULED",
           requested_by_id: null,
           target_workload_id: null,
           started_at: observedAt,
-          finished_at: observedAt,
-          duration_ms: 420,
+          finished_at: syncStatus === "SUCCEEDED" ? observedAt : null,
+          duration_ms: syncStatus === "SUCCEEDED" ? 420 : null,
           error_code: null,
           resource_counts: { created: 0, updated: 1, missing: 0 },
         }],

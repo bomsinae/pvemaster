@@ -70,14 +70,28 @@ test("admin drawer traps focus, closes with Escape, and restores trigger focus",
 test("admin reviews inventory freshness, requests sync, and acknowledges drift", async ({ page }) => {
   const state = await installApiMock(page);
   await loginAs(page, "admin");
+  await page.getByRole("button", { name: "라이트 테마로 전환" }).click();
 
   await page.getByRole("button", { name: "동기화와 재조정", exact: true }).click();
   await expect(page.getByRole("heading", { name: "클러스터 동기화 상태" })).toBeVisible();
   await expect(page.getByText("customer-web-01의 메모리 사양이 변경되었습니다.")).toBeVisible();
   await expect(page.getByText("FULL · #7")).toBeVisible();
+  const navigationBox = await page.locator(".admin-nav").boundingBox();
+  const contentHeadingBox = await page
+    .getByRole("heading", { name: "클러스터 동기화 상태" })
+    .boundingBox();
+  expect(navigationBox).not.toBeNull();
+  expect(contentHeadingBox).not.toBeNull();
+  expect(contentHeadingBox!.x).toBeGreaterThan(navigationBox!.x + navigationBox!.width + 30);
+  await expect(page.locator(".inventory-freshness-grid article")).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)",
+  );
 
   await page.getByRole("button", { name: "전체 동기화" }).click();
   await expect(page.getByText(/인벤토리 동기화를 요청했습니다/)).toBeVisible();
+  await expect(page.getByText("RUNNING", { exact: true })).toBeVisible();
+  await expect(page.getByText("SUCCEEDED", { exact: true })).toBeVisible();
 
   await page.getByLabel(/담당자/).selectOption("admin-id");
   await page.getByRole("button", { name: "확인", exact: true }).click();

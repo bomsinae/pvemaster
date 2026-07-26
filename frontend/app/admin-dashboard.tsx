@@ -618,6 +618,17 @@ export function AdminDashboard({
   }, [activeRestoreRun, apiBaseUrl, loadSection, token]);
 
   useEffect(() => {
+    if (
+      section !== "inventory"
+      || !inventorySyncRuns.some((run) => ["QUEUED", "RUNNING"].includes(run.status))
+    ) return;
+    const timer = window.setTimeout(() => {
+      void loadSection("inventory");
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [inventorySyncRuns, loadSection, section]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => { void loadSection(section); }, 0);
     return () => window.clearTimeout(timer);
   }, [loadSection, section]);
@@ -1493,9 +1504,9 @@ function InventoryReconciliationView({
   const [assigneeByFinding, setAssigneeByFinding] = useState<Record<string, string>>({});
   const displayNameByUserId = new Map(users.map((item) => [item.id, item.display_name]));
   return (
-    <div className="inventory-reconciliation">
-      <section className="admin-panel">
-        <div className="admin-panel-heading">
+    <div className="admin-content enter-admin inventory-reconciliation">
+      <section className="admin-section">
+        <div className="admin-section-title">
           <div><p className="eyebrow">Freshness</p><h2>클러스터 동기화 상태</h2></div>
           <span>{freshness.filter((item) => item.is_stale).length} stale</span>
         </div>
@@ -1520,8 +1531,8 @@ function InventoryReconciliationView({
         </div>
       </section>
 
-      <section className="admin-panel">
-        <div className="admin-panel-heading">
+      <section className="admin-section">
+        <div className="admin-section-title">
           <div><p className="eyebrow">Drift queue</p><h2>재조정 항목</h2></div>
           <span>{activeFindings.length} active</span>
         </div>
@@ -1582,8 +1593,8 @@ function InventoryReconciliationView({
         </div>
       </section>
 
-      <section className="admin-panel">
-        <div className="admin-panel-heading">
+      <section className="admin-section">
+        <div className="admin-section-title">
           <div><p className="eyebrow">Recent runs</p><h2>최근 동기화 실행</h2></div>
           <span>{runs.length} runs</span>
         </div>

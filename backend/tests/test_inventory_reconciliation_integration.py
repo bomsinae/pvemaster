@@ -255,6 +255,42 @@ async def test_partial_guest_failure_never_tombstones_workload() -> None:
         await app.state.db_engine.dispose()
 
 
+async def test_sync_reloads_run_after_snapshot_transaction_is_rolled_back() -> None:
+    settings = _settings()
+    app = create_app(settings)
+    await _clear(app)
+    try:
+        async with app.state.db_session_factory() as session:
+            cluster = Cluster(
+                id=uuid4(),
+                name="rollback-safe-cluster",
+                api_base_url="https://rollback-safe.example.test:8006",
+                is_active=True,
+            )
+            session.add(cluster)
+            await session.commit()
+
+            async def load_after_rollback(_cluster_id: object) -> InventorySnapshot:
+                await session.rollback()
+                return _snapshot([])
+
+            runner = ScheduledInventorySyncRunner(
+                session=session,
+                settings=settings,
+                cipher=CredentialCipher(settings.app_secret_key.get_secret_value()),
+                snapshot_loader=load_after_rollback,
+            )
+            run = await runner.run(cluster.id)
+
+            assert run is not None
+            assert run.status == RunStatus.SUCCEEDED.value
+            assert run.finished_at is not None
+    finally:
+        await _clear(app)
+        await app.state.redis.aclose()
+        await app.state.db_engine.dispose()
+
+
 async def test_reappearing_workload_records_node_spec_and_power_drift() -> None:
     settings = _settings()
     app = create_app(settings)

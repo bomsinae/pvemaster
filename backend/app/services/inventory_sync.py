@@ -75,6 +75,7 @@ class ScheduledInventorySyncRunner:
         run = await self._session.get(SyncRun, run_or_cluster_id)
         if run is None:
             run = await self._create_compatibility_run(run_or_cluster_id)
+        run_id = run.id
         cluster_id = run.cluster_id
         owner_id = uuid4()
         grant = await acquire_lease(
@@ -91,19 +92,32 @@ class ScheduledInventorySyncRunner:
                 await self._session.commit()
             return None
 
-        run = await self._session.get(SyncRun, run.id, with_for_update=True) or run
+        run = await self._session.get(SyncRun, run_id, with_for_update=True) or run
         run.status = RunStatus.RUNNING.value
         run.error_code = None
         await self._session.commit()
         try:
             snapshot = await self._snapshot_loader(cluster_id)
             await require_current_lease(self._session, grant)
+            # The production snapshot loader rolls back its read transaction before
+            # performing slow PVE HTTP calls. A rollback expires ORM state even when
+            # expire_on_commit is disabled, so reload the run before applying data.
+            run = await self._session.get(
+                SyncRun,
+                run_id,
+                with_for_update=True,
+                populate_existing=True,
+            )
+            if run is None:
+                raise AppError(404, "SYNC_RUN_NOT_FOUND", "The inventory sync run was not found.")
             validated = self._validate_snapshot(snapshot)
             counts = await self._apply(run, validated)
             await require_current_lease(self._session, grant)
         except Exception as exc:
             await self._session.rollback()
-            run = await self._session.get(SyncRun, run.id, with_for_update=True) or run
+            run = await self._session.get(SyncRun, run_id, with_for_update=True)
+            if run is None:
+                raise
             run.status = RunStatus.FAILED.value
             run.partial_failure = False
             run.error_code = self._error_code(exc)

@@ -3725,7 +3725,7 @@ body,
 
 .inventory-reconciliation {
   display: grid;
-  gap: 18px;
+  gap: 3rem;
 }
 
 .customer-inline-alert {
@@ -3746,9 +3746,8 @@ body,
 
 .inventory-freshness-grid article {
   border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 16px;
-  background: color-mix(in srgb, var(--admin-panel) 92%, white 8%);
+  padding: 1rem;
+  background: var(--panel-bg);
 }
 
 .inventory-freshness-grid article.is-stale {
