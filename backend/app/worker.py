@@ -14,9 +14,12 @@ celery_app = Celery(
     backend=settings.redis_url.get_secret_value(),
     include=[
         "app.tasks.backup",
+        "app.tasks.advanced_operations",
+        "app.tasks.inventory",
         "app.tasks.power",
         "app.tasks.provisioning",
         "app.tasks.maintenance",
+        "app.tasks.scheduler",
     ],
 )
 celery_app.conf.update(
@@ -28,11 +31,69 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
+    result_expires=86400,
     task_routes={
         "app.tasks.backup.*": {"queue": "operations"},
+        "app.tasks.advanced_operations.*": {"queue": "operations"},
         "app.tasks.power.*": {"queue": "operations"},
         "app.tasks.provisioning.*": {"queue": "operations"},
+        "app.tasks.inventory.*": {"queue": "inventory"},
         "app.tasks.maintenance.*": {"queue": "maintenance"},
+        "app.tasks.scheduler.*": {"queue": "maintenance"},
+    },
+    beat_schedule={
+        "dispatch-operation-outbox": {
+            "task": "app.tasks.scheduler.dispatch_operation_outbox",
+            "schedule": 5.0,
+        },
+        "watchdog-operations": {
+            "task": "app.tasks.scheduler.watchdog_operations",
+            "schedule": 30.0,
+        },
+        "watchdog-provisioning": {
+            "task": "app.tasks.scheduler.watchdog_provisioning",
+            "schedule": 30.0,
+        },
+        "dispatch-inventory-sync": {
+            "task": "app.tasks.scheduler.dispatch_inventory_sync",
+            "schedule": 60.0,
+        },
+        "release-ip-quarantine": {
+            "task": "app.tasks.scheduler.release_ip_quarantine",
+            "schedule": 60.0,
+        },
+        "check-control-plane-state": {
+            "task": "app.tasks.scheduler.check_control_plane_state",
+            "schedule": 300.0,
+        },
+        "reconcile-backup-metadata": {
+            "task": "app.tasks.scheduler.reconcile_backup_metadata",
+            "schedule": 300.0,
+        },
+        "dispatch-backup-policies": {
+            "task": "app.tasks.scheduler.dispatch_backup_policies",
+            "schedule": 60.0,
+        },
+        "reconcile-backup-verifications": {
+            "task": "app.tasks.scheduler.reconcile_backup_verifications",
+            "schedule": 300.0,
+        },
+        "collect-workload-metrics": {
+            "task": "app.tasks.scheduler.collect_workload_metrics",
+            "schedule": 60.0,
+        },
+        "retain-workload-metrics": {
+            "task": "app.tasks.scheduler.retain_workload_metrics",
+            "schedule": 300.0,
+        },
+        "deliver-customer-notifications": {
+            "task": "app.tasks.scheduler.deliver_customer_notifications",
+            "schedule": 30.0,
+        },
+        "run-data-retention": {
+            "task": "app.tasks.scheduler.run_retention",
+            "schedule": 86400.0,
+        },
     },
 )
 
@@ -59,18 +120,21 @@ def record_worker_heartbeat(sender: object, **_: object) -> None:
 
 
 @worker_ready.connect  # type: ignore[untyped-decorator]
-def recover_incomplete_power_operations(**_: object) -> None:
-    from asyncio import run
-
-    from app.tasks.backup import recover_backup_operations
-    from app.tasks.power import recover_power_operations
-    from app.tasks.provisioning import recover_provisioning_requests
-
+def schedule_recovery_watchdogs(**_: object) -> None:
     try:
         _record_worker_heartbeat(str(_.get("sender", "worker")))
     except Exception:
         pass
 
-    run(recover_power_operations())
-    run(recover_backup_operations())
-    run(recover_provisioning_requests())
+    celery_app.send_task(
+        "app.tasks.scheduler.dispatch_operation_outbox",
+        queue="maintenance",
+    )
+    celery_app.send_task(
+        "app.tasks.scheduler.watchdog_operations",
+        queue="maintenance",
+    )
+    celery_app.send_task(
+        "app.tasks.scheduler.watchdog_provisioning",
+        queue="maintenance",
+    )

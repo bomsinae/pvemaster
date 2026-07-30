@@ -34,14 +34,32 @@ services:
       context: ./backend
     environment:
       APP_NAME: PVE Master
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: INFO
       APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set}
       DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       CORS_ORIGINS: '["${FRONTEND_ORIGIN:-http://localhost:3000}"]'
+      ADMIN_MFA_REQUIRED: '${ADMIN_MFA_REQUIRED:-false}'
+      WEBAUTHN_RP_ID: '${WEBAUTHN_RP_ID:-localhost}'
+      WEBAUTHN_RP_NAME: '${WEBAUTHN_RP_NAME:-PVE Master}'
+      WEBAUTHN_ORIGIN: '${WEBAUTHN_ORIGIN:-http://localhost:3000}'
+      NOTIFICATION_WEBHOOK_ALLOWED_HOSTS: '${NOTIFICATION_WEBHOOK_ALLOWED_HOSTS:-[]}'
+      NOTIFICATION_WEBHOOK_ALLOWED_NETWORKS: '${NOTIFICATION_WEBHOOK_ALLOWED_NETWORKS:-[]}'
+      SMTP_HOST: '${SMTP_HOST:-}'
+      SMTP_PORT: '${SMTP_PORT:-465}'
+      SMTP_USERNAME: '${SMTP_USERNAME:-}'
+      SMTP_PASSWORD: '${SMTP_PASSWORD:-}'
+      SMTP_FROM_ADDRESS: '${SMTP_FROM_ADDRESS:-}'
       PVE_ALLOWED_HOSTS: '${PVE_ALLOWED_HOSTS:-[]}'
       PVE_ALLOWED_NETWORKS: '${PVE_ALLOWED_NETWORKS:-[]}'
+      ADVANCED_SNAPSHOT_ENABLED: '${ADVANCED_SNAPSHOT_ENABLED:-false}'
+      ADVANCED_MIGRATION_ENABLED: '${ADVANCED_MIGRATION_ENABLED:-false}'
+      ADVANCED_HA_ENABLED: '${ADVANCED_HA_ENABLED:-false}'
+      ADVANCED_NODE_MAINTENANCE_ENABLED: '${ADVANCED_NODE_MAINTENANCE_ENABLED:-false}'
+      ADVANCED_BULK_ENABLED: '${ADVANCED_BULK_ENABLED:-false}'
+      ADVANCED_GUEST_CONFIG_ENABLED: '${ADVANCED_GUEST_CONFIG_ENABLED:-false}'
+      ADVANCED_FIREWALL_SDN_ENABLED: '${ADVANCED_FIREWALL_SDN_ENABLED:-false}'
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -66,7 +84,7 @@ services:
       - /tmp
     restart: unless-stopped
 
-  worker:
+  worker-operations:
     build:
       context: ./backend
     command:
@@ -76,11 +94,12 @@ services:
         "app.worker:celery_app",
         "worker",
         "--loglevel=INFO",
-        "--queues=operations,maintenance,celery",
+        "--queues=operations",
+        "--hostname=operations@%h",
       ]
     environment:
       APP_NAME: PVE Master Worker
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: INFO
       APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set}
       DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster
@@ -97,12 +116,137 @@ services:
       test:
         [
           "CMD-SHELL",
-          "celery -A app.worker:celery_app inspect ping --destination celery@$$HOSTNAME --timeout 5",
+          "celery -A app.worker:celery_app inspect ping --destination operations@$$HOSTNAME --timeout 5",
         ]
       interval: 15s
       timeout: 10s
       retries: 5
       start_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+
+  worker-inventory:
+    build:
+      context: ./backend
+    command:
+      [
+        "celery",
+        "-A",
+        "app.worker:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--queues=inventory",
+        "--hostname=inventory@%h",
+      ]
+    environment:
+      APP_NAME: PVE Master Inventory Worker
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: INFO
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set}
+      DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CORS_ORIGINS: "[]"
+      PVE_ALLOWED_HOSTS: '${PVE_ALLOWED_HOSTS:-[]}'
+      PVE_ALLOWED_NETWORKS: '${PVE_ALLOWED_NETWORKS:-[]}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.worker:celery_app inspect ping --destination inventory@$$HOSTNAME --timeout 5",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+
+  worker-maintenance:
+    build:
+      context: ./backend
+    command:
+      [
+        "celery",
+        "-A",
+        "app.worker:celery_app",
+        "worker",
+        "--loglevel=INFO",
+        "--queues=maintenance",
+        "--hostname=maintenance@%h",
+      ]
+    environment:
+      APP_NAME: PVE Master Maintenance Worker
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: INFO
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set}
+      DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CORS_ORIGINS: "[]"
+      PVE_ALLOWED_HOSTS: '${PVE_ALLOWED_HOSTS:-[]}'
+      PVE_ALLOWED_NETWORKS: '${PVE_ALLOWED_NETWORKS:-[]}'
+      NOTIFICATION_WEBHOOK_ALLOWED_HOSTS: '${NOTIFICATION_WEBHOOK_ALLOWED_HOSTS:-[]}'
+      NOTIFICATION_WEBHOOK_ALLOWED_NETWORKS: '${NOTIFICATION_WEBHOOK_ALLOWED_NETWORKS:-[]}'
+      SMTP_HOST: '${SMTP_HOST:-}'
+      SMTP_PORT: '${SMTP_PORT:-465}'
+      SMTP_USERNAME: '${SMTP_USERNAME:-}'
+      SMTP_PASSWORD: '${SMTP_PASSWORD:-}'
+      SMTP_FROM_ADDRESS: '${SMTP_FROM_ADDRESS:-}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.worker:celery_app inspect ping --destination maintenance@$$HOSTNAME --timeout 5",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+
+  scheduler:
+    build:
+      context: ./backend
+    command:
+      [
+        "celery",
+        "-A",
+        "app.worker:celery_app",
+        "beat",
+        "--loglevel=INFO",
+        "--schedule=/tmp/celerybeat-schedule",
+      ]
+    environment:
+      APP_NAME: PVE Master Scheduler
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: INFO
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?APP_SECRET_KEY must be set}
+      DATABASE_URL: postgresql+asyncpg://pvemaster:${POSTGRES_PASSWORD}@postgres:5432/pvemaster
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CORS_ORIGINS: "[]"
+      PVE_ALLOWED_HOSTS: '${PVE_ALLOWED_HOSTS:-[]}'
+      PVE_ALLOWED_NETWORKS: '${PVE_ALLOWED_NETWORKS:-[]}'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp

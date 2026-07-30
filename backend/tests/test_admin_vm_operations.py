@@ -78,5 +78,10 @@ async def test_admin_vm_operation_is_flushed_before_audit_reference(settings: ob
         ),
     )
 
-    assert session.events[:3] == ["add:Operation", "flush", "add:AuditLog"]
+    assert session.events[:4] == [
+        "add:Operation",
+        "flush",
+        "add:OperationOutbox",
+        "add:AuditLog",
+    ]
     assert "rollback" not in session.events

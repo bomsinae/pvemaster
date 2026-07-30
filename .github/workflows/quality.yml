@@ -1,0 +1,168 @@
+name: Quality gates
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend / pytest, Ruff, mypy
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: pvemaster_test
+          POSTGRES_USER: pvemaster
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pvemaster -d pvemaster_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_NAME: PVE Master CI
+      ENVIRONMENT: test
+      APP_SECRET_KEY: ci-only-secret-key-at-least-32-characters
+      DATABASE_URL: postgresql+asyncpg://pvemaster:ci-postgres-password@127.0.0.1:5432/pvemaster_test
+      REDIS_URL: redis://127.0.0.1:6379/0
+      AUTH_TEST_DATABASE_URL: postgresql+asyncpg://pvemaster:ci-postgres-password@127.0.0.1:5432/pvemaster_test
+      AUTH_TEST_REDIS_URL: redis://127.0.0.1:6379/1
+      CORS_ORIGINS: '["http://127.0.0.1:3000"]'
+      PVE_ALLOWED_HOSTS: '["pve.example.test"]'
+      PVE_ALLOWED_NETWORKS: '[]'
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and quality tools
+        run: python -m pip install --disable-pip-version-check -e ".[dev]"
+      - name: Ruff format
+        run: ruff format --check .
+      - name: Ruff lint
+        run: ruff check .
+      - name: Mypy
+        run: mypy app
+      - name: Prepare integration test schema
+        run: alembic upgrade head
+      - name: Pytest
+        run: pytest
+
+  migrations:
+    name: Database / Alembic round trip
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: pvemaster_migration
+          POSTGRES_USER: pvemaster
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pvemaster -d pvemaster_migration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_NAME: PVE Master Migration CI
+      ENVIRONMENT: test
+      APP_SECRET_KEY: ci-only-secret-key-at-least-32-characters
+      DATABASE_URL: postgresql+asyncpg://pvemaster:ci-postgres-password@127.0.0.1:5432/pvemaster_migration
+      REDIS_URL: redis://127.0.0.1:6379/0
+      CORS_ORIGINS: "[]"
+      PVE_ALLOWED_HOSTS: "[]"
+      PVE_ALLOWED_NETWORKS: "[]"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - run: python -m pip install --disable-pip-version-check .
+      - name: Upgrade to head
+        run: alembic upgrade head
+      - name: Downgrade to base
+        run: alembic downgrade base
+      - name: Re-upgrade to head
+        run: alembic upgrade head
+
+  frontend:
+    name: Frontend / lint, types, mock, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:mock
+      - run: npm run build
+
+  browser:
+    name: Browser / Playwright (Chromium, Firefox, WebKit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Install browser runtimes
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run real browser journeys
+        run: npm run test:browser
+      - name: Upload browser report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report
+          path: |
+            frontend/output/playwright/report
+            frontend/output/playwright/results.xml
+            frontend/output/playwright/test-results
+          if-no-files-found: ignore
+          retention-days: 14

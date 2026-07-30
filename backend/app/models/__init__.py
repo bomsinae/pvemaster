@@ -1,14 +1,46 @@
+from app.models import event_capture as _event_capture  # noqa: E402,F401
+from app.models.advanced_operations import AdvancedOperationIntent, AdvancedOperationTarget
+from app.models.alerting import (
+    Alert,
+    AlertEvent,
+    MaintenanceWindow,
+    NotificationChannel,
+    NotificationDelivery,
+    NotificationRule,
+)
 from app.models.auth import (
     AuditLog,
     LoginThrottle,
     Organization,
     OrganizationMember,
+    OrganizationRole,
     RefreshToken,
     User,
     UserRole,
 )
-from app.models.backup import BackupRun, BackupTarget, RestoreRun
+from app.models.backup import (
+    BackupPolicy,
+    BackupPolicyAssignment,
+    BackupRun,
+    BackupTarget,
+    BackupVerification,
+    RestoreRun,
+)
 from app.models.cluster import Cluster, ClusterCredential
+from app.models.customer_notifications import (
+    CustomerNotificationDelivery,
+    CustomerNotificationPreference,
+    OrganizationNotificationPolicy,
+)
+from app.models.inventory import (
+    FindingKind,
+    FindingSeverity,
+    FindingStatus,
+    InventoryNode,
+    InventoryStorage,
+    ReconciliationFinding,
+    WorkloadChangeEvent,
+)
 from app.models.ipam import (
     IpAddress,
     IpAddressState,
@@ -18,13 +50,23 @@ from app.models.ipam import (
     IpPool,
     IpPoolExclusion,
 )
+from app.models.metrics import WorkloadMetric
 from app.models.operation import (
     Operation,
+    OperationAssignment,
+    OperationEvent,
     OperationStatus,
     PowerAction,
     PveTask,
     Workload,
     WorkloadAssignment,
+)
+from app.models.organization_governance import (
+    ApprovalPolicy,
+    OrganizationInvitation,
+    OrganizationQuota,
+    QuotaReservation,
+    QuotaUsageSnapshot,
 )
 from app.models.provisioning import (
     Product,
@@ -35,26 +77,79 @@ from app.models.provisioning import (
     ProvisioningStepStatus,
     Template,
 )
+from app.models.scheduling import (
+    MaintenanceRun,
+    OperationOutbox,
+    OutboxStatus,
+    RunStatus,
+    SchedulerLease,
+    SyncRun,
+)
+from app.models.self_service import (
+    ApprovalStep,
+    OrganizationServiceQuota,
+    SecurityGroup,
+    ServiceRequest,
+    ServiceRequestStatus,
+    ServiceRequestType,
+    SshPublicKey,
+    WorkloadSecurityGroup,
+    WorkloadSshPublicKey,
+)
 
 __all__ = [
+    "AdvancedOperationIntent",
+    "AdvancedOperationTarget",
     "AuditLog",
+    "Alert",
+    "AlertEvent",
+    "ApprovalStep",
     "BackupRun",
+    "BackupPolicy",
+    "BackupPolicyAssignment",
     "BackupTarget",
+    "BackupVerification",
     "RestoreRun",
     "Cluster",
     "ClusterCredential",
+    "CustomerNotificationDelivery",
+    "CustomerNotificationPreference",
     "IpAddress",
     "IpAddressState",
     "IpAllocation",
     "IpAllocationKind",
     "IpAllocationStatus",
     "IpPool",
+    "FindingKind",
+    "FindingSeverity",
+    "FindingStatus",
+    "InventoryNode",
+    "InventoryStorage",
+    "ReconciliationFinding",
+    "WorkloadChangeEvent",
     "IpPoolExclusion",
     "LoginThrottle",
+    "MaintenanceRun",
+    "MaintenanceWindow",
+    "NotificationChannel",
+    "NotificationDelivery",
+    "NotificationRule",
     "Organization",
     "OrganizationMember",
+    "OrganizationRole",
+    "OrganizationInvitation",
+    "OrganizationQuota",
+    "QuotaReservation",
+    "QuotaUsageSnapshot",
+    "ApprovalPolicy",
+    "OrganizationNotificationPolicy",
+    "OrganizationServiceQuota",
     "Operation",
+    "OperationAssignment",
+    "OperationEvent",
+    "OperationOutbox",
     "OperationStatus",
+    "OutboxStatus",
     "PowerAction",
     "Product",
     "ProvisioningNode",
@@ -64,9 +159,20 @@ __all__ = [
     "ProvisioningStepStatus",
     "PveTask",
     "RefreshToken",
+    "RunStatus",
+    "SchedulerLease",
+    "SecurityGroup",
+    "ServiceRequest",
+    "ServiceRequestStatus",
+    "ServiceRequestType",
+    "SshPublicKey",
     "User",
     "UserRole",
     "Template",
+    "SyncRun",
     "Workload",
+    "WorkloadMetric",
     "WorkloadAssignment",
+    "WorkloadSecurityGroup",
+    "WorkloadSshPublicKey",
 ]

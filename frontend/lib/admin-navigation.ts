@@ -1,11 +1,17 @@
 export const adminSections = [
   "overview",
   "clusters",
+  "inventory",
   "vms",
+  "advanced",
   "backups",
   "access",
+  "governance",
   "networks",
   "provisioning",
+  "service_requests",
+  "operations",
+  "alerts",
   "audit",
 ] as const;
 

@@ -36,6 +36,23 @@
 - 우선 WebAuthn 또는 TOTP를 지원하고 복구 코드는 일방향 해시로 저장한다.
 - MFA 등록/해제와 복구 코드 사용은 재인증 및 감사 대상이다.
 - 클러스터 등록, 자격 증명 회전, 사용자 권한 변경, 강제 stop 같은 고위험 작업에 최근 MFA 인증(step-up)을 요구할 수 있다.
+- TOTP secret은 MFA 전용 HKDF context로 파생한 AES-GCM 키와 사용자/method AAD로
+  암호화하고, 복구 코드는 keyed hash만 저장한다.
+- WebAuthn은 고정 RP ID, HTTPS origin과 user verification을 검증한다.
+- access token의 session family ID를 매 요청의 활성 refresh family와 대조해 개별
+  session revoke를 즉시 반영한다.
+- step-up token은 사용자, session epoch와 action에 묶고 다른 action 재사용을
+  거부한다.
+- `production` 환경의 SUPER_ADMIN/OPERATOR MFA는 비활성화할 수 없다.
+- 비밀번호 변경은 현재 비밀번호 재검증을 요구한다. 전체 session 종료를 선택하지
+  않아도 현재 family를 제외한 다른 refresh family는 모두 폐기한다.
+- 고객 session 조회와 revoke는 token family의 사용자 소유권을 서비스 계층에서
+  검사하며 다른 사용자의 UUID는 존재 여부를 숨기는 `404`로 처리한다.
+- 고객 알림 설정은 활성 조직 멤버십을 서비스 계층에서 재검사하고 이메일 수신지는
+  마스킹한다. 조직의 필수 알림 정책은 고객 opt-out보다 우선한다.
+- 알림 enqueue와 실제 전달 사이에 설정·멤버십이 바뀔 수 있으므로 발송 직전 다시
+  권한과 유효 설정을 검사한다. 메일 오류에는 주소, 본문, SMTP 응답 원문을 기록하지
+  않는다.
 
 ### CSRF와 브라우저 보호
 
@@ -56,6 +73,7 @@
 | 조직 생성·구성원 추가·제거 | 허용 | 조회만 허용 | 금지 |
 | 클러스터/자격 증명 CRUD와 연결 시험 | 허용 | 허용 | 금지 |
 | 전체 노드/VM/CT/스토리지 조회 | 허용 | 허용 | 금지 |
+| inventory sync·freshness·reconciliation finding 관리 | 허용 | 허용 | 금지 |
 | 워크로드 할당/회수 | 허용 | 허용 | 금지 |
 | 템플릿/프로비저닝/IPAM 정책 변경 | 허용 | 금지 | 금지 |
 | 자신의 활성 할당 워크로드 조회 | 허용 | 허용 | 허용 |
@@ -83,6 +101,8 @@ AND organization.is_active = true
 - 먼저 객체를 가져온 뒤 애플리케이션에서만 소유자를 비교하는 패턴을 피한다.
 - 비소유, 존재하지 않음, 과거 소유는 고객에게 모두 `404`로 응답해 존재 여부를 숨긴다.
 - operation 조회도 대상 워크로드의 현재 소유권과 `requested_by`를 모두 확인한다.
+- 고객 operation의 요청 당시 조직과 workload의 현재 조직이 다르면 과거 소유로 보고
+  목록과 상세에서 모두 제외한다.
 - 작업 enqueue 전에 검사하고 워커 실행 직전에도 다시 검사한다. 할당이 회수된 고객 작업은 시작 전 취소한다.
 - 이미 PVE에서 실행 중인 작업 중 할당이 회수되면 안전하게 중단할 수 있는 경우 취소하고, 아니면 완료 결과를 관리자에게 노출하되 고객의 후속 접근은 차단한다.
 - UUID는 추측 방지 보조 수단일 뿐 권한 통제가 아니다.
@@ -94,9 +114,24 @@ AND organization.is_active = true
 - 강제 `stop`은 현재 조직 소유 QEMU에만 허용하고, UI 위험 재확인과 API의 `confirm_forced=true`를 모두 요구하며 `FORCED` 감사 기록을 남긴다.
 - 관리자 `reset`도 강제 작업으로 표시하며 고객 역할에는 허용하지 않는다.
 - 고객 콘솔은 현재 활성 조직에 할당된 실행 중 워크로드에만 허용한다. 설정 변경, migrate, clone, delete, snapshot은 고객에게 노출하지 않는다.
+- 고객 설정 변경은 PVE 직접 실행 API로 제공하지 않고 유형별 구조화
+  `service_request`로만 접수한다. 고객 생성, 관리자 승인과 실행 직전에 현재
+  assignment·조직·quota를 각각 다시 검사한다.
+- SSH key endpoint는 공개키 형식만 허용하고 private key 표식, 줄바꿈과 비정상
+  encoding을 거부한다. 고객 response에는 내부 조직 UUID를 포함하지 않는다.
+- security group은 임의 명령 문자열 대신 direction/action/protocol/CIDR/port
+  allowlist schema를 사용하며 다른 조직 정책 참조는 404로 숨긴다.
+- vCPU/RAM/disk 변경은 증가만 허용하고 disk 축소를 항상 거부한다. restore는 기존
+  VM 덮어쓰기 대상 필드를 제공하지 않는다.
+- 재설치와 restore 요청은 typed confirmation, MFA 등록과 action-bound step-up을
+  모두 요구한다. 승인 후 취소를 허용하지 않고 실패는 `NEEDS_ATTENTION`으로
+  operation·감사와 함께 보존한다.
 - 콘솔은 REST 인증 후 발급되는 30초 TTL 일회용 token을 WebSocket subprotocol로 전달한다. PVE 단기 콘솔 ticket은 RFB 인증을 위해 `no-store` 응답으로만 전달하며 브라우저 메모리 밖에 보존하지 않는다. access token, PVE ticket과 PVE endpoint를 URL에 넣지 않는다.
 - WebSocket 연결 시 허용 Origin, 역할, 사용자 활성/session epoch, workload 실행 상태를 다시 검사한다. 고객 역할은 조직 활성 상태, 멤버십과 현재 할당도 재검증한다. 사용자·workload 조합별 한 연결과 최대 세션 시간을 강제한다.
 - 대상의 현재 상태를 PVE에서 확인하고 무의미하거나 위험한 전이는 `409`로 거부한다.
+- 마지막 관측이 stale 기준을 넘은 고객 워크로드의 전원 작업은 서버에서
+  `503 INVENTORY_STALE`로 거부한다. 고객 응답에는 관측 시각과 stale 여부만
+  제공하고 cluster, node, sync generation, finding 상세는 노출하지 않는다.
 
 ## 4. PVE 자격 증명 보호
 
@@ -163,6 +198,9 @@ PVE API token은 일반적으로 token ID와 secret으로 나뉜다.
 - 작업 인자/결과의 기본 영속화를 최소화하고 만료 시간을 둔다. 업무 결과는 DB에 저장한다.
 - `acks_late`와 재시도를 사용하더라도 DB 상태 전이와 멱등성 제약이 중복 실행을 막아야 한다.
 - 클러스터/워크로드 단위 잠금은 TTL Redis 락만 신뢰하지 않고 DB advisory/row lock과 상태 compare-and-set을 사용한다.
+- inventory 큐에는 `sync_runs.id`만 전달하고 PVE endpoint, token, 원시 응답은 넣지
+  않는다. 전체 응답이 완전한 경우에만 누락 tombstone을 적용하며, 외부 삭제가
+  감지되어도 조직 할당과 IP를 자동 해제하지 않는다.
 - PVE UPID는 로그 주입을 막도록 구조화 필드로 저장하고 UI에서는 필요한 범위만 표시한다.
 
 ## 7. Cloud-Init과 고객 데이터
@@ -176,6 +214,12 @@ PVE API token은 일반적으로 token ID와 secret으로 나뉜다.
 - VM 이름, 설명, SSH key comment 등 PVE로 전달되는 문자열은 길이와 문자 집합을 제한한다.
 
 ## 8. 감사 로깅
+
+Notification channel 구성은 PVE credential/MFA와 분리된 HKDF context의 AES-GCM으로
+암호화한다. Webhook은 HTTPS, public 목적지 allowlist, DNS 재검증, redirect/proxy
+금지 정책을 통과해야 하며 delivery UUID를 멱등 key로 사용한다. 고객 payload와 API
+조회에는 현재 조직 범위의 일반화된 사건만 포함하고 cluster/node/UPID/endpoint를
+노출하지 않는다.
 
 ### 감사 대상
 
@@ -231,6 +275,32 @@ PVE API token은 일반적으로 token ID와 secret으로 나뉜다.
 - 암호화 키, PVE 토큰, 관리자 세션, 백업 복구에 대한 사고 대응 및 회전 런북을 유지한다.
 - 백업은 암호화하고 복구 훈련을 수행한다. 복구된 감사 로그의 hash/checkpoint도 검증한다.
 - 기본적으로 민감 오류 상세를 클라이언트에 숨기고 request ID로 운영 로그와 연결한다.
+- 자동 백업 정책은 PVE에 등록된 PBS storage만 참조하며 PBS credential, encryption
+  key와 prune 권한을 저장하지 않는다.
+- policy 변경·skip과 restore drill에는 최근 MFA 기반 step-up을 요구하고, schedule
+  dispatch는 생성자가 여전히 활성 SUPER_ADMIN인지 다시 확인한다.
+- 고객 backup/snapshot API는 과거 소유권 경계 검증이 별도 승인되기 전까지 deny한다.
+- 고객 VM 상세, 작업 이력과 metric은 활성 멤버십·현재 조직·미회수 assignment를
+  매 요청에 재검사한다. metric에는 수집 당시 조직 snapshot과 assignment 시작 시각을
+  함께 적용해 재할당 전 값을 차단한다.
+- 고객 작업 실패 문구는 허용된 일반화 메시지만 반환하고 PVE 응답, UPID,
+  cluster/node, endpoint를 노출하지 않는다.
+- 플랫폼 역할과 조직 역할을 분리한다. 조직 역할은 명시적 permission allowlist만
+  부여하며 고객 token으로 `/admin` API를 호출할 수 없다.
+- 조직 멤버십의 활성 상태와 만료는 요청과 비동기 실행 시점에 모두 검사한다.
+  마지막 `ORG_OWNER`의 강등·제거는 transaction 안에서 거부한다.
+- 조직 초대 원문은 생성 응답에서 한 번만 노출하고 DB에는 hash만 저장한다. 본인
+  이메일, 만료, 폐기와 replay를 모두 검사한다.
+- quota 검증과 예약은 조직 row lock을 획득한 동일 transaction에서 수행하며,
+  현재 사용량과 모든 활성 예약을 함께 계산해 병렬 초과 예약을 막는다.
+- Snapshot rollback, migration, HA, node drain, 큰 bulk와 구조화 구성 변경은 항상
+  preview·typed confirmation을 거치며 정책에 따라 action-bound step-up MFA를 요구한다.
+- 고급 작업은 feature별 기본 비활성 flag를 사용한다. Firewall/SDN은 read-only로
+  투영하고 PVE 응답을 필드 allowlist로 축소한다.
+- bulk 대상은 실행 전 immutable snapshot과 모든 workload의 활성 DB 잠금을 만든다.
+  worker는 각 대상의 존재·node·version과 관리자 활성 권한을 다시 검사한다.
+- 임의 PVE argument, passthrough, disk 축소와 자유 형식 Cloud-Init/firewall 입력은
+  schema에 없다. PVE 제출 timeout은 자동 재제출하지 않고 `NEEDS_ATTENTION`으로 남긴다.
 
 ## 11. 출시 전 보안 완료 조건
 

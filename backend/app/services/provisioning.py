@@ -40,6 +40,7 @@ from app.schemas.provisioning import (
 )
 from app.security.access import Principal, require_service_role
 from app.services.audit import add_audit_event
+from app.services.quota import reserve_quota
 
 ProvisioningPublisher = Callable[[UUID, str], None]
 logger = logging.getLogger(__name__)
@@ -321,6 +322,28 @@ class ProvisioningService:
             version=1,
         )
         self._session.add(request)
+        try:
+            await self._session.flush([request])
+            await reserve_quota(
+                self._session,
+                payload.organization_id,
+                provisioning_request_id=request.id,
+                vcpu=product.cpu_cores,
+                memory_bytes=product.memory_bytes,
+                disk_bytes=product.disk_bytes,
+                vms=1,
+                ips=1,
+            )
+        except AppError:
+            await self._session.rollback()
+            raise
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise AppError(
+                status_code=409,
+                code="PROVISIONING_REQUEST_CONFLICT",
+                message="The provisioning request conflicts with an existing reservation.",
+            ) from exc
         self._session.add_all(
             [
                 ProvisioningStep(

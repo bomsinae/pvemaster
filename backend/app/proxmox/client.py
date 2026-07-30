@@ -131,6 +131,22 @@ class ProxmoxClient:
         )
         return self._require_object_list(data)
 
+    async def get_guest_rrd_data(
+        self,
+        *,
+        kind: str,
+        node: str,
+        vmid: int,
+        timeframe: str,
+    ) -> list[dict[str, Any]]:
+        guest_type = self._guest_type(kind)
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}/{vmid}/rrddata",
+            params={"timeframe": timeframe, "cf": "AVERAGE"},
+            expected_type=list,
+        )
+        return self._require_object_list(data)
+
     async def get_guests(self) -> list[dict[str, Any]]:
         data = await self._request_data(
             "/api2/json/cluster/resources",
@@ -330,6 +346,157 @@ class ProxmoxClient:
             raise self._invalid_response()
         return data
 
+    async def get_guest_snapshots(self, *, kind: str, node: str, vmid: int) -> list[dict[str, Any]]:
+        guest_type = self._guest_type(kind)
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}/{vmid}/snapshot",
+            expected_type=list,
+        )
+        return self._require_object_list(data)
+
+    async def submit_guest_snapshot(
+        self,
+        *,
+        kind: str,
+        node: str,
+        vmid: int,
+        snapshot_name: str,
+        include_memory: bool,
+    ) -> str:
+        guest_type = self._guest_type(kind)
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}/{vmid}/snapshot",
+            expected_type=str,
+            method="POST",
+            data={
+                "snapname": snapshot_name,
+                "vmstate": "1" if include_memory else "0",
+            },
+        )
+        return self._require_upid(data)
+
+    async def delete_guest_snapshot(
+        self, *, kind: str, node: str, vmid: int, snapshot_name: str
+    ) -> str:
+        guest_type = self._guest_type(kind)
+        data = await self._request_data(
+            (
+                f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}/{vmid}"
+                f"/snapshot/{quote(snapshot_name, safe='')}"
+            ),
+            expected_type=str,
+            method="DELETE",
+        )
+        return self._require_upid(data)
+
+    async def rollback_guest_snapshot(
+        self, *, kind: str, node: str, vmid: int, snapshot_name: str
+    ) -> str:
+        guest_type = self._guest_type(kind)
+        data = await self._request_data(
+            (
+                f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}/{vmid}"
+                f"/snapshot/{quote(snapshot_name, safe='')}/rollback"
+            ),
+            expected_type=str,
+            method="POST",
+        )
+        return self._require_upid(data)
+
+    async def migrate_guest(
+        self,
+        *,
+        kind: str,
+        node: str,
+        vmid: int,
+        target_node: str,
+        online: bool,
+        target_storage: str | None,
+        target_network: str | None,
+    ) -> str:
+        guest_type = self._guest_type(kind)
+        payload = {
+            "target": target_node,
+            "online": "1" if online else "0",
+            "with-local-disks": "1",
+        }
+        if target_storage:
+            payload["targetstorage"] = target_storage
+        if target_network:
+            payload["migration_network"] = target_network
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}/{vmid}/migrate",
+            expected_type=str,
+            method="POST",
+            data=payload,
+        )
+        return self._require_upid(data)
+
+    async def get_ha_resources(self) -> list[dict[str, Any]]:
+        data = await self._request_data(
+            "/api2/json/cluster/ha/resources",
+            expected_type=list,
+        )
+        return self._require_object_list(data)
+
+    async def get_ha_groups(self) -> list[dict[str, Any]]:
+        data = await self._request_data(
+            "/api2/json/cluster/ha/groups",
+            expected_type=list,
+        )
+        return self._require_object_list(data)
+
+    async def update_ha_resource(self, *, resource_id: str, state: str, group: str | None) -> None:
+        payload = {"state": state}
+        if group:
+            payload["group"] = group
+        await self._request_data(
+            f"/api2/json/cluster/ha/resources/{quote(resource_id, safe='')}",
+            expected_type=str,
+            method="PUT",
+            data=payload,
+            allow_null_data=True,
+        )
+
+    async def configure_guest_advanced(
+        self, *, kind: str, node: str, vmid: int, values: dict[str, str]
+    ) -> None:
+        allowed = {"cores", "memory", "net0", "boot", "ciuser", "nameserver", "ipconfig0"}
+        if not values or not set(values).issubset(allowed):
+            raise ValueError("unsupported advanced guest configuration")
+        guest_type = self._guest_type(kind)
+        await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}/{vmid}/config",
+            expected_type=str,
+            method="PUT",
+            data=values,
+            allow_null_data=True,
+        )
+
+    async def get_guest_firewall_rules(
+        self, *, kind: str, node: str, vmid: int
+    ) -> list[dict[str, Any]]:
+        guest_type = self._guest_type(kind)
+        data = await self._request_data(
+            f"/api2/json/nodes/{quote(node, safe='')}/{guest_type}/{vmid}/firewall/rules",
+            expected_type=list,
+        )
+        return self._require_object_list(data)
+
+    async def get_sdn_resources(self) -> dict[str, list[dict[str, Any]]]:
+        zones = await self._request_data(
+            "/api2/json/cluster/sdn/zones",
+            expected_type=list,
+        )
+        vnets = await self._request_data(
+            "/api2/json/cluster/sdn/vnets",
+            expected_type=list,
+        )
+        return {
+            "zones": self._require_object_list(zones),
+            "vnets": self._require_object_list(vnets),
+        }
+
     async def get_task_status(self, *, node: str, upid: str) -> dict[str, Any]:
         data = await self._request_data(
             f"/api2/json/nodes/{quote(node, safe='')}/tasks/{quote(upid, safe='')}/status",
@@ -516,6 +683,12 @@ class ProxmoxClient:
                 status_code=403,
                 code="PVE_PERMISSION_DENIED",
                 message="The Proxmox API token lacks a required permission.",
+            )
+        if response.status_code == 429:
+            raise AppError(
+                status_code=503,
+                code="PVE_RATE_LIMITED",
+                message="The Proxmox API rate limit was reached.",
             )
         if response.status_code >= 500:
             raise AppError(

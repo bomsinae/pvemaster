@@ -1,5 +1,5 @@
 import hmac
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID, uuid4
 
@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import AppError
-from app.models.auth import LoginThrottle, RefreshToken, User, UserRole
-from app.schemas.auth import LoginRequest, TokenResponse
+from app.models.auth import LoginThrottle, MfaChallenge, MfaMethod, RefreshToken, User, UserRole
+from app.schemas.auth import LoginRequest, LoginResponse, TokenResponse
 from app.security.passwords import PasswordManager
 from app.security.tokens import TokenManager
 from app.services.audit import add_audit_event
@@ -35,7 +35,8 @@ class AuthService:
         *,
         source: str,
         request_id: str,
-    ) -> TokenResponse:
+        user_agent: str | None = None,
+    ) -> LoginResponse:
         now = datetime.now(UTC)
         key_hash = self._throttle_key(request.email, source)
         throttle = await self._session.scalar(
@@ -84,8 +85,53 @@ class AuthService:
 
         if throttle is not None:
             await self._session.delete(throttle)
+        active_methods = (
+            await self._session.scalars(
+                select(MfaMethod).where(
+                    MfaMethod.user_id == user.id,
+                    MfaMethod.disabled_at.is_(None),
+                )
+            )
+        ).all()
+        if active_methods:
+            challenge = MfaChallenge(
+                user_id=user.id,
+                purpose="LOGIN",
+                expires_at=now + timedelta(seconds=self._settings.mfa_challenge_ttl_seconds),
+                max_attempts=self._settings.mfa_max_attempts,
+                context={
+                    "source_ip": source,
+                    "user_agent": (user_agent or "")[:512],
+                    "device_label": request.device_label or "",
+                },
+            )
+            self._session.add(challenge)
+            add_audit_event(
+                self._session,
+                action="AUTH_LOGIN_MFA_CHALLENGE",
+                outcome="ATTEMPTED",
+                request_id=request_id,
+                actor_user_id=user.id,
+                actor_role=UserRole(user.role),
+                target_type="user",
+                target_id=user.id,
+            )
+            await self._session.commit()
+            return LoginResponse(
+                expires_in=self._settings.mfa_challenge_ttl_seconds,
+                mfa_required=True,
+                challenge_id=challenge.id,
+                methods=sorted({method.type for method in active_methods} | {"RECOVERY"}),
+            )
+
         user.last_login_at = now
-        token_response = self._issue_token_pair(user, now=now)
+        token_response = self._issue_token_pair(
+            user,
+            now=now,
+            source_ip=source,
+            user_agent=user_agent,
+            device_label=request.device_label,
+        )
         add_audit_event(
             self._session,
             action="AUTH_LOGIN",
@@ -97,7 +143,7 @@ class AuthService:
             target_id=user.id,
         )
         await self._session.commit()
-        return token_response
+        return LoginResponse(**token_response.model_dump())
 
     async def refresh(self, raw_token: str, *, request_id: str) -> TokenResponse:
         now = datetime.now(UTC)
@@ -145,12 +191,23 @@ class AuthService:
             token_hash=self._tokens.hash_refresh_secret(raw_replacement),
             parent_id=stored.id,
             expires_at=now + self._tokens.refresh_ttl,
+            device_label=stored.device_label,
+            created_ip=stored.created_ip,
+            user_agent=stored.user_agent,
+            last_seen_at=now,
+            mfa_authenticated_at=stored.mfa_authenticated_at,
+            assurance_level=stored.assurance_level,
         )
         self._session.add(replacement)
         await self._session.flush()
         stored.revoked_at = now
         stored.replaced_by_id = replacement.id
-        access_token, expires_in = self._tokens.create_access_token(user)
+        access_token, expires_in = self._tokens.create_access_token(
+            user,
+            session_id=stored.family_id,
+            assurance_level=stored.assurance_level,
+            mfa_authenticated_at=stored.mfa_authenticated_at,
+        )
         add_audit_event(
             self._session,
             action="AUTH_REFRESH",
@@ -180,7 +237,6 @@ class AuthService:
         user = await self._session.get(User, stored.user_id)
         await self._revoke_family(stored.family_id, now)
         if user is not None:
-            user.session_epoch += 1
             add_audit_event(
                 self._session,
                 action="AUTH_LOGOUT",
@@ -193,7 +249,36 @@ class AuthService:
             )
         await self._session.commit()
 
-    def _issue_token_pair(self, user: User, *, now: datetime) -> TokenResponse:
+    def issue_mfa_session(
+        self,
+        user: User,
+        *,
+        now: datetime,
+        source_ip: str | None,
+        user_agent: str | None,
+        device_label: str | None,
+    ) -> TokenResponse:
+        return self._issue_token_pair(
+            user,
+            now=now,
+            source_ip=source_ip,
+            user_agent=user_agent,
+            device_label=device_label,
+            assurance_level="MFA",
+            mfa_authenticated_at=now,
+        )
+
+    def _issue_token_pair(
+        self,
+        user: User,
+        *,
+        now: datetime,
+        source_ip: str | None = None,
+        user_agent: str | None = None,
+        device_label: str | None = None,
+        assurance_level: str = "PASSWORD",
+        mfa_authenticated_at: datetime | None = None,
+    ) -> TokenResponse:
         refresh_secret = self._tokens.create_refresh_secret()
         family_id = uuid4()
         self._session.add(
@@ -203,9 +288,20 @@ class AuthService:
                 family_id=family_id,
                 token_hash=self._tokens.hash_refresh_secret(refresh_secret),
                 expires_at=now + self._tokens.refresh_ttl,
+                device_label=device_label,
+                created_ip=source_ip,
+                user_agent=(user_agent or "")[:512] or None,
+                last_seen_at=now,
+                mfa_authenticated_at=mfa_authenticated_at,
+                assurance_level=assurance_level,
             )
         )
-        access_token, expires_in = self._tokens.create_access_token(user)
+        access_token, expires_in = self._tokens.create_access_token(
+            user,
+            session_id=family_id,
+            assurance_level=assurance_level,
+            mfa_authenticated_at=mfa_authenticated_at,
+        )
         return TokenResponse(
             access_token=access_token,
             refresh_token=refresh_secret,

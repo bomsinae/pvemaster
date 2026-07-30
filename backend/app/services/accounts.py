@@ -8,7 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.errors import AppError
-from app.models.auth import Organization, OrganizationMember, RefreshToken, User, UserRole
+from app.models.auth import (
+    Organization,
+    OrganizationMember,
+    OrganizationRole,
+    RefreshToken,
+    User,
+    UserRole,
+)
 from app.models.operation import WorkloadAssignment
 from app.models.provisioning import ProvisioningRequest
 from app.schemas.auth import (
@@ -58,14 +65,23 @@ class AccountService:
                 message="The current password is invalid.",
             )
         user.password_hash = self._passwords.hash(request.new_password.get_secret_value())
-        user.session_epoch += 1
         user.version += 1
+        token_filters = [
+            RefreshToken.user_id == user.id,
+            RefreshToken.revoked_at.is_(None),
+        ]
+        if request.revoke_all_sessions:
+            user.session_epoch += 1
+        else:
+            token_filters.append(RefreshToken.family_id != self._principal.session_id)
         await self._session.execute(
-            update(RefreshToken)
-            .where(RefreshToken.user_id == user.id, RefreshToken.revoked_at.is_(None))
-            .values(revoked_at=datetime.now(UTC))
+            update(RefreshToken).where(*token_filters).values(revoked_at=datetime.now(UTC))
         )
-        self._audit("USER_PASSWORD_CHANGED", user.id)
+        self._audit(
+            "USER_PASSWORD_CHANGED",
+            user.id,
+            {"all_sessions_revoked": request.revoke_all_sessions},
+        )
         await self._session.commit()
 
     async def create_user(self, request: UserCreate) -> UserResponse:
@@ -463,6 +479,9 @@ class AccountService:
             organization_id=organization.id,
             user_id=user.id,
             added_by_id=self._principal.user_id,
+            organization_role=request.organization_role.value,
+            status="ACTIVE",
+            version=1,
         )
         self._session.add(membership)
         await self._flush_conflict("The user is already an organization member.")
@@ -485,7 +504,11 @@ class AccountService:
                 id=membership.id,
                 organization_id=membership.organization_id,
                 user_id=membership.user_id,
+                organization_role=OrganizationRole(membership.organization_role),
+                status=membership.status,
+                expires_at=membership.expires_at,
                 created_at=membership.created_at,
+                version=membership.version,
                 email=user.email,
                 display_name=user.display_name,
                 role=UserRole(user.role),
@@ -510,6 +533,24 @@ class AccountService:
                 code="ORGANIZATION_MEMBER_NOT_FOUND",
                 message="The organization member was not found.",
             )
+        if membership.organization_role == OrganizationRole.ORG_OWNER.value:
+            other_owner = await self._session.scalar(
+                select(OrganizationMember.id)
+                .where(
+                    OrganizationMember.organization_id == organization_id,
+                    OrganizationMember.id != membership.id,
+                    OrganizationMember.organization_role == OrganizationRole.ORG_OWNER.value,
+                    OrganizationMember.status == "ACTIVE",
+                    OrganizationMember.expires_at.is_(None),
+                )
+                .with_for_update()
+            )
+            if other_owner is None:
+                raise AppError(
+                    status_code=409,
+                    code="LAST_ORGANIZATION_OWNER",
+                    message="The last organization owner cannot be removed.",
+                )
         await self._session.delete(membership)
         add_audit_event(
             self._session,
@@ -566,7 +607,12 @@ class AccountService:
             await self._session.rollback()
             raise AppError(status_code=409, code="RESOURCE_CONFLICT", message=message) from exc
 
-    def _audit(self, action: str, target_id: UUID) -> None:
+    def _audit(
+        self,
+        action: str,
+        target_id: UUID,
+        details: dict[str, object] | None = None,
+    ) -> None:
         add_audit_event(
             self._session,
             action=action,
@@ -576,4 +622,5 @@ class AccountService:
             actor_role=self._principal.role,
             target_type="account",
             target_id=target_id,
+            details=details,
         )

@@ -42,3 +42,30 @@ class RequestIdMiddleware:
             user_agent_context.reset(user_agent_token)
             source_ip_context.reset(source_token)
             request_id_context.reset(token)
+
+
+class SecurityHeadersMiddleware:
+    def __init__(self, app: ASGIApp, *, enable_hsts: bool = False) -> None:
+        self.app = app
+        self.enable_hsts = enable_hsts
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_security_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers["X-Frame-Options"] = "DENY"
+                headers["Referrer-Policy"] = "no-referrer"
+                headers["Permissions-Policy"] = (
+                    "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+                )
+                headers["Cache-Control"] = "no-store"
+                if self.enable_hsts:
+                    headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            await send(message)
+
+        await self.app(scope, receive, send_with_security_headers)

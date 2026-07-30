@@ -228,9 +228,7 @@ async def test_pbs_target_backup_lifecycle_idempotency_and_access_control() -> N
     settings = Settings(
         _env_file=None,
         database_url=SecretStr(os.environ["AUTH_TEST_DATABASE_URL"]),
-        redis_url=SecretStr(
-            os.environ.get("AUTH_TEST_REDIS_URL", "redis://localhost:6379/15")
-        ),
+        redis_url=SecretStr(os.environ.get("AUTH_TEST_REDIS_URL", "redis://localhost:6379/15")),
         app_secret_key=SecretStr(token_urlsafe(32)),
         pve_allowed_networks=["8.8.8.8/32"],
         pve_task_poll_interval_seconds=0.001,

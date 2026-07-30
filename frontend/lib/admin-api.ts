@@ -28,6 +28,98 @@ export type CurrentUser = {
   organization_names?: string[];
 };
 
+export type OperationCenterAssignment = {
+  assigned_to_id: string | null;
+  assigned_to_name: string | null;
+  assigned_at: string | null;
+  acknowledged_by_id: string | null;
+  acknowledged_at: string | null;
+  resolved_by_id: string | null;
+  resolved_at: string | null;
+  resolution_note: string | null;
+  version: number;
+};
+
+export type OperationCenterAction =
+  | "CANCEL"
+  | "RETRY"
+  | "ACKNOWLEDGE"
+  | "ASSIGN"
+  | "RESOLVE_MANUALLY";
+
+export type OperationCenterItem = {
+  id: string;
+  resource_type: "OPERATION" | "PROVISIONING";
+  operation_type: string;
+  action: string;
+  status: string;
+  cluster_id: string;
+  cluster_name: string;
+  organization_id: string | null;
+  organization_name: string | null;
+  requested_by_id: string;
+  requested_by_name: string;
+  workload_id: string | null;
+  workload_name: string | null;
+  current_step: string | null;
+  error_code: string | null;
+  error_summary: string | null;
+  retryable: boolean;
+  retry_of_id: string | null;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  heartbeat_at: string | null;
+  is_stuck: boolean;
+  available_actions: OperationCenterAction[];
+  impact_summary: string;
+  recommended_action: string;
+  assignment: OperationCenterAssignment | null;
+  version: number;
+};
+
+export type OperationCenterDetail = OperationCenterItem & {
+  events: {
+    id: number;
+    event_type: string;
+    status: string | null;
+    step: string | null;
+    message: string;
+    details: Record<string, unknown>;
+    actor_user_id: string | null;
+    occurred_at: string;
+  }[];
+  pve_tasks: {
+    step_name: string;
+    status: string;
+    upid_reference: string;
+    pve_exit_status: string | null;
+    poll_attempts: number;
+    error_code: string | null;
+    submitted_at: string;
+    last_polled_at: string | null;
+    completed_at: string | null;
+  }[];
+  provisioning_steps: {
+    order: number;
+    name: string;
+    status: string;
+    attempt_count: number;
+    upid_reference: string | null;
+    error_code: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+  }[];
+  related_audit_count: number;
+  related_backup_ids: string[];
+};
+
+export type OperationCenterFilters = {
+  status?: string;
+  operationType?: string;
+  errorCode?: string;
+};
+
 export type UserCreateInput = {
   email: string;
   display_name: string;
@@ -96,10 +188,14 @@ export type Workload = {
   disk_bytes: number | null;
   is_template: boolean;
   is_present: boolean;
+  sync_generation?: number;
+  missing_since?: string | null;
   organization_id: string | null;
   organization_name: string | null;
   assigned_ip_addresses?: string[];
   observed_at: string;
+  is_stale?: boolean;
+  stale_reason?: string | null;
   version: number;
 };
 
@@ -155,6 +251,9 @@ export type BackupRun = {
   source_node: string;
   organization_id: string | null;
   organization_name: string | null;
+  policy_assignment_id: string | null;
+  scheduled_for: string | null;
+  trigger_type: "MANUAL" | "SCHEDULED" | "RUN_NOW";
   mode: string;
   compression: string;
   status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "TIMEOUT";
@@ -169,6 +268,51 @@ export type BackupRun = {
   requested_at: string;
   started_at: string | null;
   finished_at: string | null;
+};
+
+export type BackupPolicyAssignment = {
+  id: string;
+  organization_id: string | null;
+  organization_name: string | null;
+  workload_id: string | null;
+  workload_name: string | null;
+};
+
+export type BackupPolicy = {
+  id: string;
+  name: string;
+  backup_target_id: string;
+  backup_target_name: string;
+  schedule: string;
+  timezone: string;
+  mode: string;
+  retention_reference: string | null;
+  verification_interval_days: number;
+  is_enabled: boolean;
+  next_run_at: string;
+  last_dispatched_at: string | null;
+  skip_next_at: string | null;
+  recent_success_at: string | null;
+  consecutive_failures: number;
+  assignments: BackupPolicyAssignment[];
+  created_at: string;
+  updated_at: string;
+  version: number;
+};
+
+export type BackupVerification = {
+  id: string;
+  backup_run_id: string;
+  restore_run_id: string | null;
+  verification_type: "METADATA" | "RESTORE_DRILL";
+  status: "DUE" | "RUNNING" | "SUCCEEDED" | "FAILED";
+  snapshot_volume_id: string;
+  due_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error_code: string | null;
+  result_summary: string | null;
+  created_at: string;
 };
 
 export type RestoreRun = {
@@ -202,6 +346,9 @@ export type Cluster = {
   ca_configured: boolean;
   last_connection_error_code: string | null;
   last_connected_at: string | null;
+  last_sync_succeeded_at?: string | null;
+  sync_interval_seconds?: number;
+  inventory_stale?: boolean;
   credential: { token_identifier: string; configured: boolean; last_used_at: string | null };
   created_at: string;
   updated_at: string;
@@ -330,6 +477,17 @@ export type OperationsStatus = {
     last_connected_at: string | null;
     error_code: string | null;
   }>;
+  scheduler?: Array<{
+    job_name: string;
+    status: string;
+    last_started_at: string;
+    last_finished_at: string | null;
+    last_success_at: string | null;
+    processed_count: number;
+    error_code: string | null;
+  }>;
+  open_reconciliation_findings?: number;
+  stale_inventory_clusters?: number;
   alerts: Array<{
     code: string;
     severity: string;
@@ -339,6 +497,150 @@ export type OperationsStatus = {
     value: number | null;
     threshold: number | null;
   }>;
+};
+
+export type PersistentAlert = {
+  id: string;
+  type: string;
+  severity: string;
+  status: string;
+  resource_type: string;
+  resource_id: string | null;
+  message: string;
+  occurrence_count: number;
+  assigned_to_id: string | null;
+  acknowledged_at: string | null;
+  silenced_until: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+  version: number;
+  events: Array<{
+    id: string;
+    event_type: string;
+    actor_user_id: string | null;
+    note: string | null;
+    created_at: string;
+  }>;
+};
+
+export type MaintenanceWindow = {
+  id: string;
+  name: string;
+  target_type: string;
+  target_id: string | null;
+  starts_at: string;
+  ends_at: string;
+  suppress_notifications: boolean;
+};
+
+export type NotificationChannel = {
+  id: string;
+  name: string;
+  type: string;
+  organization_id: string | null;
+  is_enabled: boolean;
+  configured: boolean;
+};
+
+export type AdminServiceRequest = {
+  id: string;
+  request_type: string;
+  vm_id: string;
+  vm_name: string;
+  organization_name: string;
+  input: Record<string, unknown>;
+  impact: { messages?: string[] };
+  status: string;
+  operation_id: string | null;
+  error_code: string | null;
+  result_summary: string | null;
+  requested_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  version: number;
+};
+
+export type AdminQuotaValues = {
+  vcpu: number;
+  memory_bytes: number;
+  disk_bytes: number;
+  vms: number;
+  ips: number;
+  backup_bytes: number;
+};
+
+export type AdminOrganizationQuota = {
+  organization_id: string;
+  limits: AdminQuotaValues;
+  usage: AdminQuotaValues;
+  reserved: AdminQuotaValues;
+  remaining: AdminQuotaValues;
+  version: number;
+  updated_at: string | null;
+  captured_at: string;
+};
+
+export type AdminApprovalPolicy = {
+  id: string;
+  organization_id: string;
+  request_type: string;
+  requires_approval: boolean;
+  minimum_role: "ORG_OWNER" | "ORG_ADMIN" | "ORG_OPERATOR";
+  updated_at: string;
+  version: number;
+};
+
+export type InventoryFreshness = {
+  cluster_id: string;
+  cluster_name: string;
+  last_full_success_at: string | null;
+  stale_after_seconds: number;
+  is_stale: boolean;
+  stale_reason: string | null;
+  latest_status: string | null;
+};
+
+export type InventorySyncRun = {
+  id: string;
+  operation_id: string;
+  cluster_id: string;
+  cluster_name: string;
+  generation: number;
+  scope: string;
+  status: string;
+  partial_failure: boolean;
+  triggered_by: string;
+  requested_by_id: string | null;
+  target_workload_id: string | null;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  error_code: string | null;
+  resource_counts: Record<string, unknown>;
+};
+
+export type ReconciliationFinding = {
+  id: string;
+  kind: string;
+  severity: "INFO" | "WARNING" | "CRITICAL";
+  status: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+  cluster_id: string;
+  cluster_name: string;
+  workload_id: string | null;
+  sync_run_id: string | null;
+  target_type: string;
+  target_id: string;
+  summary: string;
+  details: Record<string, unknown>;
+  first_observed_at: string;
+  last_observed_at: string;
+  acknowledged_by_id: string | null;
+  acknowledged_at: string | null;
+  assigned_to_id: string | null;
+  resolved_by_id: string | null;
+  resolved_at: string | null;
+  resolution_note: string | null;
 };
 
 export type IpPool = {
@@ -423,6 +725,68 @@ export type AdminWorkloadJob = {
 
 /** @deprecated Use AdminWorkloadJob. */
 export type AdminVmJob = AdminWorkloadJob;
+
+export type AdvancedFeature =
+  | "SNAPSHOT"
+  | "MIGRATION"
+  | "HA"
+  | "NODE_MAINTENANCE"
+  | "BULK"
+  | "GUEST_CONFIG"
+  | "FIREWALL_SDN";
+
+export type AdvancedFeatureCapability = {
+  feature: AdvancedFeature;
+  enabled: boolean;
+  mode: "EXECUTE" | "READ_ONLY";
+  actions: string[];
+};
+
+export type AdvancedPreviewInput = {
+  feature: AdvancedFeature;
+  action: string;
+  workload_ids: string[];
+  options: Record<string, unknown>;
+};
+
+export type AdvancedPreview = {
+  feature: AdvancedFeature;
+  action: string;
+  enabled: boolean;
+  executable: boolean;
+  targets: Array<{
+    workload_id: string;
+    name: string;
+    kind: string;
+    node: string;
+    power_state: string;
+    version: number;
+  }>;
+  warnings: string[];
+  blockers: string[];
+  required_confirmation: string;
+  step_up_action: string | null;
+  requested_state: Record<string, unknown>;
+};
+
+export type AdvancedOperation = {
+  operation_id: string;
+  feature: AdvancedFeature;
+  action: string;
+  status: string;
+  targets: AdvancedPreview["targets"];
+  requested_state: Record<string, unknown>;
+  observed_state: Record<string, unknown>;
+  error_code: string | null;
+};
+
+export type AdvancedInspection = {
+  feature: AdvancedFeature;
+  scope: string;
+  workload_id: string;
+  items: Array<Record<string, unknown>>;
+  related: Record<string, Array<Record<string, unknown>>>;
+};
 
 export type AuditLog = {
   id: string;
@@ -543,6 +907,81 @@ export const importClusterWorkloads = (
   `/api/v1/admin/clusters/${encodeURIComponent(id)}/workloads/import`,
   token,
   { method: "POST" },
+  fetcher,
+);
+
+export const requestClusterSync = (
+  base: string,
+  token: string,
+  id: string,
+  fetcher?: Fetcher,
+) => api<{ operation_id: string; status: string }>(
+  base,
+  `/api/v1/admin/clusters/${encodeURIComponent(id)}/sync`,
+  token,
+  { method: "POST" },
+  fetcher,
+);
+
+export async function listInventoryFreshness(base: string, token: string, fetcher?: Fetcher) {
+  return (await api<{ items: InventoryFreshness[] }>(
+    base,
+    "/api/v1/admin/inventory/freshness",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export async function listInventorySyncRuns(base: string, token: string, fetcher?: Fetcher) {
+  return (await api<{ items: InventorySyncRun[] }>(
+    base,
+    "/api/v1/admin/inventory/sync-runs?limit=50",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export async function listReconciliationFindings(
+  base: string,
+  token: string,
+  fetcher?: Fetcher,
+) {
+  return (await api<{ items: ReconciliationFinding[] }>(
+    base,
+    "/api/v1/admin/inventory/reconciliation/findings?limit=100",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const acknowledgeReconciliationFinding = (
+  base: string,
+  token: string,
+  findingId: string,
+  assignedToId: string | null = null,
+  fetcher?: Fetcher,
+) => api<ReconciliationFinding>(
+  base,
+  `/api/v1/admin/inventory/reconciliation/findings/${encodeURIComponent(findingId)}/acknowledge`,
+  token,
+  { method: "POST", body: JSON.stringify({ assigned_to_id: assignedToId }) },
+  fetcher,
+);
+
+export const resolveReconciliationFinding = (
+  base: string,
+  token: string,
+  findingId: string,
+  resolutionNote: string,
+  fetcher?: Fetcher,
+) => api<ReconciliationFinding>(
+  base,
+  `/api/v1/admin/inventory/reconciliation/findings/${encodeURIComponent(findingId)}/resolve`,
+  token,
+  { method: "POST", body: JSON.stringify({ resolution_note: resolutionNote }) },
   fetcher,
 );
 
@@ -726,6 +1165,66 @@ export async function listWorkloads(
   )).items;
 }
 
+export async function getAdvancedCapabilities(
+  base: string,
+  token: string,
+  fetcher?: Fetcher,
+) {
+  return (await api<{ items: AdvancedFeatureCapability[] }>(
+    base,
+    "/api/v1/admin/advanced/capabilities",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const previewAdvancedOperation = (
+  base: string,
+  token: string,
+  payload: AdvancedPreviewInput,
+  fetcher?: Fetcher,
+) => api<AdvancedPreview>(
+  base,
+  "/api/v1/admin/advanced/preview",
+  token,
+  { method: "POST", body: JSON.stringify(payload) },
+  fetcher,
+);
+
+export const createAdvancedOperation = (
+  base: string,
+  token: string,
+  preview: AdvancedPreviewInput,
+  confirmation: string,
+  idempotencyKey: string,
+  fetcher?: Fetcher,
+) => api<AdvancedOperation>(
+  base,
+  "/api/v1/admin/advanced/operations",
+  token,
+  {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ preview, confirmation }),
+  },
+  fetcher,
+);
+
+export const inspectAdvancedWorkload = (
+  base: string,
+  token: string,
+  workloadId: string,
+  feature: AdvancedFeature,
+  fetcher?: Fetcher,
+) => api<AdvancedInspection>(
+  base,
+  `/api/v1/admin/advanced/workloads/${encodeURIComponent(workloadId)}/inspection?feature=${encodeURIComponent(feature)}`,
+  token,
+  {},
+  fetcher,
+);
+
 export const getWorkload = (
   base: string,
   token: string,
@@ -815,6 +1314,107 @@ export const updateBackupTarget = (
   {
     method: "PATCH",
     body: JSON.stringify({ is_enabled: isEnabled, version: target.version }),
+  },
+  fetcher,
+);
+
+export async function listBackupPolicies(base: string, token: string, fetcher?: Fetcher) {
+  return (await api<{ items: BackupPolicy[] }>(
+    base,
+    "/api/v1/admin/backup-policies",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const createBackupPolicy = (
+  base: string,
+  token: string,
+  payload: {
+    name: string;
+    backup_target_id: string;
+    schedule: string;
+    timezone: string;
+    retention_reference: string | null;
+    verification_interval_days: number;
+    assignments: Array<{ organization_id?: string; workload_id?: string }>;
+  },
+  fetcher?: Fetcher,
+) => api<BackupPolicy>(
+  base,
+  "/api/v1/admin/backup-policies",
+  token,
+  { method: "POST", body: JSON.stringify(payload) },
+  fetcher,
+);
+
+export const runBackupPolicyNow = (
+  base: string,
+  token: string,
+  policyId: string,
+  fetcher?: Fetcher,
+) => api<{ dispatched_count: number }>(
+  base,
+  `/api/v1/admin/backup-policies/${encodeURIComponent(policyId)}/run-now`,
+  token,
+  { method: "POST" },
+  fetcher,
+);
+
+export const skipBackupPolicy = (
+  base: string,
+  token: string,
+  policy: BackupPolicy,
+  fetcher?: Fetcher,
+) => api<BackupPolicy>(
+  base,
+  `/api/v1/admin/backup-policies/${encodeURIComponent(policy.id)}/skip`,
+  token,
+  { method: "POST", body: JSON.stringify({ version: policy.version }) },
+  fetcher,
+);
+
+export async function listBackupVerifications(
+  base: string,
+  token: string,
+  fetcher?: Fetcher,
+) {
+  return (await api<{ items: BackupVerification[] }>(
+    base,
+    "/api/v1/admin/backup-verifications",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const reconcileBackupMetadata = (
+  base: string,
+  token: string,
+  fetcher?: Fetcher,
+) => api<{ processed_count: number }>(
+  base,
+  "/api/v1/admin/backup-metadata/reconcile",
+  token,
+  { method: "POST" },
+  fetcher,
+);
+
+export const requestBackupMetadataVerification = (
+  base: string,
+  token: string,
+  runId: string,
+  idempotencyKey: string,
+  fetcher?: Fetcher,
+) => api<BackupVerification>(
+  base,
+  `/api/v1/admin/backups/${encodeURIComponent(runId)}/verifications`,
+  token,
+  {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ verification_type: "METADATA" }),
   },
   fetcher,
 );
@@ -955,6 +1555,69 @@ export async function listProvisionRequests(base: string, token: string, fetcher
   return (await api<{ items: ProvisionRequest[] }>(base, "/api/v1/admin/provision-requests", token, {}, fetcher)).items;
 }
 
+export async function listOperationCenter(
+  base: string,
+  token: string,
+  filters: OperationCenterFilters = {},
+  fetcher?: Fetcher,
+) {
+  const query = new URLSearchParams();
+  if (filters.status) query.set("status", filters.status);
+  if (filters.operationType) query.set("operation_type", filters.operationType);
+  if (filters.errorCode) query.set("error_code", filters.errorCode);
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return api<{ items: OperationCenterItem[]; total: number; limit: number; offset: number }>(
+    base,
+    `/api/v1/admin/operations${suffix}`,
+    token,
+    {},
+    fetcher,
+  );
+}
+
+export const getOperationCenterDetail = (
+  base: string,
+  token: string,
+  operationId: string,
+  fetcher?: Fetcher,
+) => api<OperationCenterDetail>(
+  base,
+  `/api/v1/admin/operations/${encodeURIComponent(operationId)}`,
+  token,
+  {},
+  fetcher,
+);
+
+export async function runOperationCenterAction(
+  base: string,
+  token: string,
+  operation: OperationCenterItem,
+  action: OperationCenterAction,
+  options: { assignedToId?: string; resolutionNote?: string } = {},
+  fetcher?: Fetcher,
+) {
+  const paths: Record<OperationCenterAction, string> = {
+    CANCEL: "cancel",
+    RETRY: "retry",
+    ACKNOWLEDGE: "acknowledge",
+    ASSIGN: "assign",
+    RESOLVE_MANUALLY: "resolve-manually",
+  };
+  const payload: Record<string, unknown> = { version: operation.version };
+  if (options.assignedToId) payload.assigned_to_id = options.assignedToId;
+  if (options.resolutionNote) payload.resolution_note = options.resolutionNote;
+  return api<OperationCenterItem | {
+    operation: OperationCenterItem;
+    created_operation_id: string;
+  }>(
+    base,
+    `/api/v1/admin/operations/${encodeURIComponent(operation.id)}/${paths[action]}`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+    fetcher,
+  );
+}
+
 export const requestAdminWorkloadAction = (
   base: string,
   token: string,
@@ -1025,6 +1688,204 @@ export async function listAuditLogs(
     base, `/api/v1/admin/audit-logs?limit=${limit}&offset=${offset}`, token, {}, fetcher,
   );
 }
+
+export async function listAlerts(base: string, token: string, fetcher?: Fetcher) {
+  return (await api<{ items: PersistentAlert[] }>(
+    base, "/api/v1/admin/alerts", token, {}, fetcher,
+  )).items;
+}
+
+export const actOnAlert = (
+  base: string,
+  token: string,
+  alert: PersistentAlert,
+  action: "acknowledge" | "resolve" | "silence",
+  payload: { note?: string; silenced_until?: string } = {},
+  fetcher?: Fetcher,
+) => api<PersistentAlert>(
+  base,
+  `/api/v1/admin/alerts/${encodeURIComponent(alert.id)}/${action}`,
+  token,
+  {
+    method: "POST",
+    body: JSON.stringify({ ...payload, version: alert.version }),
+  },
+  fetcher,
+);
+
+export async function listMaintenanceWindows(base: string, token: string, fetcher?: Fetcher) {
+  return api<MaintenanceWindow[]>(
+    base, "/api/v1/admin/maintenance-windows", token, {}, fetcher,
+  );
+}
+
+export const createMaintenanceWindow = (
+  base: string,
+  token: string,
+  payload: Record<string, unknown>,
+  fetcher?: Fetcher,
+) => api<MaintenanceWindow>(base, "/api/v1/admin/maintenance-windows", token, {
+  method: "POST",
+  body: JSON.stringify(payload),
+}, fetcher);
+
+export async function listNotificationChannels(base: string, token: string, fetcher?: Fetcher) {
+  return api<NotificationChannel[]>(
+    base, "/api/v1/admin/notification-channels", token, {}, fetcher,
+  );
+}
+
+export const createNotificationChannel = (
+  base: string,
+  token: string,
+  payload: Record<string, unknown>,
+  fetcher?: Fetcher,
+) => api<NotificationChannel>(base, "/api/v1/admin/notification-channels", token, {
+  method: "POST",
+  body: JSON.stringify(payload),
+}, fetcher);
+
+export const testNotificationChannel = (
+  base: string,
+  token: string,
+  channelId: string,
+  fetcher?: Fetcher,
+) => api<{ status: string; last_error_code: string | null }>(
+  base,
+  `/api/v1/admin/notification-channels/${encodeURIComponent(channelId)}/test`,
+  token,
+  { method: "POST" },
+  fetcher,
+);
+
+export async function listAdminServiceRequests(
+  base: string,
+  token: string,
+  fetcher?: Fetcher,
+) {
+  return (await api<{ items: AdminServiceRequest[] }>(
+    base,
+    "/api/v1/admin/service-requests",
+    token,
+    {},
+    fetcher,
+  )).items;
+}
+
+export const decideAdminServiceRequest = (
+  base: string,
+  token: string,
+  request: AdminServiceRequest,
+  decision: "approve" | "reject",
+  reason: string,
+  fetcher?: Fetcher,
+) => api<AdminServiceRequest>(
+  base,
+  `/api/v1/admin/service-requests/${encodeURIComponent(request.id)}/${decision}`,
+  token,
+  {
+    method: "POST",
+    body: JSON.stringify({ version: request.version, reason }),
+  },
+  fetcher,
+);
+
+export const updateAdminServiceRequestExecution = (
+  base: string,
+  token: string,
+  request: AdminServiceRequest,
+  outcome: "START" | "SUCCEEDED" | "FAILED",
+  summary: string,
+  fetcher?: Fetcher,
+) => api<AdminServiceRequest>(
+  base,
+  `/api/v1/admin/service-requests/${encodeURIComponent(request.id)}/execution`,
+  token,
+  {
+    method: "POST",
+    body: JSON.stringify({ version: request.version, outcome, summary }),
+  },
+  fetcher,
+);
+
+export const getAdminOrganizationQuota = (
+  base: string,
+  token: string,
+  organizationId: string,
+  fetcher?: Fetcher,
+) => api<AdminOrganizationQuota>(
+  base,
+  `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/quota`,
+  token,
+  {},
+  fetcher,
+);
+
+export const updateAdminOrganizationQuota = (
+  base: string,
+  token: string,
+  organizationId: string,
+  quota: AdminOrganizationQuota | null,
+  limits: AdminQuotaValues,
+  fetcher?: Fetcher,
+) => api<AdminOrganizationQuota>(
+  base,
+  `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/quota`,
+  token,
+  {
+    method: "PUT",
+    body: JSON.stringify({
+      max_vcpu: limits.vcpu,
+      max_memory_bytes: limits.memory_bytes,
+      max_disk_bytes: limits.disk_bytes,
+      max_vms: limits.vms,
+      max_ips: limits.ips,
+      max_backup_bytes: limits.backup_bytes,
+      version: quota && quota.version > 0 ? quota.version : null,
+    }),
+  },
+  fetcher,
+);
+
+export async function listAdminApprovalPolicies(
+  base: string,
+  token: string,
+  organizationId: string,
+  fetcher?: Fetcher,
+) {
+  return api<AdminApprovalPolicy[]>(
+    base,
+    `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/approval-policies`,
+    token,
+    {},
+    fetcher,
+  );
+}
+
+export const updateAdminApprovalPolicy = (
+  base: string,
+  token: string,
+  organizationId: string,
+  policy: AdminApprovalPolicy | null,
+  requestType: string,
+  minimumRole: AdminApprovalPolicy["minimum_role"],
+  requiresApproval: boolean,
+  fetcher?: Fetcher,
+) => api<AdminApprovalPolicy>(
+  base,
+  `/api/v1/admin/organizations/${encodeURIComponent(organizationId)}/approval-policies`,
+  token,
+  {
+    method: "PUT",
+    body: JSON.stringify({
+      request_type: requestType,
+      requires_approval: requiresApproval,
+      minimum_role: minimumRole,
+      version: policy?.version ?? null,
+    }),
+  },
+  fetcher,
+);
 
 export async function endSession(base: string, session: SessionLike, fetcher?: Fetcher) {
   await (fetcher ?? fetch)(`${base}/api/v1/auth/logout`, {

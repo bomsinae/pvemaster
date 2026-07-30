@@ -12,10 +12,18 @@ from sqlalchemy.orm import aliased
 
 from app.core.config import Settings
 from app.models.auth import AuditLog, Organization, User, UserRole
+from app.models.backup import BackupPolicy, BackupRun, BackupVerification
 from app.models.cluster import Cluster
+from app.models.inventory import (
+    FindingSeverity,
+    FindingStatus,
+    ReconciliationFinding,
+    WorkloadChangeEvent,
+)
 from app.models.ipam import IpAddress, IpAddressState, IpPool, IpPoolExclusion
 from app.models.operation import Operation, Workload
 from app.models.provisioning import ProvisioningRequest, ProvisioningStatus
+from app.models.scheduling import MaintenanceRun, RunStatus
 from app.schemas.observability import (
     AuditLogListResponse,
     AuditLogResponse,
@@ -25,6 +33,7 @@ from app.schemas.observability import (
     OperationalAlert,
     OperationsStatusResponse,
     QueueStatus,
+    SchedulerJobStatus,
     WorkerStatus,
     WorkloadInventoryStatus,
 )
@@ -189,7 +198,10 @@ class ObservabilityService:
         workloads = await self._workload_inventory()
         directory = await self._directory_inventory()
         clusters = await self._cluster_statuses()
-        alerts = await self._alerts(worker, queue, clusters)
+        scheduler = await self._scheduler_status()
+        open_findings = await self._open_finding_count()
+        stale_clusters = await self._stale_cluster_count()
+        alerts = await self._alerts(worker, queue, clusters, scheduler)
         return OperationsStatusResponse(
             status="degraded" if alerts else "ok",
             worker=worker,
@@ -197,8 +209,19 @@ class ObservabilityService:
             workloads=workloads,
             directory=directory,
             clusters=clusters,
+            scheduler=scheduler,
+            open_reconciliation_findings=open_findings,
+            stale_inventory_clusters=stale_clusters,
             alerts=alerts,
         )
+
+    async def evaluate_alerts(self) -> list[OperationalAlert]:
+        """Compute the current control-plane signals without requiring a dashboard principal."""
+        worker = await self._worker_status()
+        queue = await self._queue_status()
+        clusters = await self._cluster_statuses()
+        scheduler = await self._scheduler_status()
+        return await self._alerts(worker, queue, clusters, scheduler)
 
     async def prometheus_metrics(self) -> str:
         worker = await self._worker_status()
@@ -234,6 +257,58 @@ class ObservabilityService:
         )
         for status, count in operation_counts:
             lines.append(f'pvemaster_operations{{status="{status}"}} {count}')
+        finding_counts = await self._session.execute(
+            select(
+                ReconciliationFinding.status,
+                ReconciliationFinding.severity,
+                func.count(),
+            ).group_by(
+                ReconciliationFinding.status,
+                ReconciliationFinding.severity,
+            )
+        )
+        lines.extend(
+            [
+                "# HELP pvemaster_reconciliation_findings Number of drift findings.",
+                "# TYPE pvemaster_reconciliation_findings gauge",
+            ]
+        )
+        for status, severity, count in finding_counts:
+            lines.append(
+                "pvemaster_reconciliation_findings"
+                f'{{status="{status}",severity="{severity}"}} {count}'
+            )
+        lines.extend(
+            [
+                "# HELP pvemaster_inventory_stale_clusters Number of active clusters "
+                "without a recent full inventory sync.",
+                "# TYPE pvemaster_inventory_stale_clusters gauge",
+                f"pvemaster_inventory_stale_clusters {await self._stale_cluster_count()}",
+            ]
+        )
+        scheduler = await self._scheduler_status()
+        lines.extend(
+            [
+                "# HELP pvemaster_scheduler_job_last_success_timestamp_seconds "
+                "Unix timestamp of the last successful scheduled job run.",
+                "# TYPE pvemaster_scheduler_job_last_success_timestamp_seconds gauge",
+                "# HELP pvemaster_scheduler_job_failed Whether the latest scheduled job failed.",
+                "# TYPE pvemaster_scheduler_job_failed gauge",
+            ]
+        )
+        for job in scheduler:
+            name = job.job_name.replace("\\", "\\\\").replace('"', '\\"')
+            success_timestamp = (
+                int(job.last_success_at.timestamp()) if job.last_success_at is not None else 0
+            )
+            lines.append(
+                "pvemaster_scheduler_job_last_success_timestamp_seconds"
+                f'{{job="{name}"}} {success_timestamp}'
+            )
+            lines.append(
+                f'pvemaster_scheduler_job_failed{{job="{name}"}} '
+                f"{int(job.status == RunStatus.FAILED.value)}"
+            )
         pool_counts = await self._ip_pool_counts()
         lines.extend(
             [
@@ -268,6 +343,8 @@ class ObservabilityService:
         try:
             queues = {
                 "operations": int(await cast(Awaitable[int], self._redis.llen("operations"))),
+                "inventory": int(await cast(Awaitable[int], self._redis.llen("inventory"))),
+                "maintenance": int(await cast(Awaitable[int], self._redis.llen("maintenance"))),
                 "celery": int(await cast(Awaitable[int], self._redis.llen("celery"))),
             }
         except Exception:
@@ -361,6 +438,7 @@ class ObservabilityService:
         worker: WorkerStatus,
         queue: QueueStatus,
         clusters: list[ClusterConnectionStatus],
+        scheduler: list[SchedulerJobStatus] | None = None,
     ) -> list[OperationalAlert]:
         alerts: list[OperationalAlert] = []
         if not worker.available or not queue.available:
@@ -403,6 +481,56 @@ class ObservabilityService:
                         message="The Proxmox cluster is not connected.",
                     )
                 )
+                if cluster.error_code in {"PVE_AUTH_FAILED", "PVE_PERMISSION_DENIED"}:
+                    alerts.append(
+                        OperationalAlert(
+                            code="CLUSTER_CREDENTIAL_REJECTED",
+                            severity="critical",
+                            resource_type="cluster",
+                            resource_id=str(cluster.cluster_id),
+                            message="The cluster credential was rejected or lacks permission.",
+                        )
+                    )
+        critical_findings = await self._session.scalar(
+            select(func.count())
+            .select_from(ReconciliationFinding)
+            .where(
+                ReconciliationFinding.status != FindingStatus.RESOLVED.value,
+                ReconciliationFinding.severity == FindingSeverity.CRITICAL.value,
+            )
+        )
+        if critical_findings:
+            alerts.append(
+                OperationalAlert(
+                    code="RECONCILIATION_CRITICAL",
+                    severity="critical",
+                    resource_type="inventory",
+                    message="Critical inventory drift findings require review.",
+                    value=int(critical_findings),
+                )
+            )
+        stale_clusters = await self._stale_cluster_count()
+        if stale_clusters:
+            alerts.append(
+                OperationalAlert(
+                    code="INVENTORY_STALE",
+                    severity="critical",
+                    resource_type="inventory",
+                    message="One or more clusters have stale inventory.",
+                    value=stale_clusters,
+                )
+            )
+        for job in scheduler or []:
+            if job.status == RunStatus.FAILED.value:
+                alerts.append(
+                    OperationalAlert(
+                        code="SCHEDULER_JOB_FAILED",
+                        severity="critical",
+                        resource_type="scheduler",
+                        resource_id=job.job_name,
+                        message="A scheduled maintenance job failed.",
+                    )
+                )
         cutoff = datetime.now(UTC) - timedelta(
             minutes=self._settings.provisioning_failure_window_minutes
         )
@@ -440,7 +568,175 @@ class ObservabilityService:
                         threshold=self._settings.ip_pool_low_available_threshold,
                     )
                 )
+        alerts.extend(await self._incident_alerts())
         return alerts
+
+    async def _incident_alerts(self) -> list[OperationalAlert]:
+        incident_cutoff = datetime.now(UTC) - timedelta(hours=24)
+        alerts: list[OperationalAlert] = []
+        failed_operations = (
+            await self._session.execute(
+                select(Operation, Workload.organization_id)
+                .outerjoin(Workload, Workload.id == Operation.workload_id)
+                .where(
+                    Operation.status.in_(
+                        [
+                            "FAILED",
+                            "TIMEOUT",
+                            "NEEDS_ATTENTION",
+                        ]
+                    ),
+                    Operation.requested_at >= incident_cutoff,
+                )
+            )
+        ).all()
+        for operation, organization_id in failed_operations:
+            alerts.append(
+                OperationalAlert(
+                    code="OPERATION_REQUIRES_ATTENTION",
+                    severity="critical" if operation.status == "NEEDS_ATTENTION" else "warning",
+                    resource_type="operation",
+                    resource_id=str(operation.id),
+                    organization_id=organization_id,
+                    workload_id=operation.workload_id,
+                    message="An operation failed or requires manual review.",
+                )
+            )
+        failed_backups = (
+            await self._session.scalars(
+                select(BackupRun).where(
+                    BackupRun.status.in_(["FAILED", "TIMEOUT", "NEEDS_ATTENTION"]),
+                    BackupRun.created_at >= incident_cutoff,
+                )
+            )
+        ).all()
+        for backup in failed_backups:
+            alerts.append(
+                OperationalAlert(
+                    code="BACKUP_FAILED",
+                    severity="critical",
+                    resource_type="backup",
+                    resource_id=str(backup.id),
+                    organization_id=backup.organization_id,
+                    workload_id=backup.workload_id,
+                    message="A workload backup failed or needs review.",
+                )
+            )
+        missed_policies = (
+            await self._session.scalars(
+                select(BackupPolicy).where(
+                    BackupPolicy.is_enabled.is_(True),
+                    BackupPolicy.next_run_at < datetime.now(UTC) - timedelta(minutes=10),
+                )
+            )
+        ).all()
+        for policy in missed_policies:
+            alerts.append(
+                OperationalAlert(
+                    code="BACKUP_SCHEDULE_MISSED",
+                    severity="critical",
+                    resource_type="backup_policy",
+                    resource_id=str(policy.id),
+                    message="An enabled backup policy missed its scheduled dispatch.",
+                )
+            )
+        due_verifications = (
+            await self._session.scalars(
+                select(BackupVerification).where(BackupVerification.status.in_(["DUE", "FAILED"]))
+            )
+        ).all()
+        for verification in due_verifications:
+            alerts.append(
+                OperationalAlert(
+                    code="BACKUP_VERIFICATION_DUE",
+                    severity="warning" if verification.status == "DUE" else "critical",
+                    resource_type="backup_verification",
+                    resource_id=str(verification.id),
+                    message="A backup restore verification is due or failed.",
+                )
+            )
+        change_cutoff = datetime.now(UTC) - timedelta(minutes=10)
+        change_events = (
+            await self._session.execute(
+                select(WorkloadChangeEvent, Workload.organization_id)
+                .join(Workload, Workload.id == WorkloadChangeEvent.workload_id)
+                .where(
+                    WorkloadChangeEvent.observed_at >= change_cutoff,
+                    WorkloadChangeEvent.kind.in_(["POWER_STATE_CHANGED", "MISSING"]),
+                    Workload.organization_id.is_not(None),
+                )
+            )
+        ).all()
+        for event, organization_id in change_events:
+            alerts.append(
+                OperationalAlert(
+                    code="CUSTOMER_VM_STATE_CHANGED",
+                    severity="info",
+                    resource_type="workload",
+                    resource_id=str(event.workload_id),
+                    organization_id=organization_id,
+                    workload_id=event.workload_id,
+                    message="A managed VM state changed.",
+                )
+            )
+        return alerts
+
+    async def _open_finding_count(self) -> int:
+        count = await self._session.scalar(
+            select(func.count())
+            .select_from(ReconciliationFinding)
+            .where(ReconciliationFinding.status != FindingStatus.RESOLVED.value)
+        )
+        return int(count or 0)
+
+    async def _stale_cluster_count(self) -> int:
+        now = datetime.now(UTC)
+        clusters = await self._session.scalars(select(Cluster).where(Cluster.is_active.is_(True)))
+        return sum(
+            1
+            for cluster in clusters
+            if cluster.last_sync_succeeded_at is None
+            or cluster.last_sync_succeeded_at
+            < now
+            - timedelta(
+                seconds=max(
+                    self._settings.inventory_stale_after_seconds,
+                    cluster.sync_interval_seconds * 3,
+                )
+            )
+        )
+
+    async def _scheduler_status(self) -> list[SchedulerJobStatus]:
+        rows = (
+            await self._session.scalars(
+                select(MaintenanceRun).order_by(
+                    MaintenanceRun.started_at.desc(),
+                    MaintenanceRun.id.desc(),
+                )
+            )
+        ).all()
+        latest: dict[str, MaintenanceRun] = {}
+        last_success: dict[str, datetime] = {}
+        for item in rows:
+            latest.setdefault(item.job_name, item)
+            if (
+                item.status == RunStatus.SUCCEEDED.value
+                and item.finished_at is not None
+                and item.job_name not in last_success
+            ):
+                last_success[item.job_name] = item.finished_at
+        return [
+            SchedulerJobStatus(
+                job_name=name,
+                status=item.status,
+                last_started_at=item.started_at,
+                last_finished_at=item.finished_at,
+                last_success_at=last_success.get(name),
+                processed_count=item.processed_count,
+                error_code=item.error_code,
+            )
+            for name, item in sorted(latest.items())
+        ]
 
     async def _ip_pool_counts(self) -> list[tuple[UUID, str, int]]:
         pools = list(

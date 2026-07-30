@@ -62,6 +62,8 @@ class RestoreOperationRunner:
             OperationStatus.SUCCEEDED.value,
             OperationStatus.FAILED.value,
             OperationStatus.TIMEOUT.value,
+            OperationStatus.CANCELLED.value,
+            OperationStatus.NEEDS_ATTENTION.value,
         }:
             return
         restore = await self._session.scalar(
@@ -127,9 +129,10 @@ class RestoreOperationRunner:
                 operation,
                 restore,
                 actor,
-                status=OperationStatus.FAILED,
+                status=OperationStatus.NEEDS_ATTENTION,
                 error_code="RESTORE_SUBMISSION_STATE_UNKNOWN",
                 retryable=False,
+                restore_status=OperationStatus.FAILED,
             )
             return
 
@@ -169,12 +172,15 @@ class RestoreOperationRunner:
                             restore,
                             actor,
                             status=(
-                                OperationStatus.TIMEOUT
+                                OperationStatus.NEEDS_ATTENTION
                                 if exc.code == "PVE_TIMEOUT"
                                 else OperationStatus.FAILED
                             ),
                             error_code=exc.code,
                             retryable=False,
+                            restore_status=(
+                                OperationStatus.TIMEOUT if exc.code == "PVE_TIMEOUT" else None
+                            ),
                         )
                         return
                     task = PveTask(
@@ -305,6 +311,7 @@ class RestoreOperationRunner:
         retryable: bool,
         error_code: str | None = None,
         task: PveTask | None = None,
+        restore_status: OperationStatus | None = None,
     ) -> None:
         now = datetime.now(UTC)
         operation.status = status.value
@@ -317,7 +324,7 @@ class RestoreOperationRunner:
         operation.retryable = retryable
         operation.version += 1
         if restore is not None:
-            restore.status = status.value
+            restore.status = (restore_status or status).value
             restore.finished_at = now
         add_audit_event(
             self._session,

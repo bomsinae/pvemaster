@@ -23,6 +23,12 @@ from app.models.operation import (
 from app.schemas.operation import JobResponse, VmDeleteRequest, VmSpecUpdateRequest
 from app.security.access import Principal, require_service_role
 from app.services.audit import add_audit_event
+from app.services.outbox import (
+    POWER_EVENT,
+    add_operation_event,
+    record_publish_failure,
+    record_publish_success,
+)
 
 OperationPublisher = Callable[[UUID, str], None]
 logger = logging.getLogger(__name__)
@@ -140,6 +146,7 @@ class OperationService:
                 code="OPERATION_CONFLICT",
                 message="A duplicate or conflicting operation already exists.",
             ) from exc
+        outbox = add_operation_event(self._session, operation, POWER_EVENT)
         add_audit_event(
             self._session,
             action=f"VM_POWER_{action.value.upper()}",
@@ -175,10 +182,13 @@ class OperationService:
         try:
             self._publisher(operation.id, celery_task_id)
         except Exception:
+            await record_publish_failure(self._session, outbox, self._settings)
             logger.exception(
                 "Power operation enqueue failed; worker recovery will retry",
                 extra={"operation_id": str(operation.id)},
             )
+        else:
+            await record_publish_success(self._session, outbox)
         return await self._response(operation), True
 
     async def request_admin_action(
@@ -275,6 +285,7 @@ class OperationService:
                 "OPERATION_CONFLICT",
                 "A duplicate or conflicting operation already exists.",
             ) from exc
+        outbox = add_operation_event(self._session, operation, POWER_EVENT)
         add_audit_event(
             self._session,
             action=operation.operation_type,
@@ -298,9 +309,12 @@ class OperationService:
         try:
             self._publisher(operation.id, operation.celery_task_id)
         except Exception:
+            await record_publish_failure(self._session, outbox, self._settings)
             logger.exception(
                 "VM operation enqueue failed", extra={"operation_id": str(operation.id)}
             )
+        else:
+            await record_publish_success(self._session, outbox)
         return await self._response(operation), True
 
     async def get_job(self, job_id: UUID) -> JobResponse:

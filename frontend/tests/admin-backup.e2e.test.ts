@@ -4,9 +4,13 @@ import test from "node:test";
 
 import {
   createBackupTarget,
+  createBackupPolicy,
   discoverBackupStorages,
+  reconcileBackupMetadata,
+  requestBackupMetadataVerification,
   requestWorkloadBackup,
   requestBackupRestore,
+  runBackupPolicyNow,
 } from "../lib/admin-api.ts";
 
 test("backup API client uses scoped endpoints and an idempotency key", async () => {
@@ -94,6 +98,82 @@ test("backup API client uses scoped endpoints and an idempotency key", async () 
   });
 });
 
+test("backup automation client preserves policy and verification contracts", async () => {
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  const fetcher: typeof fetch = async (input, init = {}) => {
+    requests.push({ url: String(input), init });
+    if (String(input).endsWith("/backup-policies")) {
+      return new Response(JSON.stringify({
+        id: "policy-1",
+        name: "daily",
+        backup_target_id: "target-1",
+        backup_target_name: "pbs-main",
+        schedule: "0 2 * * *",
+        timezone: "Asia/Seoul",
+        mode: "snapshot",
+        retention_reference: "daily-30",
+        verification_interval_days: 90,
+        is_enabled: true,
+        next_run_at: "2026-07-27T17:00:00Z",
+        last_dispatched_at: null,
+        skip_next_at: null,
+        recent_success_at: null,
+        consecutive_failures: 0,
+        assignments: [],
+        created_at: "2026-07-26T00:00:00Z",
+        updated_at: "2026-07-26T00:00:00Z",
+        version: 1,
+      }), { status: 201 });
+    }
+    return new Response(JSON.stringify({ dispatched_count: 1, processed_count: 0 }), {
+      status: 202,
+    });
+  };
+
+  await createBackupPolicy("https://example.test", "access", {
+    name: "daily",
+    backup_target_id: "target-1",
+    schedule: "0 2 * * *",
+    timezone: "Asia/Seoul",
+    retention_reference: "daily-30",
+    verification_interval_days: 90,
+    assignments: [{ organization_id: "org-1" }],
+  }, fetcher);
+  await runBackupPolicyNow(
+    "https://example.test",
+    "access",
+    "policy-1",
+    fetcher,
+  );
+  await reconcileBackupMetadata("https://example.test", "access", fetcher);
+  await requestBackupMetadataVerification(
+    "https://example.test",
+    "access",
+    "run-1",
+    "verification-request-1",
+    fetcher,
+  );
+
+  assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
+    name: "daily",
+    backup_target_id: "target-1",
+    schedule: "0 2 * * *",
+    timezone: "Asia/Seoul",
+    retention_reference: "daily-30",
+    verification_interval_days: 90,
+    assignments: [{ organization_id: "org-1" }],
+  });
+  assert.equal(requests[1].url, "https://example.test/api/v1/admin/backup-policies/policy-1/run-now");
+  assert.equal(requests[2].url, "https://example.test/api/v1/admin/backup-metadata/reconcile");
+  assert.equal(
+    new Headers(requests[3].init.headers).get("Idempotency-Key"),
+    "verification-request-1",
+  );
+  assert.deepEqual(JSON.parse(String(requests[3].init.body)), {
+    verification_type: "METADATA",
+  });
+});
+
 test("backup workspace exposes filters, per-VM history, and transfer measurements", async () => {
   const [dashboard, styles] = await Promise.all([
     readFile(new URL("../app/admin-dashboard.tsx", import.meta.url), "utf8"),
@@ -110,6 +190,12 @@ test("backup workspace exposes filters, per-VM history, and transfer measurement
   assert.match(dashboard, /기존 VMID는 덮어쓰지 않으며/);
   assert.match(dashboard, /복구 작업/);
   assert.match(dashboard, /최근 백업/);
+  assert.match(dashboard, /자동 백업 정책/);
+  assert.match(dashboard, /다음 실행 건너뛰기/);
+  assert.match(dashboard, /복구 검증/);
+  assert.match(dashboard, /메타데이터 재조정/);
+  assert.match(dashboard, /복구 영향 미리보기/);
+  assert.match(dashboard, /자동 할당 없음/);
   assert.match(dashboard, /admin-drawer-backdrop/);
   assert.match(dashboard, /createPortal/);
   assert.match(dashboard, /document\.body\.style\.overflow = "hidden"/);

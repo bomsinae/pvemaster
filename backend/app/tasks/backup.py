@@ -40,8 +40,14 @@ def execute_restore_operation(operation_id: str) -> None:
     from asyncio import run
 
     from app.services.restore_runner import run_restore_operation
+    from app.tasks.inventory import request_operation_target_sync
 
-    run(run_restore_operation(UUID(operation_id)))
+    async def execute() -> None:
+        parsed_id = UUID(operation_id)
+        await run_restore_operation(parsed_id)
+        await request_operation_target_sync(parsed_id)
+
+    run(execute())
 
 
 async def recover_backup_operations() -> int:

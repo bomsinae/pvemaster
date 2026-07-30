@@ -5,9 +5,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AuthSession,
   CustomerPowerAction,
+  CustomerAlert,
   CustomerApiError,
+  CustomerMetricRange,
+  CustomerMetricSeries,
   CustomerVm,
+  CustomerVmDetail,
+  getCustomerVm,
+  getCustomerVmMetrics,
   getCustomerJob,
+  listCustomerJobs,
+  listCustomerAlerts,
   listCustomerVms,
   requestPowerAction,
 } from "@/lib/customer-api";
@@ -18,8 +26,14 @@ import type { CustomerJobsByVmId, CustomerPowerFilter } from "@/lib/customer-por
 
 import { LoginPanel } from "./login-panel";
 import { PasswordChangeDialog } from "./password-change-dialog";
+import { SecurityCenterDialog } from "./security-center-dialog";
+import { StepUpDialog } from "./step-up-dialog";
 import { useDialogFocus } from "./use-dialog-focus";
 import { VmConsoleModal } from "./vm-console-modal";
+import { CustomerVmDetailView } from "./customer-vm-detail";
+import { CustomerNotificationDialog } from "./customer-notification-dialog";
+import { CustomerOrganizationDialog } from "./customer-organization-dialog";
+import { CustomerSelfServiceDialog } from "./customer-self-service-dialog";
 
 const actionLabels: Record<CustomerPowerAction, string> = {
   start: "시작",
@@ -28,7 +42,13 @@ const actionLabels: Record<CustomerPowerAction, string> = {
   reboot: "재부팅",
 };
 
-const terminalStatuses = new Set(["SUCCEEDED", "FAILED", "TIMEOUT"]);
+const terminalStatuses = new Set([
+  "SUCCEEDED",
+  "FAILED",
+  "TIMEOUT",
+  "CANCELLED",
+  "NEEDS_ATTENTION",
+]);
 
 function errorMessage(error: unknown): string {
   return error instanceof CustomerApiError
@@ -108,6 +128,12 @@ export function CustomerPortal({
 }) {
   const [session, setSession] = useState<AuthSession | null>(initialSession);
   const [vms, setVms] = useState<CustomerVm[]>([]);
+  const [alerts, setAlerts] = useState<CustomerAlert[]>([]);
+  const [selectedDetail, setSelectedDetail] = useState<CustomerVmDetail | null>(null);
+  const [detailMetrics, setDetailMetrics] = useState<CustomerMetricSeries | null>(null);
+  const [metricRange, setMetricRange] = useState<CustomerMetricRange>("day");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
   const [powerFilter, setPowerFilter] = useState<CustomerPowerFilter>("ALL");
   const [organizationFilter, setOrganizationFilter] = useState("ALL");
@@ -117,13 +143,51 @@ export function CustomerPortal({
   const [jobsByVmId, setJobsByVmId] = useState<CustomerJobsByVmId>({});
   const [consoleVm, setConsoleVm] = useState<CustomerVm | null>(null);
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
+  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
+  const [organizationDialogOpen, setOrganizationDialogOpen] = useState(false);
+  const [selfServiceVm, setSelfServiceVm] = useState<CustomerVm | null>(null);
   const [loading, setLoading] = useState(Boolean(initialSession));
   const [error, setError] = useState("");
   const actionDialogRef = useRef<HTMLElement>(null);
 
   const refreshList = useCallback(async (activeSession: AuthSession) => {
-    const items = await listCustomerVms(apiBaseUrl, activeSession.accessToken);
+    const [items, jobs, customerAlerts] = await Promise.all([
+      listCustomerVms(apiBaseUrl, activeSession.accessToken),
+      listCustomerJobs(apiBaseUrl, activeSession.accessToken),
+      listCustomerAlerts(apiBaseUrl, activeSession.accessToken).catch(() => []),
+    ]);
     setVms(items);
+    setAlerts(customerAlerts);
+    setJobsByVmId(() =>
+      jobs.reduce<CustomerJobsByVmId>(
+        (current, job) => current[job.vm_id] ? current : upsertCustomerJob(current, job),
+        {},
+      ),
+    );
+  }, [apiBaseUrl]);
+
+  const loadDetail = useCallback(async (
+    activeSession: AuthSession,
+    vmId: string,
+    range: CustomerMetricRange,
+  ) => {
+    setDetailLoading(true);
+    try {
+      const [detail, metrics] = await Promise.all([
+        getCustomerVm(apiBaseUrl, activeSession.accessToken, vmId),
+        getCustomerVmMetrics(apiBaseUrl, activeSession.accessToken, vmId, range),
+      ]);
+      setSelectedDetail(detail);
+      setDetailMetrics(metrics);
+      setError("");
+    } catch (caught) {
+      setSelectedDetail(null);
+      setDetailMetrics(null);
+      setError(errorMessage(caught));
+    } finally {
+      setDetailLoading(false);
+    }
   }, [apiBaseUrl]);
 
   useEffect(() => {
@@ -135,6 +199,25 @@ export function CustomerPortal({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [refreshList, session]);
+
+  useEffect(() => {
+    if (!session) return;
+    const restoreRoute = () => {
+      const match = window.location.pathname.match(/^\/customer\/vms\/([^/]+)$/);
+      if (!match) {
+        setSelectedDetail(null);
+        setDetailMetrics(null);
+        return;
+      }
+      void loadDetail(session, decodeURIComponent(match[1]), metricRange);
+    };
+    const timer = window.setTimeout(restoreRoute, 0);
+    window.addEventListener("popstate", restoreRoute);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", restoreRoute);
+    };
+  }, [loadDetail, metricRange, session]);
 
   useEffect(() => {
     if (!session) return;
@@ -164,14 +247,21 @@ export function CustomerPortal({
           setError(errorMessage(failedPoll.reason));
         }
         if (polledJobs.some((job) => terminalStatuses.has(job.status))) {
+          const completed = polledJobs.find((job) => terminalStatuses.has(job.status));
+          if (completed) {
+            setNotice(`${actionLabels[completed.action]} 작업이 ${completed.status} 상태로 완료됐습니다.`);
+          }
           await refreshList(session);
+          if (selectedDetail && completed?.vm_id === selectedDetail.id) {
+            await loadDetail(session, selectedDetail.id, metricRange);
+          }
         }
       } catch (caught) {
         setError(errorMessage(caught));
       }
     }, 1500);
     return () => window.clearTimeout(timer);
-  }, [apiBaseUrl, jobsByVmId, refreshList, session]);
+  }, [apiBaseUrl, jobsByVmId, loadDetail, metricRange, refreshList, selectedDetail, session]);
 
   async function runAction() {
     if (!session || !pendingVm || !pendingAction) return;
@@ -215,6 +305,18 @@ export function CustomerPortal({
     if (!openConsoleWindow(vm.id)) setConsoleVm(vm);
   }
 
+  function openDetail(vm: CustomerVm) {
+    if (!session) return;
+    window.history.pushState({}, "", `/customer/vms/${encodeURIComponent(vm.id)}`);
+    void loadDetail(session, vm.id, metricRange);
+  }
+
+  function closeDetail() {
+    window.history.pushState({}, "", "/");
+    setSelectedDetail(null);
+    setDetailMetrics(null);
+  }
+
   async function endSession() {
     if (!session) return;
     try {
@@ -222,10 +324,15 @@ export function CustomerPortal({
     } finally {
       setSession(null);
       setVms([]);
+      setSelectedDetail(null);
+      setDetailMetrics(null);
       setOrganizationFilter("ALL");
       setPendingVm(null);
       setConsoleVm(null);
       setPasswordDialogOpen(false);
+      setNotificationDialogOpen(false);
+      setOrganizationDialogOpen(false);
+      setSelfServiceVm(null);
       setJobsByVmId({});
       onSessionEnded?.();
     }
@@ -253,12 +360,22 @@ export function CustomerPortal({
     <main className="portal-shell">
       <header className="portal-header">
         <div className="brand"><span className="brand-mark" aria-hidden="true">PM</span><span>PVE Master</span></div>
-        <div className="portal-session"><span className="state-dot" aria-hidden="true" /><span className="portal-workspace-label">고객 워크스페이스</span>{userEmail && <span className="portal-account" title={userEmail}><small>로그인 계정</small><strong>{userEmail}</strong></span>}<button onClick={() => setPasswordDialogOpen(true)}>비밀번호 변경</button><button onClick={endSession}>로그아웃</button></div>
+        <div className="portal-session"><span className="state-dot" aria-hidden="true" /><span className="portal-workspace-label">고객 워크스페이스</span>{userEmail && <span className="portal-account" title={userEmail}><small>로그인 계정</small><strong>{userEmail}</strong></span>}<button onClick={() => setOrganizationDialogOpen(true)}>조직 관리</button><button onClick={() => setSecurityDialogOpen(true)}>보안 설정</button><button onClick={() => setNotificationDialogOpen(true)}>알림 설정</button><button onClick={() => setPasswordDialogOpen(true)}>비밀번호 변경</button><button onClick={endSession}>로그아웃</button></div>
       </header>
 
       {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="오류 닫기">×</button></div>}
+      {notice && <div className="customer-global-notice" role="status" aria-live="polite"><span>{notice}</span><button type="button" onClick={() => setNotice("")} aria-label="알림 닫기">×</button></div>}
 
       <div className="customer-workspace">
+        {selectedDetail ? <CustomerVmDetailView
+          detail={selectedDetail}
+          metrics={detailMetrics}
+          range={metricRange}
+          loading={detailLoading}
+          onRange={setMetricRange}
+          onClose={closeDetail}
+        /> : <>
+        {alerts.some((item) => item.status !== "RESOLVED") && <section className="customer-alert-feed" aria-labelledby="customer-alert-title"><div><p className="eyebrow">Notifications</p><h2 id="customer-alert-title">운영 알림</h2></div>{alerts.filter((item) => item.status !== "RESOLVED").slice(0, 5).map((item) => <article key={item.id}><strong>{item.type}</strong><p>{item.message}</p><time>{formatTime(item.last_seen_at)}</time></article>)}</section>}
         <section className="customer-inventory" aria-labelledby="customer-inventory-title">
           <div className="customer-inventory-heading">
             <div>
@@ -295,6 +412,11 @@ export function CustomerPortal({
           </div>
 
           <div className="customer-table-scroll" aria-label="가상 머신 목록">
+            {visibleVms.some((vm) => vm.is_stale) && (
+              <div className="customer-inline-alert" role="status">
+                일부 VM 정보가 오래되었습니다. 최신 상태가 확인될 때까지 전원 제어가 제한됩니다.
+              </div>
+            )}
             <div className="customer-vm-table">
               <div className="customer-vm-table-head" aria-hidden="true">
                 <span>가상 머신</span><span>조직</span><span>상태</span><span>IP 주소</span><span>vCPU</span><span>메모리</span><span>디스크</span><span>마지막 확인</span><span>전원 제어</span>
@@ -308,26 +430,32 @@ export function CustomerPortal({
                     key={vm.id}
                     className="customer-vm-row"
                   >
-                    <span className="customer-vm-identity" data-label="가상 머신"><strong>{vm.name}</strong><small>{vm.id.slice(0, 8)}</small></span>
+                    <span className="customer-vm-identity" data-label="가상 머신"><button type="button" onClick={() => openDetail(vm)}><strong>{vm.name}</strong><small>상세 보기</small></button></span>
                     <strong className="customer-organization-badge" data-label="조직"><span aria-hidden="true" />{vm.organization_name}</strong>
-                    <span className="customer-vm-status" data-label="상태"><span className={`status-pip ${vm.power_state.toLowerCase()}`} aria-hidden="true" />{running ? "실행 중" : "중지됨"}</span>
+                    <span className="customer-vm-status" data-label="상태"><span className={`status-pip ${vm.power_state.toLowerCase()}`} aria-hidden="true" />{vm.is_stale ? "확인 필요" : running ? "실행 중" : "중지됨"}</span>
                     <span className={vm.assigned_ip_addresses.length ? "customer-vm-ip" : "customer-vm-muted"} data-label="IP 주소">{vm.assigned_ip_addresses.length ? vm.assigned_ip_addresses.join(", ") : "미할당"}</span>
                     <strong data-label="vCPU">{vm.cpu_cores ?? "—"}</strong>
                     <span data-label="메모리">{formatBytes(vm.memory_bytes)}</span>
                     <span data-label="디스크">{formatBytes(vm.disk_bytes)}</span>
-                    <span className="customer-vm-muted" data-label="마지막 확인">{formatTime(vm.observed_at)}</span>
+                    <span className="customer-vm-muted" data-label="마지막 확인">{formatTime(vm.observed_at)}{vm.is_stale ? " · 오래됨" : ""}</span>
                     <span className="customer-row-actions" data-label="전원 제어">
                       <span className="customer-row-action-buttons">
-                        <button className="console-row-button" disabled={!running} onClick={() => openConsole(vm)}>콘솔</button>
-                        <button disabled={running || jobPending} onClick={() => openActionDialog(vm, "start")}>시작</button>
-                        <button disabled={!running || jobPending} onClick={() => openActionDialog(vm, "shutdown")}>정상 종료</button>
-                        <button disabled={!running || jobPending} onClick={() => openActionDialog(vm, "reboot")}>재부팅</button>
-                        <button className="customer-danger-action" disabled={!running || jobPending} onClick={() => openActionDialog(vm, "stop")}>강제 중지</button>
+                        <button className="console-row-button" disabled={!running || vm.is_stale} onClick={() => openConsole(vm)}>콘솔</button>
+                        <button onClick={() => setSelfServiceVm(vm)}>변경 요청</button>
+                        <button disabled={running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "start")}>시작</button>
+                        <button disabled={!running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "shutdown")}>정상 종료</button>
+                        <button disabled={!running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "reboot")}>재부팅</button>
+                        <button className="customer-danger-action" disabled={!running || jobPending || vm.is_stale} onClick={() => openActionDialog(vm, "stop")}>강제 중지</button>
                       </span>
                       {vmJob && (
                         <small className={`customer-row-job ${vmJob.status.toLowerCase()}`} role="status" aria-live="polite">
                           <span className={!terminalStatuses.has(vmJob.status) ? "progress-pulse" : "status-pip"} aria-hidden="true" />
                           {actionLabels[vmJob.action]} · {vmJob.status}
+                          {vmJob.status === "NEEDS_ATTENTION" || vmJob.retryable === false && vmJob.status === "FAILED"
+                            ? " · 지원팀 문의 필요"
+                            : vmJob.retryable && terminalStatuses.has(vmJob.status)
+                              ? " · 잠시 후 다시 시도 가능"
+                              : ""}
                         </small>
                       )}
                     </span>
@@ -340,6 +468,7 @@ export function CustomerPortal({
             </div>
           </div>
         </section>
+        </>}
 
       </div>
 
@@ -369,9 +498,47 @@ export function CustomerPortal({
           apiBaseUrl={apiBaseUrl}
           accessToken={session.accessToken}
           onClose={() => setPasswordDialogOpen(false)}
-          onChanged={endSession}
+          onChanged={async (allSessionsRevoked) => {
+            if (allSessionsRevoked) {
+              await endSession();
+              return;
+            }
+            setPasswordDialogOpen(false);
+            setNotice("비밀번호를 변경했습니다. 현재 세션은 계속 사용할 수 있습니다.");
+          }}
         />
       )}
+      {securityDialogOpen && (
+        <SecurityCenterDialog
+          apiBaseUrl={apiBaseUrl}
+          accessToken={session.accessToken}
+          onClose={() => setSecurityDialogOpen(false)}
+          onCurrentSessionRevoked={endSession}
+        />
+      )}
+      {notificationDialogOpen && (
+        <CustomerNotificationDialog
+          apiBaseUrl={apiBaseUrl}
+          accessToken={session.accessToken}
+          onClose={() => setNotificationDialogOpen(false)}
+        />
+      )}
+      {organizationDialogOpen && (
+        <CustomerOrganizationDialog
+          apiBaseUrl={apiBaseUrl}
+          accessToken={session.accessToken}
+          onClose={() => setOrganizationDialogOpen(false)}
+        />
+      )}
+      {selfServiceVm && (
+        <CustomerSelfServiceDialog
+          apiBaseUrl={apiBaseUrl}
+          accessToken={session.accessToken}
+          vm={selfServiceVm}
+          onClose={() => setSelfServiceVm(null)}
+        />
+      )}
+      <StepUpDialog apiBaseUrl={apiBaseUrl} accessToken={session.accessToken} />
     </main>
   );
 }

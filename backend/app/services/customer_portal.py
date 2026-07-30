@@ -1,25 +1,55 @@
 import hmac
 import logging
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID, uuid4
 
-from sqlalchemy import Select, exists, select
+from sqlalchemy import Select, exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.models.alerting import MaintenanceWindow
 from app.models.auth import Organization, OrganizationMember, UserRole
+from app.models.backup import BackupRun
+from app.models.cluster import Cluster
+from app.models.inventory import WorkloadChangeEvent
 from app.models.ipam import IpAddress, IpAllocation, IpAllocationStatus
-from app.models.operation import Operation, OperationStatus, PowerAction, Workload
+from app.models.metrics import WorkloadMetric
+from app.models.operation import (
+    Operation,
+    OperationStatus,
+    PowerAction,
+    Workload,
+    WorkloadAssignment,
+)
 from app.schemas.customer import (
+    CustomerBackupStatus,
     CustomerJobResponse,
+    CustomerMaintenance,
+    CustomerMetricPoint,
+    CustomerMetricRange,
+    CustomerMetricSeriesResponse,
+    CustomerStateChange,
     CustomerVmDetailResponse,
     CustomerVmSummary,
 )
 from app.security.access import Principal, require_service_role
 from app.services.audit import add_audit_event
+from app.services.organization_access import (
+    WORKLOAD_OPERATE_ROLES,
+    WORKLOAD_READ_ROLES,
+    active_membership_conditions,
+)
+from app.services.outbox import (
+    POWER_EVENT,
+    add_operation_event,
+    record_publish_failure,
+    record_publish_success,
+)
 
 CustomerOperationPublisher = Callable[[UUID, str], None]
 logger = logging.getLogger(__name__)
@@ -53,29 +83,45 @@ class CustomerPortalService:
         owned = workloads.all()
         assigned_ips = await self._assigned_ip_addresses([item.id for item in owned])
         organization_names = await self._organization_names(owned)
+        sync_intervals = await self._cluster_sync_intervals(owned)
         return [
             self._vm_summary(
                 item,
                 organization_name=organization_names[item.organization_id],
                 assigned_ip_addresses=assigned_ips.get(item.id, []),
+                sync_interval_seconds=sync_intervals[item.cluster_id],
             )
             for item in owned
-            if item.organization_id in organization_names
+            if item.organization_id in organization_names and item.cluster_id in sync_intervals
         ]
 
     async def get_vm(self, vm_id: UUID) -> CustomerVmDetailResponse:
         workload = await self._owned_vm(vm_id)
-        jobs = await self._recent_jobs(workload.id)
+        assignment = await self._current_assignment(workload)
+        jobs = await self._recent_jobs(workload.id, assignment.assigned_at)
         assigned_ips = await self._assigned_ip_addresses([workload.id])
         organization_names = await self._organization_names([workload])
-        if workload.organization_id not in organization_names:
+        sync_intervals = await self._cluster_sync_intervals([workload])
+        sync_interval_seconds = sync_intervals.get(workload.cluster_id)
+        if workload.organization_id not in organization_names or sync_interval_seconds is None:
             raise self._not_found()
         summary = self._vm_summary(
             workload,
             organization_name=organization_names[workload.organization_id],
             assigned_ip_addresses=assigned_ips.get(workload.id, []),
+            sync_interval_seconds=sync_interval_seconds,
         )
-        return CustomerVmDetailResponse(**summary.model_dump(), recent_jobs=jobs)
+        return CustomerVmDetailResponse(
+            **summary.model_dump(),
+            recent_jobs=jobs,
+            recent_state_changes=await self._state_changes(workload.id, assignment.assigned_at),
+            recent_backup=await self._recent_backup(
+                workload.id,
+                assignment.organization_id,
+                assignment.assigned_at,
+            ),
+            upcoming_maintenance=await self._upcoming_maintenance(workload),
+        )
 
     async def request_power_action(
         self,
@@ -97,7 +143,15 @@ class CustomerPortalService:
                 code="CUSTOMER_ACTION_FORBIDDEN",
                 message="This power action is not available to customers.",
             )
-        workload = await self._owned_vm(vm_id)
+        workload = await self._owned_vm(vm_id, roles=WORKLOAD_OPERATE_ROLES)
+        sync_intervals = await self._cluster_sync_intervals([workload])
+        sync_interval_seconds = sync_intervals.get(workload.cluster_id)
+        if sync_interval_seconds is None:
+            raise self._not_found()
+        self._require_fresh_inventory(
+            workload,
+            sync_interval_seconds=sync_interval_seconds,
+        )
         if workload.organization_id is None:
             raise self._not_found()
         if action is PowerAction.STOP and not confirm_forced:
@@ -172,6 +226,7 @@ class CustomerPortalService:
                 code="OPERATION_CONFLICT",
                 message="A duplicate or conflicting operation already exists.",
             ) from exc
+        outbox = add_operation_event(self._session, operation, POWER_EVENT)
         add_audit_event(
             self._session,
             action=operation.operation_type,
@@ -191,10 +246,13 @@ class CustomerPortalService:
         try:
             self._publisher(operation.id, operation.celery_task_id)
         except Exception:
+            await record_publish_failure(self._session, outbox, self._settings)
             logger.exception(
                 "Customer power operation enqueue failed; worker recovery will retry",
                 extra={"operation_id": str(operation.id)},
             )
+        else:
+            await record_publish_success(self._session, outbox)
         return self._job_response(operation)
 
     @staticmethod
@@ -206,10 +264,19 @@ class CustomerPortalService:
         return "STANDARD"
 
     async def get_job(self, job_id: UUID) -> CustomerJobResponse:
+        current_owner = exists(
+            select(Workload.id).where(
+                Workload.id == Operation.workload_id,
+                Workload.organization_id == Operation.organization_id,
+            )
+        )
         membership = exists(
             select(OrganizationMember.id).where(
-                OrganizationMember.user_id == self._principal.user_id,
-                OrganizationMember.organization_id == Operation.organization_id,
+                *active_membership_conditions(
+                    user_id=self._principal.user_id,
+                    organization_id=Operation.organization_id,
+                    roles=WORKLOAD_READ_ROLES,
+                ),
             )
         )
         active_organization = exists(
@@ -218,29 +285,179 @@ class CustomerPortalService:
                 Organization.is_active.is_(True),
             )
         )
+        current_assignment = self._operation_in_current_assignment()
         operation = await self._session.scalar(
             select(Operation).where(
                 Operation.id == job_id,
                 Operation.requested_by_id == self._principal.user_id,
+                current_owner,
                 membership,
                 active_organization,
+                current_assignment,
             )
         )
         if operation is None:
             raise AppError(status_code=404, code="JOB_NOT_FOUND", message="The job was not found.")
         return self._job_response(operation)
 
-    def _owned_workloads_query(self) -> Select[tuple[Workload]]:
+    async def list_jobs(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        vm_id: UUID | None,
+        status: OperationStatus | None,
+        started_at: datetime | None,
+        ended_at: datetime | None,
+    ) -> tuple[list[CustomerJobResponse], int]:
+        current_owner = exists(
+            select(Workload.id).where(
+                Workload.id == Operation.workload_id,
+                Workload.organization_id == Operation.organization_id,
+            )
+        )
         membership = exists(
             select(OrganizationMember.id).where(
-                OrganizationMember.user_id == self._principal.user_id,
-                OrganizationMember.organization_id == Workload.organization_id,
+                *active_membership_conditions(
+                    user_id=self._principal.user_id,
+                    organization_id=Operation.organization_id,
+                    roles=WORKLOAD_READ_ROLES,
+                ),
+            )
+        )
+        active_organization = exists(
+            select(Organization.id).where(
+                Organization.id == Operation.organization_id,
+                Organization.is_active.is_(True),
+            )
+        )
+        filters: list[ColumnElement[bool]] = [
+            Operation.requested_by_id == self._principal.user_id,
+            Operation.operation_type.like("POWER_%"),
+            current_owner,
+            membership,
+            active_organization,
+            self._operation_in_current_assignment(),
+        ]
+        if vm_id is not None:
+            await self._owned_vm(vm_id)
+            filters.append(Operation.workload_id == vm_id)
+        if status is not None:
+            filters.append(Operation.status == status.value)
+        if started_at is not None:
+            filters.append(Operation.requested_at >= started_at)
+        if ended_at is not None:
+            filters.append(Operation.requested_at <= ended_at)
+        total = int(
+            await self._session.scalar(select(func.count()).select_from(Operation).where(*filters))
+            or 0
+        )
+        operations = await self._session.scalars(
+            select(Operation)
+            .where(*filters)
+            .order_by(Operation.requested_at.desc(), Operation.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return [self._job_response(item) for item in operations.all()], total
+
+    async def metrics(
+        self,
+        vm_id: UUID,
+        metric_range: CustomerMetricRange,
+    ) -> CustomerMetricSeriesResponse:
+        workload = await self._owned_vm(vm_id)
+        assignment = await self._current_assignment(workload)
+        resolution, duration = {
+            "day": (60, timedelta(hours=24)),
+            "month": (300, timedelta(days=30)),
+            "year": (3600, timedelta(days=365)),
+        }[metric_range]
+        now = datetime.now(UTC)
+        start = max(assignment.assigned_at, now - duration)
+        rows = (
+            await self._session.scalars(
+                select(WorkloadMetric)
+                .where(
+                    WorkloadMetric.workload_id == workload.id,
+                    WorkloadMetric.organization_id == assignment.organization_id,
+                    WorkloadMetric.resolution_seconds == resolution,
+                    WorkloadMetric.bucket_at >= start,
+                    WorkloadMetric.bucket_at <= now,
+                )
+                .order_by(WorkloadMetric.bucket_at)
+                .limit(10_000)
+            )
+        ).all()
+        points = [
+            CustomerMetricPoint(
+                time=item.bucket_at,
+                sample_count=item.sample_count,
+                cpu_avg=item.cpu_avg,
+                cpu_max=item.cpu_max,
+                memory_used_avg=item.memory_used_avg,
+                memory_used_max=item.memory_used_max,
+                disk_read_avg=item.disk_read_avg,
+                disk_read_max=item.disk_read_max,
+                disk_write_avg=item.disk_write_avg,
+                disk_write_max=item.disk_write_max,
+                network_receive_avg=item.network_receive_avg,
+                network_receive_max=item.network_receive_max,
+                network_transmit_avg=item.network_transmit_avg,
+                network_transmit_max=item.network_transmit_max,
+            )
+            for item in rows
+        ]
+        expected = max(1, int((now - start).total_seconds() / resolution))
+        return CustomerMetricSeriesResponse(
+            vm_id=workload.id,
+            range=metric_range,
+            resolution_seconds=resolution,
+            assignment_started_at=assignment.assigned_at,
+            observed_at=rows[-1].bucket_at if rows else workload.observed_at,
+            partial=len(rows) < expected * 0.8,
+            items=points,
+        )
+
+    def _operation_in_current_assignment(self) -> ColumnElement[bool]:
+        return exists(
+            select(WorkloadAssignment.id).where(
+                WorkloadAssignment.workload_id == Operation.workload_id,
+                WorkloadAssignment.organization_id == Operation.organization_id,
+                WorkloadAssignment.revoked_at.is_(None),
+                WorkloadAssignment.assigned_at <= Operation.requested_at,
+            )
+        )
+
+    def _owned_workloads_query(
+        self, *, roles: tuple[str, ...] = WORKLOAD_READ_ROLES
+    ) -> Select[tuple[Workload]]:
+        membership = exists(
+            select(OrganizationMember.id).where(
+                *active_membership_conditions(
+                    user_id=self._principal.user_id,
+                    organization_id=Workload.organization_id,
+                    roles=roles,
+                ),
             )
         )
         active_organization = exists(
             select(Organization.id).where(
                 Organization.id == Workload.organization_id,
                 Organization.is_active.is_(True),
+            )
+        )
+        active_cluster = exists(
+            select(Cluster.id).where(
+                Cluster.id == Workload.cluster_id,
+                Cluster.is_active.is_(True),
+            )
+        )
+        current_assignment = exists(
+            select(WorkloadAssignment.id).where(
+                WorkloadAssignment.workload_id == Workload.id,
+                WorkloadAssignment.organization_id == Workload.organization_id,
+                WorkloadAssignment.revoked_at.is_(None),
             )
         )
         return select(Workload).where(
@@ -250,27 +467,137 @@ class CustomerPortalService:
             Workload.is_template.is_(False),
             membership,
             active_organization,
+            active_cluster,
+            current_assignment,
         )
 
-    async def _owned_vm(self, vm_id: UUID) -> Workload:
+    async def _owned_vm(
+        self, vm_id: UUID, *, roles: tuple[str, ...] = WORKLOAD_READ_ROLES
+    ) -> Workload:
         workload = await self._session.scalar(
-            self._owned_workloads_query().where(Workload.id == vm_id)
+            self._owned_workloads_query(roles=roles).where(Workload.id == vm_id)
         )
         if workload is None:
             raise self._not_found()
         return workload
 
-    async def _recent_jobs(self, vm_id: UUID) -> list[CustomerJobResponse]:
+    async def _recent_jobs(
+        self, vm_id: UUID, assignment_started_at: datetime
+    ) -> list[CustomerJobResponse]:
         operations = await self._session.scalars(
             select(Operation)
             .where(
                 Operation.workload_id == vm_id,
                 Operation.requested_by_id == self._principal.user_id,
+                Operation.operation_type.like("POWER_%"),
+                Operation.requested_at >= assignment_started_at,
             )
             .order_by(Operation.requested_at.desc())
             .limit(10)
         )
         return [self._job_response(item) for item in operations.all()]
+
+    async def _current_assignment(self, workload: Workload) -> WorkloadAssignment:
+        assignment = await self._session.scalar(
+            select(WorkloadAssignment).where(
+                WorkloadAssignment.workload_id == workload.id,
+                WorkloadAssignment.organization_id == workload.organization_id,
+                WorkloadAssignment.revoked_at.is_(None),
+            )
+        )
+        if assignment is None:
+            raise self._not_found()
+        return assignment
+
+    async def _state_changes(
+        self, workload_id: UUID, assignment_started_at: datetime
+    ) -> list[CustomerStateChange]:
+        rows = (
+            await self._session.scalars(
+                select(WorkloadChangeEvent)
+                .where(
+                    WorkloadChangeEvent.workload_id == workload_id,
+                    WorkloadChangeEvent.observed_at >= assignment_started_at,
+                )
+                .order_by(WorkloadChangeEvent.observed_at.desc())
+                .limit(20)
+            )
+        ).all()
+        summaries = {
+            "POWER_STATE_DRIFT": "전원 상태가 변경되었습니다.",
+            "SPEC_DRIFT": "가상 머신 사양이 변경되었습니다.",
+            "NODE_MOVED": "가상 머신 위치가 조정되었습니다.",
+            "EXTERNAL_DELETE": "가상 머신 상태를 확인할 수 없습니다.",
+        }
+        return [
+            CustomerStateChange(
+                id=item.id,
+                change_type=item.kind,
+                summary=summaries.get(item.kind, "가상 머신 상태가 변경되었습니다."),
+                observed_at=item.observed_at,
+            )
+            for item in rows
+        ]
+
+    async def _recent_backup(
+        self,
+        workload_id: UUID,
+        organization_id: UUID,
+        assignment_started_at: datetime,
+    ) -> CustomerBackupStatus | None:
+        run = await self._session.scalar(
+            select(BackupRun)
+            .where(
+                BackupRun.workload_id == workload_id,
+                BackupRun.organization_id == organization_id,
+                BackupRun.created_at >= assignment_started_at,
+            )
+            .order_by(BackupRun.created_at.desc())
+        )
+        if run is None:
+            return None
+        return CustomerBackupStatus(
+            status=run.status,
+            completed_at=run.finished_at,
+            scheduled_for=run.scheduled_for,
+        )
+
+    async def _upcoming_maintenance(self, workload: Workload) -> list[CustomerMaintenance]:
+        now = datetime.now(UTC)
+        rows = (
+            await self._session.scalars(
+                select(MaintenanceWindow)
+                .where(
+                    MaintenanceWindow.ends_at > now,
+                    (
+                        MaintenanceWindow.organization_id.is_(None)
+                        | (MaintenanceWindow.organization_id == workload.organization_id)
+                    ),
+                    (
+                        (MaintenanceWindow.target_type == "ALL")
+                        | (
+                            (func.lower(MaintenanceWindow.target_type) == "workload")
+                            & (MaintenanceWindow.target_id == str(workload.id))
+                        )
+                        | (
+                            (func.lower(MaintenanceWindow.target_type) == "organization")
+                            & (MaintenanceWindow.target_id == str(workload.organization_id))
+                        )
+                    ),
+                )
+                .order_by(MaintenanceWindow.starts_at)
+                .limit(10)
+            )
+        ).all()
+        return [
+            CustomerMaintenance(
+                id=item.id,
+                name=item.name,
+                starts_at=item.starts_at,
+                ends_at=item.ends_at,
+            )
+            for item in rows
+        ]
 
     async def _assigned_ip_addresses(self, workload_ids: list[UUID]) -> dict[UUID, list[str]]:
         if not workload_ids:
@@ -304,13 +631,33 @@ class CustomerPortalService:
         )
         return {organization_id: name for organization_id, name in rows.all()}
 
-    @staticmethod
+    async def _cluster_sync_intervals(
+        self,
+        workloads: Sequence[Workload],
+    ) -> dict[UUID, int]:
+        cluster_ids = {item.cluster_id for item in workloads}
+        if not cluster_ids:
+            return {}
+        rows = await self._session.execute(
+            select(Cluster.id, Cluster.sync_interval_seconds).where(
+                Cluster.id.in_(cluster_ids),
+                Cluster.is_active.is_(True),
+            )
+        )
+        return {cluster_id: sync_interval for cluster_id, sync_interval in rows.all()}
+
     def _vm_summary(
+        self,
         workload: Workload,
         *,
         organization_name: str,
         assigned_ip_addresses: list[str],
+        sync_interval_seconds: int,
     ) -> CustomerVmSummary:
+        is_stale = self._is_stale(
+            workload,
+            sync_interval_seconds=sync_interval_seconds,
+        )
         return CustomerVmSummary(
             id=workload.id,
             name=workload.name or "Unnamed VM",
@@ -319,9 +666,32 @@ class CustomerPortalService:
             cpu_cores=workload.cpu_cores,
             memory_bytes=workload.memory_bytes,
             disk_bytes=workload.disk_bytes,
+            uptime_seconds=workload.uptime_seconds,
             assigned_ip_addresses=assigned_ip_addresses,
             observed_at=workload.observed_at,
+            is_stale=is_stale,
+            stale_reason="LAST_OBSERVATION_EXPIRED" if is_stale else None,
         )
+
+    def _is_stale(self, workload: Workload, *, sync_interval_seconds: int) -> bool:
+        stale_after_seconds = max(
+            self._settings.inventory_stale_after_seconds,
+            sync_interval_seconds * 3,
+        )
+        return workload.observed_at < datetime.now(UTC) - timedelta(seconds=stale_after_seconds)
+
+    def _require_fresh_inventory(
+        self,
+        workload: Workload,
+        *,
+        sync_interval_seconds: int,
+    ) -> None:
+        if self._is_stale(workload, sync_interval_seconds=sync_interval_seconds):
+            raise AppError(
+                status_code=503,
+                code="INVENTORY_STALE",
+                message="The VM state is stale. Try again after inventory synchronization.",
+            )
 
     @staticmethod
     def _job_response(operation: Operation) -> CustomerJobResponse:
@@ -339,12 +709,34 @@ class CustomerPortalService:
             status=OperationStatus(operation.status),
             result=safe_result,
             error_code=operation.error_code,
-            error_summary=operation.error_summary,
+            error_summary=CustomerPortalService._safe_error_summary(
+                operation.error_code,
+                OperationStatus(operation.status),
+            ),
             retryable=operation.retryable,
             requested_at=operation.requested_at,
             started_at=operation.started_at,
             finished_at=operation.finished_at,
         )
+
+    @staticmethod
+    def _safe_error_summary(
+        error_code: str | None,
+        status: OperationStatus,
+    ) -> str | None:
+        if status not in {
+            OperationStatus.FAILED,
+            OperationStatus.TIMEOUT,
+            OperationStatus.NEEDS_ATTENTION,
+        }:
+            return None
+        if error_code == "INVENTORY_STALE":
+            return "최신 상태를 확인한 뒤 다시 시도해 주세요."
+        if status is OperationStatus.TIMEOUT:
+            return "작업 결과 확인이 지연되고 있습니다. 지원팀에서 상태를 확인합니다."
+        if status is OperationStatus.NEEDS_ATTENTION:
+            return "작업 상태를 자동으로 확정하지 못했습니다. 지원팀에 문의해 주세요."
+        return "작업을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요."
 
     def _key_hash(self, key: str) -> bytes:
         secret = self._settings.app_secret_key.get_secret_value().encode()

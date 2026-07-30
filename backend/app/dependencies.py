@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from typing import Annotated, cast
 
 from fastapi import Depends, Header, Request
@@ -6,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
-from app.models.auth import User, UserRole
+from app.models.auth import RefreshToken, User, UserRole
 from app.security.access import Principal
 from app.security.tokens import TokenManager
 
@@ -34,7 +35,20 @@ async def get_current_principal(
     raw_token = authorization.removeprefix("Bearer ").strip()
     claims = cast(TokenManager, request.app.state.token_manager).decode_access_token(raw_token)
     user = await session.scalar(select(User).where(User.id == claims.user_id))
-    if user is None or not user.is_active or user.session_epoch != claims.session_epoch:
+    active_session = await session.scalar(
+        select(RefreshToken.id).where(
+            RefreshToken.family_id == claims.session_id,
+            RefreshToken.user_id == claims.user_id,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > datetime.now(UTC),
+        )
+    )
+    if (
+        user is None
+        or not user.is_active
+        or user.session_epoch != claims.session_epoch
+        or active_session is None
+    ):
         raise AppError(
             status_code=401,
             code="INVALID_ACCESS_TOKEN",
@@ -45,6 +59,9 @@ async def get_current_principal(
         email=user.email,
         role=UserRole(user.role),
         session_epoch=user.session_epoch,
+        session_id=claims.session_id,
+        assurance_level=claims.assurance_level,
+        mfa_authenticated_at=claims.mfa_authenticated_at,
     )
 
 

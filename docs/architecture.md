@@ -87,7 +87,8 @@ PVE Master는 PVE 위에 위치하는 제어 플레인이다. 브라우저는 Fa
 
 ### 인벤토리 투영
 
-`nodes`와 `workloads`는 PVE 데이터의 로컬 투영이다. 각 행은 `observed_at`, `sync_generation`, `is_present`를 가진다.
+`nodes`, `inventory_storages`, `workloads`는 PVE 데이터의 로컬 투영이다. 각 행은
+`observed_at`, `sync_generation`, `is_present`를 가진다.
 
 1. 동기화 시작 시 `sync_runs`와 generation을 만든다.
 2. PVE에서 리소스를 읽고 `(cluster_id, natural_key)` 기준 upsert한다.
@@ -96,6 +97,9 @@ PVE Master는 PVE 위에 위치하는 제어 플레인이다. 브라우저는 Fa
 5. API는 클러스터별 stale 임계치와 마지막 성공 시각을 함께 반환한다.
 
 PVE 외부에서 이루어진 변경도 다음 동기화에서 반영된다. 로컬 이름/상태를 PVE에 덮어써서 맞추지 않는다.
+node 이동, 사양·전원 변경과 전체 응답에서의 누락은 `reconciliation_findings`와
+`workload_change_events`에 기록한다. 누락 workload의 고객 할당과 IP는 자동
+해제하지 않으며 관리자가 원인을 확인하고 해결 상태를 기록한다.
 
 ### Operation과 PVE task
 
@@ -113,6 +117,10 @@ PENDING -> QUEUED -> RUNNING -> SUCCEEDED
 - PVE가 UPID를 반환한 뒤 워커가 죽어도 maintenance worker가 미완료 `pve_tasks`를 다시 폴링한다.
 - PVE 호출 결과가 불명확한 네트워크 오류에서는 같은 생성 명령을 즉시 반복하지 않는다. 먼저 VMID/UPID/대상 상태를 조회해 결과를 판별한다.
 - 취소는 best effort다. PVE가 이미 완료했거나 취소를 지원하지 않으면 최종 실제 상태를 보고한다.
+- 제출 결과가 불명확하고 안전한 대상 재조회로 판별할 수 없으면 자동 재제출하지 않고
+  `NEEDS_ATTENTION`으로 전환한다.
+- `operation_events`는 상태·단계 timeline, `operation_assignments`는 담당·확인·수동
+  해결을 보존한다. 재시도는 terminal 원본을 변경하지 않고 새 operation을 연결한다.
 
 ### 프로비저닝 사가
 
@@ -162,7 +170,7 @@ Docker Compose의 논리 서비스:
 
 - `web`: Next.js, 외부 진입점 또는 reverse proxy 뒤에서 실행.
 - `api`: FastAPI ASGI 서버, 수평 확장 가능.
-- `worker-operations`, `worker-inventory`: 큐와 동시성 분리.
+- `worker-operations`, `worker-inventory`, `worker-maintenance`: 큐와 동시성 분리.
 - `scheduler`: Celery beat 단일 인스턴스.
 - `postgres`: 영속 볼륨, 운영에서는 관리형 DB도 가능.
 - `redis`: 인증/TLS가 가능한 전용 인스턴스.
@@ -199,6 +207,11 @@ Docker Compose의 논리 서비스:
 - 동기화 부분 실패: absent 표시를 수행하지 않고 실패 범위를 기록한다.
 
 DB commit과 Celery publish 사이 유실을 막기 위해 초기 구현부터 `operation_outbox` 테이블을 두거나 Celery publish 실패를 재전송하는 DB dispatcher를 사용한다.
+
+현재 구현은 `operation_outbox`를 사용한다. operation과 publish intent를 같은
+transaction에 저장하고 maintenance dispatcher가 5초 주기로 미발행 행을 재전송한다.
+Scheduler 메시지 중복은 `scheduler_leases`의 PostgreSQL advisory lock, 만료 시각과
+fencing token으로 제어한다.
 
 ## 10. 확장 결정
 

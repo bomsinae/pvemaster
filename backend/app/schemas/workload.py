@@ -18,10 +18,14 @@ class WorkloadResponse(BaseModel):
     disk_bytes: int | None
     is_template: bool
     is_present: bool
+    sync_generation: int
+    missing_since: datetime | None
     organization_id: UUID | None
     organization_name: str | None
     assigned_ip_addresses: list[str]
     observed_at: datetime
+    is_stale: bool
+    stale_reason: str | None
     version: int
 
 

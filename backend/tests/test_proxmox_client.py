@@ -36,6 +36,7 @@ def make_client(handler: Handler, *, secret: str | None = None) -> ProxmoxClient
     [
         (401, "PVE_AUTH_FAILED", 401),
         (403, "PVE_PERMISSION_DENIED", 403),
+        (429, "PVE_RATE_LIMITED", 503),
         (503, "PVE_UPSTREAM_ERROR", 502),
     ],
 )
@@ -214,6 +215,32 @@ async def test_node_rrd_data_uses_encoded_path_and_average_query() -> None:
     assert captured_path == "/api2/json/nodes/pve%20node/rrddata"
     assert captured_query == {"timeframe": ["day"], "cf": ["AVERAGE"]}
     assert data[0]["cpu"] == 0.25
+
+
+async def test_guest_rrd_data_uses_typed_guest_path_and_average_query() -> None:
+    captured_path = ""
+    captured_query: dict[str, list[str]] = {}
+
+    def success(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_path, captured_query
+        captured_path = request.url.raw_path.decode().split("?", maxsplit=1)[0]
+        captured_query = parse_qs(request.url.query.decode())
+        return httpx.Response(
+            200,
+            json={"data": [{"time": 1720000000, "cpu": 0.25, "netin": 1024}]},
+        )
+
+    async with make_client(success) as client:
+        data = await client.get_guest_rrd_data(
+            kind="QEMU",
+            node="pve node",
+            vmid=101,
+            timeframe="hour",
+        )
+
+    assert captured_path == "/api2/json/nodes/pve%20node/qemu/101/rrddata"
+    assert captured_query == {"timeframe": ["hour"], "cf": ["AVERAGE"]}
+    assert data[0]["netin"] == 1024
 
 
 async def test_vm_power_action_and_upid_status_use_expected_endpoints() -> None:
@@ -620,3 +647,64 @@ async def test_invalid_console_ticket_is_rejected(payload: dict[str, object]) ->
             await client.create_console_proxy(kind="QEMU", node="pve-a", vmid=141)
 
     assert error.value.code == "PVE_INVALID_RESPONSE"
+
+
+async def test_advanced_operations_use_scoped_typed_pve_endpoints() -> None:
+    requests: list[tuple[str, str, dict[str, list[str]]]] = []
+
+    def success(request: httpx.Request) -> httpx.Response:
+        path = request.url.raw_path.decode()
+        requests.append((request.method, path, parse_qs(request.content.decode())))
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": [{"name": "before-change"}]})
+        if path.endswith("/config") or "/cluster/ha/resources/" in path:
+            return httpx.Response(200, json={"data": None})
+        return httpx.Response(200, json={"data": f"UPID:{len(requests)}"})
+
+    async with make_client(success) as client:
+        snapshots = await client.get_guest_snapshots(kind="QEMU", node="pve a", vmid=101)
+        snapshot_upid = await client.submit_guest_snapshot(
+            kind="QEMU",
+            node="pve a",
+            vmid=101,
+            snapshot_name="before-change",
+            include_memory=True,
+        )
+        migration_upid = await client.migrate_guest(
+            kind="QEMU",
+            node="pve a",
+            vmid=101,
+            target_node="pve-b",
+            online=True,
+            target_storage="shared",
+            target_network="10.0.0.0/24",
+        )
+        await client.update_ha_resource(
+            resource_id="vm:101",
+            state="started",
+            group="production",
+        )
+        await client.configure_guest_advanced(
+            kind="QEMU",
+            node="pve a",
+            vmid=101,
+            values={"cores": "4", "memory": "4096"},
+        )
+
+    assert snapshots == [{"name": "before-change"}]
+    assert snapshot_upid.startswith("UPID:")
+    assert migration_upid.startswith("UPID:")
+    assert requests[0][1] == "/api2/json/nodes/pve%20a/qemu/101/snapshot"
+    assert requests[1][2] == {
+        "snapname": ["before-change"],
+        "vmstate": ["1"],
+    }
+    assert requests[2][2] == {
+        "target": ["pve-b"],
+        "online": ["1"],
+        "with-local-disks": ["1"],
+        "targetstorage": ["shared"],
+        "migration_network": ["10.0.0.0/24"],
+    }
+    assert requests[3][1] == "/api2/json/cluster/ha/resources/vm%3A101"
+    assert requests[4][1] == "/api2/json/nodes/pve%20a/qemu/101/config"

@@ -39,17 +39,17 @@ docs/
 | 단계 | 상태 | 대표 산출물 |
 |---|---|---|
 | 0 — 제품 정책과 운영 기준 | 완료 | [제품 정책과 운영 기준](00-product-policy/product-policy.md) |
-| 1 — CI와 실제 사용자 여정 품질 게이트 | 예정 | — |
-| 2 — Scheduler, Outbox와 정기 유지보수 기반 | 예정 | — |
-| 3 — 자동 Inventory Sync와 Reconciliation | 예정 | — |
-| 4 — 관리자 Operation 센터와 복구 흐름 | 예정 | — |
-| 5 — MFA, Session과 고위험 작업 보호 | 예정 | — |
-| 6 — 경보, Incident와 Notification | 예정 | — |
-| 7 — PBS 백업 자동화와 복구 검증 | 예정 | — |
-| 8 — 고객 작업 이력, VM 상세와 성능 지표 | 예정 | — |
-| 9 — 고객 계정 보안과 알림 설정 | 예정 | — |
-| 10 — 제한된 고객 Self-service | 예정 | — |
-| 11 — 조직 관리자, 팀 권한, Quota와 승인 | 예정 | — |
-| 12 — 관리자 고급 PVE 운영 | 예정 | — |
-| 13 — 상용 호스팅 기능 | 선택 | — |
-| 14 — 출시 Hardening과 운영 인수 | 예정 | — |
+| 1 — CI와 실제 사용자 여정 품질 게이트 | 원격 적용 확인 대기 | [검증 보고서](01-ci-browser-quality-gates/verification-report.md), [branch protection 기준](01-ci-browser-quality-gates/branch-protection.md) |
+| 2 — Scheduler, Outbox와 정기 유지보수 기반 | 구현·검증 완료 | [설계 결정](02-scheduler-outbox-maintenance/design.md), [운영 runbook](02-scheduler-outbox-maintenance/runbook.md), [검증 보고서](02-scheduler-outbox-maintenance/verification-report.md) |
+| 3 — 자동 Inventory Sync와 Reconciliation | 구현·검증 완료 | [설계 결정](03-inventory-sync-reconciliation/design.md), [운영 runbook](03-inventory-sync-reconciliation/runbook.md), [검증 보고서](03-inventory-sync-reconciliation/verification-report.md) |
+| 4 — 관리자 Operation 센터와 복구 흐름 | 구현·로컬 검증 완료 | [설계 결정](04-operation-center-recovery/design.md), [운영 runbook](04-operation-center-recovery/runbook.md), [검증 보고서](04-operation-center-recovery/verification-report.md) |
+| 5 — MFA, Session과 고위험 작업 보호 | 구현·로컬 검증 완료 | [설계 결정](05-mfa-session-security/design.md), [운영 runbook](05-mfa-session-security/runbook.md), [검증 보고서](05-mfa-session-security/verification-report.md) |
+| 6 — 경보, Incident와 Notification | 구현·로컬 검증 완료 | [설계 결정](06-alert-incident-notification/design.md), [운영 runbook](06-alert-incident-notification/runbook.md), [검증 보고서](06-alert-incident-notification/verification-report.md) |
+| 7 — PBS 백업 자동화와 복구 검증 | 구현·로컬 검증 완료 | [설계 결정](07-pbs-backup-automation/design.md), [운영 runbook](07-pbs-backup-automation/runbook.md), [검증 보고서](07-pbs-backup-automation/verification-report.md) |
+| 8 — 고객 작업 이력, VM 상세와 성능 지표 | 구현·로컬 검증 완료 | [설계 결정](08-customer-history-metrics/design.md), [운영 runbook](08-customer-history-metrics/runbook.md), [검증 보고서](08-customer-history-metrics/verification-report.md) |
+| 9 — 고객 계정 보안과 알림 설정 | 구현·로컬 검증 완료 | [설계 결정](09-customer-security-notifications/design.md), [운영 runbook](09-customer-security-notifications/runbook.md), [검증 보고서](09-customer-security-notifications/verification-report.md) |
+| 10 — 제한된 고객 Self-service | 구현·로컬 검증 완료 | [설계 결정](10-customer-self-service/design.md), [운영 runbook](10-customer-self-service/runbook.md), [검증 보고서](10-customer-self-service/verification-report.md) |
+| 11 — 조직 관리자, 팀 권한, Quota와 승인 | 구현·로컬 검증 완료 | [설계 결정](11-organization-rbac-quota/design.md), [운영 runbook](11-organization-rbac-quota/runbook.md), [검증 보고서](11-organization-rbac-quota/verification-report.md) |
+| 12 — 관리자 고급 PVE 운영 | 구현·로컬 검증 완료 | [설계 결정](12-advanced-pve-operations/design.md), [운영 runbook](12-advanced-pve-operations/runbook.md), [검증 보고서](12-advanced-pve-operations/verification-report.md) |
+| 13 — 상용 호스팅 기능 | 정책상 보류 | [착수 결정](13-commercial-hosting/decision.md) |
+| 14 — 출시 Hardening과 운영 인수 | 로컬 hardening 완료·staging 승인 대기 | [Staging 검증 계획](14-release-hardening/staging-test-plan.md), [운영 인수](14-release-hardening/operations-handover.md), [검증 보고서](14-release-hardening/verification-report.md) |

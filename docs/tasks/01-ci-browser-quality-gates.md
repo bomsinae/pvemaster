@@ -1,5 +1,10 @@
 # 단계 1 — CI와 실제 사용자 여정 품질 게이트 (P0)
 
+> 상태: 로컬 구현·검증 완료, 원격 CI와 branch protection 적용 확인 대기
+>
+> 산출물: [검증 보고서](../deliverables/01-ci-browser-quality-gates/verification-report.md),
+> [branch protection 기준](../deliverables/01-ci-browser-quality-gates/branch-protection.md)
+
 ## 목표
 
 현재 단위·통합·mock frontend 테스트를 실제 브라우저와 배포 품질 게이트로 확장한다.

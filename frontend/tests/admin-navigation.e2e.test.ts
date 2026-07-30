@@ -29,6 +29,7 @@ test("admin section navigation creates reversible URLs", () => {
 test("admin section navigation restores only permitted sections", () => {
   assert.equal(sectionFromSearch("?section=audit", adminSections), "audit");
   assert.equal(sectionFromSearch("?section=backups", adminSections), "backups");
+  assert.equal(sectionFromSearch("?section=operations", adminSections), "operations");
   assert.equal(
     sectionFromSearch("?section=audit", ["overview", "clusters", "vms", "access"]),
     "overview",

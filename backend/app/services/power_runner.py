@@ -26,6 +26,11 @@ from app.models.operation import (
 from app.proxmox.client import ProxmoxClient
 from app.security.credentials import CredentialCipher, EncryptedCredential
 from app.services.audit import add_audit_event
+from app.services.customer_notifications import queue_customer_notification
+from app.services.organization_access import (
+    WORKLOAD_OPERATE_ROLES,
+    active_membership_conditions,
+)
 
 Sleep = Callable[[float], Awaitable[None]]
 RETRYABLE_ERROR_CODES = {"CLUSTER_UNREACHABLE", "PVE_UPSTREAM_ERROR", "PVE_TIMEOUT"}
@@ -112,6 +117,8 @@ class PowerOperationRunner:
             OperationStatus.SUCCEEDED.value,
             OperationStatus.FAILED.value,
             OperationStatus.TIMEOUT.value,
+            OperationStatus.CANCELLED.value,
+            OperationStatus.NEEDS_ATTENTION.value,
         }:
             return
         if operation.action in {item.value for item in AdminVmAction}:
@@ -143,8 +150,11 @@ class PowerOperationRunner:
                     Organization.id == OrganizationMember.organization_id,
                 )
                 .where(
-                    OrganizationMember.user_id == actor.id,
-                    OrganizationMember.organization_id == operation.organization_id,
+                    *active_membership_conditions(
+                        user_id=actor.id,
+                        organization_id=operation.organization_id,
+                        roles=WORKLOAD_OPERATE_ROLES,
+                    ),
                     Organization.is_active.is_(True),
                 )
             )
@@ -220,7 +230,7 @@ class PowerOperationRunner:
                     await self._finish(
                         operation,
                         actor,
-                        status=OperationStatus.FAILED,
+                        status=OperationStatus.NEEDS_ATTENTION,
                         error_code="OPERATION_STATE_UNKNOWN",
                         retryable=False,
                     )
@@ -569,10 +579,13 @@ class PowerOperationRunner:
         pve_task: PveTask | None = None,
     ) -> None:
         is_timeout = error.code == "PVE_TIMEOUT"
+        status = OperationStatus.TIMEOUT if is_timeout else OperationStatus.FAILED
+        if submission and is_timeout:
+            status = OperationStatus.NEEDS_ATTENTION
         await self._finish(
             operation,
             actor,
-            status=OperationStatus.TIMEOUT if is_timeout else OperationStatus.FAILED,
+            status=status,
             error_code=error.code,
             retryable=error.code in RETRYABLE_ERROR_CODES and not (submission and is_timeout),
             pve_task=pve_task,
@@ -618,6 +631,21 @@ class PowerOperationRunner:
                 "error_code": error_code or "",
             },
         )
+        if (
+            actor is not None
+            and actor.role == UserRole.CUSTOMER.value
+            and operation.organization_id is not None
+        ):
+            outcome = "완료" if status is OperationStatus.SUCCEEDED else "실패"
+            await queue_customer_notification(
+                self._session,
+                organization_id=operation.organization_id,
+                recipient_user_id=actor.id,
+                event_type="OPERATION_COMPLETED",
+                event_key=f"power-operation:{operation.id}:{status.value}",
+                subject=f"가상 머신 작업 {outcome}",
+                message=f"요청한 전원 작업이 {status.value} 상태로 종료되었습니다.",
+            )
         await self._session.commit()
 
     @staticmethod

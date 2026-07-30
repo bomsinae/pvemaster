@@ -82,9 +82,21 @@ class OperationalAlert(BaseModel):
     severity: str
     resource_type: str
     resource_id: str | None = None
+    organization_id: UUID | None = None
+    workload_id: UUID | None = None
     message: str
     value: int | None = None
     threshold: int | None = None
+
+
+class SchedulerJobStatus(BaseModel):
+    job_name: str
+    status: str
+    last_started_at: datetime
+    last_finished_at: datetime | None
+    last_success_at: datetime | None
+    processed_count: int = Field(ge=0)
+    error_code: str | None
 
 
 class OperationsStatusResponse(BaseModel):
@@ -94,4 +106,7 @@ class OperationsStatusResponse(BaseModel):
     workloads: WorkloadInventoryStatus
     directory: DirectoryInventoryStatus
     clusters: list[ClusterConnectionStatus]
+    scheduler: list[SchedulerJobStatus] = Field(default_factory=list)
+    open_reconciliation_findings: int = Field(default=0, ge=0)
+    stale_inventory_clusters: int = Field(default=0, ge=0)
     alerts: list[OperationalAlert] = Field(default_factory=list)

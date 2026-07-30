@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { fetchWithAccessToken, resetAccessTokenState } from "../lib/authenticated-fetch.ts";
+import { registerStepUpHandler } from "../lib/step-up.ts";
 
 const expired = () => Response.json(
   { error: { code: "INVALID_ACCESS_TOKEN", message: "expired" } },
@@ -71,4 +72,43 @@ test("a failed refresh preserves the original API error response", async () => {
   assert.equal(response.status, 401);
   assert.equal(apiRequests, 1);
   assert.equal((await response.json()).error.code, "INVALID_ACCESS_TOKEN");
+});
+
+test("a protected action is retried once with an action-bound step-up token", async () => {
+  resetAccessTokenState();
+  const requestedActions: string[] = [];
+  const unregister = registerStepUpHandler(async (action) => {
+    requestedActions.push(action);
+    return "step-up-proof";
+  });
+  const headers: string[] = [];
+  const fetcher: typeof fetch = async (_input, init) => {
+    const proof = new Headers(init?.headers).get("X-Step-Up-Token") ?? "";
+    headers.push(proof);
+    return proof === "step-up-proof"
+      ? Response.json({ ok: true })
+      : Response.json(
+          {
+            error: {
+              code: "STEP_UP_REQUIRED",
+              details: { action: "BACKUP_RESTORE" },
+            },
+          },
+          { status: 403 },
+        );
+  };
+
+  try {
+    const response = await fetchWithAccessToken(
+      "http://api.test/protected",
+      "access",
+      { method: "POST" },
+      fetcher,
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(requestedActions, ["BACKUP_RESTORE"]);
+    assert.deepEqual(headers, ["", "step-up-proof"]);
+  } finally {
+    unregister();
+  }
 });

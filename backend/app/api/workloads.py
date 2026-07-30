@@ -27,6 +27,7 @@ def _service(
         session=session,
         principal=principal,
         request_id=request.state.request_id,
+        inventory_stale_after_seconds=request.app.state.settings.inventory_stale_after_seconds,
     )
 
 
@@ -37,11 +38,13 @@ async def list_workloads(
     principal: PrincipalDependency,
     organization_id: UUID | None = None,
     cluster_id: UUID | None = None,
+    is_present: bool = True,
 ) -> WorkloadListResponse:
     return WorkloadListResponse(
         items=await _service(request, session, principal).list_workloads(
             organization_id=organization_id,
             cluster_id=cluster_id,
+            is_present=is_present,
         )
     )
 

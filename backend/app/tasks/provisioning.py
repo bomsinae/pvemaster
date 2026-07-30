@@ -23,8 +23,14 @@ def execute_provisioning_request(request_id: str) -> None:
     from asyncio import run
 
     from app.services.provisioning_runner import run_provisioning_request
+    from app.tasks.inventory import request_provisioning_target_sync
 
-    run(run_provisioning_request(UUID(request_id)))
+    async def execute() -> None:
+        parsed_id = UUID(request_id)
+        await run_provisioning_request(parsed_id)
+        await request_provisioning_target_sync(parsed_id)
+
+    run(execute())
 
 
 async def recover_provisioning_requests() -> int:

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.operation import OperationStatus
 
@@ -77,6 +77,9 @@ class BackupRunResponse(BaseModel):
     source_node: str
     organization_id: UUID | None
     organization_name: str | None
+    policy_assignment_id: UUID | None
+    scheduled_for: datetime | None
+    trigger_type: str
     mode: str
     compression: str
     status: OperationStatus
@@ -130,3 +133,158 @@ class RestoreRunResponse(BaseModel):
     requested_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+
+
+class BackupPolicyAssignmentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    organization_id: UUID | None = None
+    workload_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "BackupPolicyAssignmentRequest":
+        if (self.organization_id is None) == (self.workload_id is None):
+            raise ValueError("Exactly one policy assignment scope is required.")
+        return self
+
+
+class BackupPolicyCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=160)
+    backup_target_id: UUID
+    schedule: str = Field(min_length=5, max_length=120)
+    timezone: str = Field(min_length=1, max_length=64)
+    mode: Literal["snapshot"] = "snapshot"
+    retention_reference: str | None = Field(default=None, max_length=255)
+    verification_interval_days: int = Field(default=90, ge=1, le=365)
+    is_enabled: bool = True
+    assignments: list[BackupPolicyAssignmentRequest] = Field(min_length=1, max_length=500)
+
+
+class BackupPolicyUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=160)
+    backup_target_id: UUID
+    schedule: str = Field(min_length=5, max_length=120)
+    timezone: str = Field(min_length=1, max_length=64)
+    mode: Literal["snapshot"] = "snapshot"
+    retention_reference: str | None = Field(default=None, max_length=255)
+    verification_interval_days: int = Field(default=90, ge=1, le=365)
+    is_enabled: bool
+    assignments: list[BackupPolicyAssignmentRequest] = Field(min_length=1, max_length=500)
+    version: int = Field(ge=1)
+
+
+class BackupPolicyAssignmentResponse(BaseModel):
+    id: UUID
+    organization_id: UUID | None
+    organization_name: str | None
+    workload_id: UUID | None
+    workload_name: str | None
+
+
+class BackupPolicyResponse(BaseModel):
+    id: UUID
+    name: str
+    backup_target_id: UUID
+    backup_target_name: str
+    schedule: str
+    timezone: str
+    mode: str
+    retention_reference: str | None
+    verification_interval_days: int
+    is_enabled: bool
+    next_run_at: datetime
+    last_dispatched_at: datetime | None
+    skip_next_at: datetime | None
+    recent_success_at: datetime | None
+    consecutive_failures: int
+    assignments: list[BackupPolicyAssignmentResponse]
+    created_at: datetime
+    updated_at: datetime
+    version: int
+
+
+class BackupPolicyListResponse(BaseModel):
+    items: list[BackupPolicyResponse]
+
+
+class BackupPolicyPreviewItem(BaseModel):
+    assignment_id: UUID
+    organization_id: UUID | None
+    workload_id: UUID
+    workload_name: str | None
+    kind: str
+    cluster_id: UUID
+    eligible: bool
+    reason: str | None
+    recent_success_at: datetime | None
+
+
+class BackupPolicyPreviewResponse(BaseModel):
+    policy_id: UUID
+    next_run_at: datetime
+    items: list[BackupPolicyPreviewItem]
+
+
+class BackupPolicySkipRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = Field(ge=1)
+
+
+class BackupMetadataReconcileResponse(BaseModel):
+    processed_count: int
+
+
+class BackupVerificationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verification_type: Literal["METADATA", "RESTORE_DRILL"]
+    target_node: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._-]+$",
+    )
+    target_vmid: int | None = Field(default=None, ge=100, le=999_999_999)
+    target_name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=63,
+        pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$",
+    )
+
+    @model_validator(mode="after")
+    def validate_restore_target(self) -> "BackupVerificationRequest":
+        target_values = (self.target_node, self.target_vmid, self.target_name)
+        if self.verification_type == "RESTORE_DRILL" and any(
+            value is None for value in target_values
+        ):
+            raise ValueError("A restore drill target is required.")
+        if self.verification_type == "METADATA" and any(
+            value is not None for value in target_values
+        ):
+            raise ValueError("Metadata verification does not accept a restore target.")
+        return self
+
+
+class BackupVerificationResponse(BaseModel):
+    id: UUID
+    backup_run_id: UUID
+    restore_run_id: UUID | None
+    verification_type: str
+    status: str
+    snapshot_volume_id: str
+    due_at: datetime | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    error_code: str | None
+    result_summary: str | None
+    created_at: datetime
+
+
+class BackupVerificationListResponse(BaseModel):
+    items: list[BackupVerificationResponse]

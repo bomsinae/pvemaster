@@ -33,6 +33,13 @@ from app.schemas.backup import (
 from app.security.access import Principal, require_service_role
 from app.security.credentials import CredentialCipher, EncryptedCredential
 from app.services.audit import add_audit_event
+from app.services.outbox import (
+    BACKUP_EVENT,
+    RESTORE_EVENT,
+    add_operation_event,
+    record_publish_failure,
+    record_publish_success,
+)
 
 BackupPublisher = Callable[[UUID, str], None]
 RestorePublisher = Callable[[UUID, str], None]
@@ -311,6 +318,7 @@ class BackupService:
         except IntegrityError as exc:
             await self._session.rollback()
             raise AppError(409, "OPERATION_CONFLICT", "A conflicting operation exists.") from exc
+        outbox = add_operation_event(self._session, operation, BACKUP_EVENT)
         self._session.add(run)
         add_audit_event(
             self._session,
@@ -342,10 +350,13 @@ class BackupService:
         try:
             self._publisher(operation.id, operation.celery_task_id)
         except Exception:
+            await record_publish_failure(self._session, outbox, self._settings)
             logger.exception(
                 "Backup operation enqueue failed; worker recovery will retry",
                 extra={"operation_id": str(operation.id)},
             )
+        else:
+            await record_publish_success(self._session, outbox)
         return await self._run_response(run.id), True
 
     async def list_runs(
@@ -502,6 +513,7 @@ class BackupService:
                 "RESTORE_SOURCE_CONFLICT",
                 "Another operation is running for the source workload.",
             ) from exc
+        outbox = add_operation_event(self._session, operation, RESTORE_EVENT)
         self._session.add(restore)
         add_audit_event(
             self._session,
@@ -529,10 +541,13 @@ class BackupService:
         try:
             self._restore_publisher(operation.id, operation.celery_task_id)
         except Exception:
+            await record_publish_failure(self._session, outbox, self._settings)
             logger.exception(
                 "Restore operation enqueue failed; worker recovery will retry",
                 extra={"operation_id": str(operation.id)},
             )
+        else:
+            await record_publish_success(self._session, outbox)
         return await self._restore_response(restore.id), True
 
     async def get_restore(self, restore_id: UUID) -> RestoreRunResponse:
@@ -573,9 +588,12 @@ class BackupService:
             source_node=workload.node,
             organization_id=run.organization_id,
             organization_name=organization.name if organization is not None else None,
+            policy_assignment_id=run.policy_assignment_id,
+            scheduled_for=run.scheduled_for,
+            trigger_type=run.trigger_type,
             mode=run.mode,
             compression=run.compression,
-            status=OperationStatus(operation.status),
+            status=OperationStatus(run.status),
             snapshot_volume_id=run.snapshot_volume_id,
             snapshot_time=run.snapshot_time,
             size_bytes=run.size_bytes,
@@ -622,7 +640,7 @@ class BackupService:
             target_node=restore.target_node,
             target_vmid=restore.target_vmid,
             target_name=restore.target_name,
-            status=OperationStatus(operation.status),
+            status=OperationStatus(restore.status),
             error_code=operation.error_code,
             error_summary=operation.error_summary,
             retryable=operation.retryable,

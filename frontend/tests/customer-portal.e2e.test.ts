@@ -3,11 +3,22 @@ import test from "node:test";
 
 import {
   changePassword,
+  createCustomerServiceRequest,
+  createCustomerSshKey,
   getCustomerJob,
+  getCustomerNotificationPreferences,
+  getCustomerOrganizationQuota,
   getCustomerVm,
+  getCustomerVmMetrics,
+  listCustomerJobs,
+  listCustomerOrganizationMembers,
+  listCustomerOrganizations,
+  listCustomerServiceRequests,
   listCustomerVms,
   login,
   requestPowerAction,
+  updateCustomerNotificationPreference,
+  updateCustomerOrganizationMember,
 } from "../lib/customer-api.ts";
 import { filterCustomerVms, upsertCustomerJob } from "../lib/customer-portal-state.ts";
 import {
@@ -45,8 +56,41 @@ test("mock login to customer power operation flow", async () => {
       return response({ access_token: "mock-access-token", refresh_token: "mock-refresh-token" });
     }
     if (url.endsWith("/customer/vms")) return response({ items: [vm] });
+    if (url.endsWith("/customer/jobs")) return response({ items: [] });
+    if (url.endsWith(`/customer/vms/${vm.id}/metrics?range=day`)) {
+      return response({
+        vm_id: vm.id,
+        range: "day",
+        resolution_seconds: 60,
+        assignment_started_at: "2026-07-14T11:00:00Z",
+        observed_at: "2026-07-14T12:00:00Z",
+        partial: true,
+        items: [{
+          time: "2026-07-14T12:00:00Z",
+          sample_count: 1,
+          cpu_avg: 0.2,
+          cpu_max: 0.3,
+          memory_used_avg: null,
+          memory_used_max: null,
+          disk_read_avg: null,
+          disk_read_max: null,
+          disk_write_avg: null,
+          disk_write_max: null,
+          network_receive_avg: null,
+          network_receive_max: null,
+          network_transmit_avg: null,
+          network_transmit_max: null,
+        }],
+      });
+    }
     if (url.endsWith(`/customer/vms/${vm.id}`)) {
-      return response({ ...vm, recent_jobs: [] });
+      return response({
+        ...vm,
+        recent_jobs: [],
+        recent_state_changes: [],
+        recent_backup: null,
+        upcoming_maintenance: [],
+      });
     }
     if (url.endsWith(`/customer/vms/${vm.id}/actions/start`)) {
       assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer mock-access-token");
@@ -90,7 +134,19 @@ test("mock login to customer power operation flow", async () => {
 
   const session = await login("http://api.test", "customer@example.test", "test-password", fetcher);
   const listing = await listCustomerVms("http://api.test", session.accessToken, fetcher);
+  const persistedJobs = await listCustomerJobs(
+    "http://api.test",
+    session.accessToken,
+    fetcher,
+  );
   const detail = await getCustomerVm("http://api.test", session.accessToken, listing[0].id, fetcher);
+  const metrics = await getCustomerVmMetrics(
+    "http://api.test",
+    session.accessToken,
+    listing[0].id,
+    "day",
+    fetcher,
+  );
   const accepted = await requestPowerAction(
     "http://api.test",
     session.accessToken,
@@ -104,15 +160,19 @@ test("mock login to customer power operation flow", async () => {
 
   assert.equal(session.refreshToken, "mock-refresh-token");
   assert.deepEqual(listing, [vm]);
+  assert.deepEqual(persistedJobs, []);
   assert.equal(detail.id, vm.id);
   assert.equal(detail.cpu_cores, 4);
   assert.equal(detail.memory_bytes, 8_589_934_592);
   assert.equal(detail.disk_bytes, 107_374_182_400);
   assert.deepEqual(detail.assigned_ip_addresses, ["192.0.2.24"]);
+  assert.equal(metrics.partial, true);
+  assert.equal(metrics.items[0].cpu_avg, 0.2);
+  assert.equal(metrics.items[0].memory_used_avg, null);
   assert.equal(running.status, "RUNNING");
   assert.equal(finished.status, "SUCCEEDED");
   assert.equal(finished.result.final_power_state, "RUNNING");
-  assert.equal(requests.length, 6);
+  assert.equal(requests.length, 8);
 });
 
 test("customer VM inventory searches names and IP addresses and filters power state", () => {
@@ -240,6 +300,187 @@ test("customer password change sends the current and new password without return
   assert.deepEqual(JSON.parse(String(request?.init?.body)), {
     current_password: "current-password",
     new_password: "new-password-at-least-12",
+    revoke_all_sessions: true,
+  });
+});
+
+test("customer notification preference uses optimistic versioning", async () => {
+  const requests: Array<{ url: string; body?: unknown }> = [];
+  const preference = {
+    organization_id: "d8c83325-968c-4cd4-a20f-17194d812d80",
+    organization_name: "Acme Korea",
+    event_type: "VM_DOWN" as const,
+    email_enabled: true,
+    required_by_organization: false,
+    version: 0,
+  };
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    if (init?.method === "PUT") {
+      return response({ ...preference, email_enabled: false, version: 1 });
+    }
+    return response({
+      channel: "EMAIL",
+      destination: "c*******@example.test",
+      items: [preference],
+    });
+  };
+
+  const listed = await getCustomerNotificationPreferences(
+    "http://api.test",
+    "customer-access",
+    fetcher,
+  );
+  const updated = await updateCustomerNotificationPreference(
+    "http://api.test",
+    "customer-access",
+    {
+      organization_id: preference.organization_id,
+      event_type: preference.event_type,
+      email_enabled: false,
+      version: preference.version,
+    },
+    fetcher,
+  );
+
+  assert.equal(listed.destination, "c*******@example.test");
+  assert.equal(updated.version, 1);
+  assert.deepEqual(requests[1].body, {
+    organization_id: preference.organization_id,
+    event_type: "VM_DOWN",
+    email_enabled: false,
+    version: 0,
+  });
+});
+
+test("customer self-service keeps public keys and approval requests VM-scoped", async () => {
+  const requests: Array<{ url: string; method?: string; body?: unknown; key?: string | null }> = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      method: init?.method,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      key: new Headers(init?.headers).get("Idempotency-Key"),
+    });
+    if (String(input).endsWith("/ssh-keys")) {
+      return response({
+        id: "key-1",
+        label: "Laptop",
+        fingerprint: "SHA256:test",
+        public_key: "ssh-ed25519 AAAA",
+        created_at: "2026-07-26T00:00:00Z",
+      }, 201);
+    }
+    if (String(input).endsWith("/service-requests") && init?.method === "POST") {
+      return response({
+        id: "request-1",
+        request_type: "RESIZE",
+        vm_id: vm.id,
+        vm_name: vm.name,
+        organization_name: vm.organization_name,
+        input: { cpu_cores: 6 },
+        impact: { messages: ["approval"] },
+        status: "PENDING_APPROVAL",
+        operation_id: null,
+        error_code: null,
+        result_summary: null,
+        requested_at: "2026-07-26T00:00:00Z",
+        started_at: null,
+        finished_at: null,
+        version: 1,
+        approvals: [],
+      }, 202);
+    }
+    return response({ items: [] });
+  };
+
+  await createCustomerSshKey(
+    "http://api.test",
+    "customer-access",
+    vm.id,
+    "Laptop",
+    "ssh-ed25519 AAAA",
+    fetcher,
+  );
+  await createCustomerServiceRequest(
+    "http://api.test",
+    "customer-access",
+    vm.id,
+    "RESIZE",
+    { cpu_cores: 6 },
+    "self-service-idempotency",
+    fetcher,
+  );
+  assert.deepEqual(await listCustomerServiceRequests(
+    "http://api.test",
+    "customer-access",
+    fetcher,
+  ), []);
+  assert.equal(requests[0].url.endsWith(`/customer/vms/${vm.id}/ssh-keys`), true);
+  assert.deepEqual(requests[1].body, {
+    request_type: "RESIZE",
+    input: { cpu_cores: 6 },
+  });
+  assert.equal(requests[1].key, "self-service-idempotency");
+});
+
+test("organization governance client preserves scope, role version, and reservations", async () => {
+  const requests: Array<{ url: string; method?: string; body?: unknown }> = [];
+  const membership = {
+    id: "member-1",
+    organization_id: "organization-1",
+    organization_name: "Acme",
+    user_id: "user-1",
+    email: "owner@example.test",
+    display_name: "Owner",
+    organization_role: "ORG_OWNER" as const,
+    status: "ACTIVE" as const,
+    expires_at: null,
+    created_at: "2026-07-26T00:00:00Z",
+    version: 3,
+    permissions: ["MEMBER_READ", "MEMBER_ROLE_WRITE", "QUOTA_READ"],
+  };
+  const fetcher: typeof fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      method: init?.method,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    if (String(input).endsWith("/quota")) {
+      return response({
+        organization_id: membership.organization_id,
+        limits: { vcpu: 10, memory_bytes: 10, disk_bytes: 10, vms: 10, ips: 10, backup_bytes: 10 },
+        usage: { vcpu: 4, memory_bytes: 4, disk_bytes: 4, vms: 1, ips: 1, backup_bytes: 4 },
+        reserved: { vcpu: 2, memory_bytes: 2, disk_bytes: 0, vms: 1, ips: 1, backup_bytes: 0 },
+        remaining: { vcpu: 4, memory_bytes: 4, disk_bytes: 6, vms: 8, ips: 8, backup_bytes: 6 },
+        version: 1,
+        updated_at: null,
+        captured_at: "2026-07-26T00:00:00Z",
+      });
+    }
+    if (init?.method === "PATCH") return response({ ...membership, organization_role: "ORG_ADMIN", version: 4 });
+    return response([membership]);
+  };
+
+  assert.equal((await listCustomerOrganizations("http://api.test", "token", fetcher))[0].organization_role, "ORG_OWNER");
+  assert.equal((await listCustomerOrganizationMembers(
+    "http://api.test", "token", membership.organization_id, fetcher,
+  ))[0].id, membership.id);
+  const quota = await getCustomerOrganizationQuota(
+    "http://api.test", "token", membership.organization_id, fetcher,
+  );
+  await updateCustomerOrganizationMember(
+    "http://api.test", "token", membership.organization_id, membership, "ORG_ADMIN", fetcher,
+  );
+
+  assert.equal(quota.reserved.vcpu, 2);
+  assert.ok(requests.every((item) => !item.url.includes("organization-2")));
+  assert.deepEqual(requests.at(-1)?.body, {
+    organization_role: "ORG_ADMIN",
+    version: 3,
   });
 });
 

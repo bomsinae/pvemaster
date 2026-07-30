@@ -21,6 +21,7 @@ from app.models.operation import Operation, OperationStatus, PveTask, Workload
 from app.proxmox.client import ProxmoxClient
 from app.security.credentials import CredentialCipher, EncryptedCredential
 from app.services.audit import add_audit_event
+from app.services.customer_notifications import queue_customer_notification
 
 Sleep = Callable[[float], Awaitable[None]]
 POLL_RETRYABLE_ERRORS = {"CLUSTER_UNREACHABLE", "PVE_UPSTREAM_ERROR", "PVE_TIMEOUT"}
@@ -135,6 +136,8 @@ class BackupOperationRunner:
             OperationStatus.SUCCEEDED.value,
             OperationStatus.FAILED.value,
             OperationStatus.TIMEOUT.value,
+            OperationStatus.CANCELLED.value,
+            OperationStatus.NEEDS_ATTENTION.value,
         }:
             return
         run = await self._session.scalar(
@@ -198,9 +201,10 @@ class BackupOperationRunner:
                 operation,
                 run,
                 actor,
-                status=OperationStatus.FAILED,
+                status=OperationStatus.NEEDS_ATTENTION,
                 error_code="BACKUP_SUBMISSION_STATE_UNKNOWN",
                 retryable=False,
+                run_status=OperationStatus.FAILED,
             )
             return
 
@@ -230,12 +234,15 @@ class BackupOperationRunner:
                             run,
                             actor,
                             status=(
-                                OperationStatus.TIMEOUT
+                                OperationStatus.NEEDS_ATTENTION
                                 if exc.code == "PVE_TIMEOUT"
                                 else OperationStatus.FAILED
                             ),
                             error_code=exc.code,
                             retryable=False,
+                            run_status=(
+                                OperationStatus.TIMEOUT if exc.code == "PVE_TIMEOUT" else None
+                            ),
                         )
                         return
                     pve_task = PveTask(
@@ -388,6 +395,7 @@ class BackupOperationRunner:
         retryable: bool,
         error_code: str | None = None,
         pve_task: PveTask | None = None,
+        run_status: OperationStatus | None = None,
     ) -> None:
         now = datetime.now(UTC)
         operation.status = status.value
@@ -400,7 +408,7 @@ class BackupOperationRunner:
         operation.retryable = retryable
         operation.version += 1
         if run is not None:
-            run.status = status.value
+            run.status = (run_status or status).value
             run.finished_at = now
         add_audit_event(
             self._session,
@@ -423,6 +431,23 @@ class BackupOperationRunner:
             },
             error_code=error_code,
         )
+        if (
+            status
+            in {
+                OperationStatus.FAILED,
+                OperationStatus.TIMEOUT,
+                OperationStatus.NEEDS_ATTENTION,
+            }
+            and operation.organization_id is not None
+        ):
+            await queue_customer_notification(
+                self._session,
+                organization_id=operation.organization_id,
+                event_type="BACKUP_FAILED",
+                event_key=f"backup-operation:{operation.id}:{status.value}",
+                subject="가상 머신 백업 확인 필요",
+                message="가상 머신 백업을 완료하지 못했습니다. 운영팀에서 상태를 확인합니다.",
+            )
         await self._session.commit()
 
     @staticmethod

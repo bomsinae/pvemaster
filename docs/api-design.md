@@ -191,7 +191,7 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 | GET | `/admin/clusters/{cluster_id}/nodes/{node}/metrics?range=hour\|six_hours\|day\|week` | 동기/짧은 timeout | Proxmox RRD 기반 CPU, load, 메모리, 네트워크, CPU·IO·메모리 PSI 시계열. 지원하지 않는 PSI 값은 `null` |
 | GET | `/admin/clusters/{cluster_id}/guests` | 동기 | 해당 PVE 클러스터의 실시간 QEMU/LXC 목록. 실행 중 게스트는 `cpu`, `maxcpu`, `mem`, `maxmem`, `disk`, `maxdisk`, `uptime` 현재 사용량과 한도를 포함 |
 | GET | `/admin/clusters/{cluster_id}/storages` | 동기 | 해당 PVE 클러스터의 실시간 스토리지 목록 |
-| POST | `/admin/clusters/{cluster_id}/sync` | 비동기 | 전체 인벤토리 동기화 operation 생성 |
+| POST | `/admin/clusters/{cluster_id}/sync` | 비동기 | 전체 또는 `workload_id` 대상 인벤토리 동기화 요청. 응답의 `operation_id`는 `sync_runs.id` |
 | POST | `/admin/clusters/{cluster_id}/rotate-credential` | 동기 | 새 token 시험 후 활성 전환 |
 
 클러스터 생성 body:
@@ -224,6 +224,14 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 | GET | `/admin/workloads/{workload_id}` | ADMIN | 없음 |
 | GET | `/customer/vms` | CUSTOMER | 현재 사용자의 활성 조직에 할당된 QEMU VM으로 서버 강제 제한. 각 항목에 안전한 `organization_name`을 포함하고 내부 조직 ID는 노출하지 않음 |
 | GET | `/customer/vms/{vm_id}` | CUSTOMER | 현재 사용자의 활성 조직 멤버십 필요. 안전한 `organization_name` 포함 |
+| GET | `/admin/inventory/sync-runs` | ADMIN | cluster별 sync 실행, scope, generation, 부분 실패와 변경 건수 |
+| GET | `/admin/inventory/sync-runs/{run_id}` | ADMIN | sync run 상세 |
+| GET | `/admin/inventory/freshness` | ADMIN | 마지막 전체 성공, stale 기준과 최근 상태 |
+| GET | `/admin/inventory/reconciliation/findings` | ADMIN | status, severity, cluster별 drift finding |
+| GET | `/admin/inventory/reconciliation/findings/{finding_id}` | ADMIN | finding 상세 |
+| POST | `/admin/inventory/reconciliation/findings/{finding_id}/acknowledge` | ADMIN | 확인·담당자 지정 |
+| POST | `/admin/inventory/reconciliation/findings/{finding_id}/resolve` | ADMIN | 해결 근거 기록 |
+| POST | `/admin/inventory/reconciliation/run` | ADMIN | cluster 전체 재조정 요청 |
 
 정렬 allowlist는 `name`, `vmid`, `observed_at`, `power_state`다. admin 검색에서 VMID는 반드시 `cluster_id`와 함께 식별하거나 결과를 목록으로 취급한다.
 
@@ -238,6 +246,8 @@ secret, ciphertext, nonce, key version은 반환하지 않는다. `api_base_url`
 ```
 
 클러스터 단절 시 마지막 관측 데이터를 `200`으로 줄 수 있으나 `is_stale=true`와 마지막 성공 시각을 명확히 제공한다. 상태 변경 요청은 별도 PVE preflight를 수행한다.
+고객 workload가 stale이면 고객 전원 작업은 `503 INVENTORY_STALE`로 제한한다. 고객
+응답에는 cluster, node, sync run ID 또는 내부 오류 원문을 포함하지 않는다.
 
 ## 7. 할당 API
 
@@ -491,6 +501,12 @@ workload와 같은 cluster여야 하며 초기 지원 option은 `mode=snapshot`,
 |---|---|---|---|
 | GET | `/admin/operations` | ADMIN | type/status/cluster/workload/requester/기간 필터 |
 | GET | `/admin/operations/{operation_id}` | ADMIN | 단계와 PVE task 포함 상세 |
+| POST | `/admin/operations/{operation_id}/cancel` | ADMIN | version 일치와 queued 상태에서만 취소 |
+| POST | `/admin/operations/{operation_id}/retry` | ADMIN | 안전 판정 후 원본과 연결된 새 작업 생성 |
+| POST | `/admin/operations/{operation_id}/assign` | ADMIN | 활성 관리자 담당자 지정 |
+| POST | `/admin/operations/{operation_id}/acknowledge` | ADMIN | 운영자 확인 시각 기록 |
+| POST | `/admin/operations/{operation_id}/resolve-manually` | ADMIN | 검증한 해결 근거 기록 |
+| GET | `/customer/jobs` | 요청 CUSTOMER + 대상 현재 소유 | 새로고침 복구용 최근 작업 목록 |
 | GET | `/customer/jobs/{job_id}` | 요청 CUSTOMER + 대상 현재 소유 | 자신의 허용 작업 상태 |
 
 operation은 immutable request identity를 가지며 terminal status를 되돌리지 않는다. `Retry-After`는 poll 권고 간격이다. 기본 polling은 실행 중 2초에서 시작해 backoff하고 terminal에서 중단한다.
@@ -501,7 +517,11 @@ operation은 immutable request identity를 가지며 terminal status를 되돌�
 - 대상 워크로드 조직의 현재 멤버이며 사용자와 조직이 모두 활성 상태임.
 - operation type이 고객 허용 목록에 있음.
 
-조건 실패는 `404`다. VM 상세의 최근 작업은 현재 사용자가 해당 VM에 요청한 최근 10개만 포함하며, 조직에서 제거되는 즉시 VM과 작업 모두 조회할 수 없다. 고객 응답에는 PVE UPID, cluster/node, API endpoint와 token 정보를 포함하지 않는다.
+조건 실패는 `404`다. operation에 저장된 요청 당시 조직과 workload의 현재 조직도
+일치해야 한다. VM 상세의 최근 작업은 현재 사용자가 해당 VM에 요청한 최근 10개만
+포함하며, 조직에서 제거되거나 workload가 재할당되는 즉시 VM과 작업 모두 조회할 수
+없다. 고객 응답에는 PVE UPID, cluster/node, API endpoint와 token 정보를 포함하지
+않는다.
 
 ## 13. 감사 API
 
@@ -523,8 +543,8 @@ operation은 immutable request identity를 가지며 terminal status를 되돌�
 |---|---|---|---|
 | GET | `/health/live` | 내부/프록시 | 프로세스 event loop 생존 여부만 |
 | GET | `/health/ready` | 내부/오케스트레이터 | DB, 필수 migration, queue publish 가능 여부 |
-| GET | `/admin/operations/status` | SUPER_ADMIN/OPERATOR | worker, queue, VM/CT 할당, 활성·전체 사용자와 조직 수, cluster 연결과 활성 경보 |
-| GET | `/metrics` | 내부/Prometheus | worker, queue, cluster, operation, IP pool 지표 |
+| GET | `/admin/operations/status` | SUPER_ADMIN/OPERATOR | worker, 목적별 queue, scheduler 최근 실행·성공·실패, VM/CT 할당, 활성·전체 사용자와 조직 수, cluster 연결과 활성 경보 |
+| GET | `/metrics` | 내부/Prometheus | worker, queue, scheduler 성공 시각·실패, cluster, operation, IP pool 지표 |
 
 PVE 개별 클러스터 장애는 전체 API readiness를 실패시키지 않고 관리자 상태/지표로 표시한다. 응답에 DSN, host 상세, version fingerprint 같은 공격 유용 정보를 노출하지 않는다.
 
@@ -558,3 +578,169 @@ PVE 개별 클러스터 장애는 전체 API readiness를 실패시키지 않고
 - 동일 VMID가 다른 cluster에 있을 때 UUID 기반 route가 정확한 대상을 선택한다.
 - stale 인벤토리와 PVE 연결 실패가 성공 상태처럼 표현되지 않는다.
 - 모든 상태 변경의 접수/거부/최종 결과가 감사 로그와 request/operation ID로 연결된다.
+
+## 18. MFA, Session과 step-up API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| POST | `/auth/mfa/challenges/verify` | 로그인 challenge | TOTP/WebAuthn/복구 코드 검증 후 token 발급 |
+| GET | `/auth/mfa/methods` | 인증 사용자 | method, 복구 코드 잔여량, 정책 준수 조회 |
+| POST | `/auth/mfa/totp/start`, `/auth/mfa/totp/verify` | 인증 사용자 | TOTP 등록 시작·검증 |
+| POST | `/auth/mfa/webauthn/start`, `/auth/mfa/webauthn/finish` | 인증 사용자 | WebAuthn 등록 |
+| POST | `/auth/mfa/recovery-codes` | 인증 사용자 + 재인증 | 복구 코드 재발급 |
+| POST | `/auth/step-up/start`, `/auth/step-up/verify` | 인증 사용자 | action-bound step-up token 발급 |
+| GET/DELETE | `/auth/sessions`, `/auth/sessions/{family_id}` | 본인 | 활성 session 조회·폐기 |
+| DELETE | `/auth/sessions/others` | 본인 | 현재를 제외한 session 폐기 |
+| GET | `/auth/login-events` | 본인 | 최근 로그인 성공·실패 |
+| GET/PUT | `/auth/mfa/policy` | SUPER_ADMIN | 관리자 MFA 정책 조회·변경 |
+
+보호 API는 `403 STEP_UP_REQUIRED`의 `details.action`을 반환한다. 클라이언트는
+해당 action으로 발급한 token을 `X-Step-Up-Token`에 넣어 원 요청을 한 번만
+  재시도한다. 다른 action, 사용자, epoch 또는 만료된 token은 동일하게 거부한다.
+
+## 19. Alert, maintenance와 notification API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/admin/alerts`, `/admin/alerts/{id}` | ADMIN | 지속 경보와 event 이력 |
+| POST | `/admin/alerts/{id}/{action}` | ADMIN | acknowledge/assign/silence/resolve |
+| GET | `/customer/alerts`, `/customer/alerts/{id}` | CUSTOMER + 현재 조직 | 허용된 조직/VM 경보 |
+| GET/POST/PUT/DELETE | `/admin/maintenance-windows` | ADMIN | 전달 suppress 기간 |
+| GET/POST/PUT/DELETE | `/admin/notification-channels` | ADMIN | 암호화 channel 관리 |
+| POST | `/admin/notification-channels/{id}/test` | ADMIN | 실제 test delivery |
+| GET/POST/PUT/DELETE | `/admin/notification-rules` | ADMIN | event/severity/quiet/escalation 규칙 |
+
+Alert action은 body의 `version`이 현재 값과 다르면 `409 ALERT_VERSION_CONFLICT`다.
+Channel 응답 schema에는 endpoint, recipient, secret이 존재하지 않는다.
+
+## 20. 자동 백업 정책과 복구 검증 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET/POST | `/admin/backup-policies` | ADMIN / SUPER_ADMIN | 정책 목록·생성 |
+| GET/PUT/DELETE | `/admin/backup-policies/{id}` | ADMIN / SUPER_ADMIN | 정책 조회·변경·삭제 |
+| GET | `/admin/backup-policies/{id}/preview` | ADMIN | 현재 인벤토리 기준 적용 대상과 제외 사유 |
+| POST | `/admin/backup-policies/{id}/run-now` | ADMIN | 정책 범위를 즉시 실행 |
+| POST | `/admin/backup-policies/{id}/skip` | SUPER_ADMIN | version을 검사해 다음 1회 실행 건너뛰기 |
+| POST | `/admin/backup-metadata/reconcile` | ADMIN | 성공 run의 누락 snapshot metadata 보정 |
+| GET | `/admin/backup-verifications` | ADMIN | metadata·restore drill 검증 이력 |
+| POST | `/admin/backups/{id}/verifications` | SUPER_ADMIN | metadata 검증 또는 격리 restore drill 요청 |
+
+정책 변경과 skip에는 action-bound step-up MFA를 적용한다. Schedule은 5-field cron과
+IANA timezone을 함께 저장하며 API 응답은 UTC `next_run_at`을 반환한다. 고객 backup
+API는 제품 정책상 계속 제공하지 않는다.
+
+## 21. 고객 VM 이력과 성능 지표 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/customer/vms/{vm_id}` | CUSTOMER + 현재 조직/할당 | 사양, uptime, 최근 본인 작업, 상태 변화, 백업 상태와 유지보수 |
+| GET | `/customer/vms/{vm_id}/metrics` | CUSTOMER + 현재 조직/할당 | `day`, `month`, `year` 범위의 안전한 집계 지표 |
+| GET | `/customer/jobs` | CUSTOMER + 현재 조직/할당 + 요청자 | 페이지네이션과 VM·상태·기간 필터 |
+| GET | `/customer/jobs/{job_id}` | CUSTOMER + 현재 조직/할당 + 요청자 | 고객 작업 상세 |
+
+작업 목록은 `limit` 1–100, `offset` 0–100000을 허용하고 최대 조회 기간은 365일이다.
+시간 파라미터는 timezone을 포함해야 한다. metric 해상도는 24시간 1분, 30일 5분,
+365일 1시간이며 응답은 최대 10000개 점으로 제한한다. 모든 조회는 현재 활성
+멤버십, 현재 workload 조직과 미회수 assignment를 같은 DB query 경계에서 다시
+검사한다. assignment 시작 전 또는 다른 조직 snapshot의 metric과 operation은
+반환하지 않는다.
+
+고객 응답에는 조직 UUID, cluster/node, VMID, PVE UPID·endpoint와 내부 오류 원문이
+없다. metric 응답은 누락 값을 `null`, 예상 구간 대비 부족 여부를 `partial`로
+표현하고 shared cache를 사용하지 않는다.
+
+## 22. 고객 계정 보안과 알림 설정 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| POST | `/auth/change-password` | 인증 사용자 + 현재 비밀번호 | 비밀번호 변경과 선택적 전체 session 종료 |
+| GET | `/customer/notification-preferences` | CUSTOMER + 현재 조직 | 조직별 이메일 알림의 유효 설정과 마스킹된 수신 주소 |
+| PUT | `/customer/notification-preferences` | CUSTOMER + 현재 조직 | version 기반 고객 알림 설정 변경 |
+
+비밀번호 변경 요청의 `revoke_all_sessions` 기본값은 `true`다. `true`이면 현재
+session을 포함한 전체 refresh family와 기존 access token을 폐기한다. `false`이면
+현재 session family만 유지하고 같은 사용자의 다른 session은 폐기한다.
+
+알림 event는 `VM_DOWN`, `OPERATION_COMPLETED`, `BACKUP_FAILED`, `MAINTENANCE`다.
+설정이 없는 event는 기본 활성화되며 조직 정책의 `email_required`가 우선한다.
+고객이 강제 알림을 끄려 하면 `409 NOTIFICATION_REQUIRED_BY_ORGANIZATION`, 오래된
+version으로 저장하면 `409 NOTIFICATION_PREFERENCE_VERSION_CONFLICT`를 반환한다.
+전달 직전에도 활성 사용자, 현재 조직 멤버십과 유효 설정을 다시 검사하므로 queue
+이후 opt-out 또는 멤버십 회수는 `CANCELLED` 처리한다. 응답에는 전체 이메일 주소,
+메일 본문, 내부 event key나 전달 오류 원문을 포함하지 않는다.
+
+## 23. 제한된 고객 Self-service API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/customer/ssh-keys` | CUSTOMER | 현재 조직 범위의 본인 공개키 |
+| POST | `/customer/vms/{vm_id}/ssh-keys` | CUSTOMER + 현재 할당 | VM 조직 범위 공개키 등록 |
+| DELETE | `/customer/ssh-keys/{key_id}` | CUSTOMER + key 소유 | 사용하지 않는 공개키 revoke |
+| GET | `/customer/vms/{vm_id}/security-groups` | CUSTOMER + 현재 할당 | 적용 요청 가능한 승인 정책 |
+| POST | `/customer/vms/{vm_id}/service-requests/preview` | CUSTOMER + 현재 할당 | quota와 영향 사전 검사 |
+| POST | `/customer/vms/{vm_id}/service-requests` | CUSTOMER + 현재 할당 | 멱등 승인 요청 생성 |
+| GET | `/customer/service-requests[/{id}]` | CUSTOMER + 현재 소유/요청자 | 자기 요청 조회 |
+| POST | `/customer/service-requests/{id}/cancel` | CUSTOMER + 요청자 | 승인 전 version 기반 취소 |
+| GET | `/admin/service-requests[/{id}]` | ADMIN | 승인 queue와 안전한 입력 snapshot |
+| POST | `/admin/service-requests/{id}/approve` | SUPER_ADMIN | 소유권·quota 재검사와 승인 |
+| POST | `/admin/service-requests/{id}/reject` | ADMIN | 사유가 있는 거부 |
+| POST | `/admin/service-requests/{id}/execution` | SUPER_ADMIN | 시작·성공·실패 결과 기록 |
+| GET/POST | `/admin/security-groups` | ADMIN / SUPER_ADMIN | 구조화된 승인 정책 조회·생성 |
+
+요청 유형은 SSH key 추가·교체·삭제, hostname/설명, rDNS, security group, backup,
+별도 대상 restore, 증설과 재설치다. 고객 payload는 유형별 allowlist 필드만 받으며
+임의 Cloud-Init, firewall 문자열, private key와 disk 축소 필드는 존재하지 않는다.
+restore와 재설치는 VM 이름을 포함한 typed confirmation과 등록된 MFA의 action-bound
+step-up을 요구한다.
+
+모든 요청은 승인 전 `PENDING_APPROVAL`이고 이때만 고객 취소가 가능하다. 승인 시
+별도 `SERVICE_REQUEST` operation을 연결하고, 실행 중 소유권 또는 다른 operation
+충돌을 다시 검사한다. 실패는 삭제하지 않고 `NEEDS_ATTENTION`으로 보존한다.
+동일 고객의 idempotency key 재전송은 같은 응답을 반환하고 다른 payload 재사용은
+409다. 응답에는 cluster/node/VMID/PVE endpoint·UPID와 private material이 없다.
+
+## 24. 조직 RBAC, Quota와 승인 정책 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/customer/organizations` | CUSTOMER | 활성·미만료 조직 멤버십과 permission allowlist |
+| GET/PATCH/DELETE | `/customer/organizations/{id}/members[/{membership_id}]` | 조직 역할별 권한 | 구성원 조회·역할 변경·제거 |
+| GET/POST | `/customer/organizations/{id}/invitations` | `MEMBER_READ` / `MEMBER_INVITE` | 초대 목록·생성 |
+| DELETE | `/customer/organizations/{id}/invitations/{invitation_id}` | `MEMBER_INVITE` | 미사용 초대 폐기 |
+| POST | `/customer/organization-invitations/accept` | CUSTOMER | 본인 이메일의 1회 초대 수락 |
+| GET | `/customer/organizations/{id}/quota` | `QUOTA_READ` | 현재 사용·예약·잔여 quota |
+| GET | `/customer/organizations/{id}/approval-policies` | `POLICY_READ` | 요청 유형별 유효 승인 정책 |
+| GET | `/customer/organizations/{id}/activity` | `ACTIVITY_READ` | 조직 범위 감사 활동 |
+| GET/PUT | `/admin/organizations/{id}/quota` | ADMIN / SUPER_ADMIN | 사용·예약을 고려한 quota 조회·변경 |
+| GET/PUT | `/admin/organizations/{id}/approval-policies` | ADMIN / SUPER_ADMIN | 승인 정책 조회·변경 |
+
+조직 역할은 `ORG_OWNER`, `ORG_ADMIN`, `ORG_OPERATOR`, `ORG_VIEWER`,
+`BILLING_VIEWER`이며 응답의 `permissions`가 서버 allowlist의 최종 결과다. 역할·quota·
+정책 변경은 `version`을 비교하고 오래된 요청은 409로 거부한다. 마지막
+`ORG_OWNER`를 강등하거나 제거할 수 없다.
+
+초대 생성 응답만 `accept_token`을 한 번 반환하며 목록에는 항상 `null`이다. 서버에는
+hash만 저장하고 로그인 이메일 일치, 만료, revoke, replay를 검사한다. Provisioning과
+증설은 조직 row lock과 같은 transaction에서 quota reservation을 만들며 초과 시
+`409 ORGANIZATION_QUOTA_EXCEEDED`를 반환한다.
+
+## 25. 관리자 고급 PVE 운영 API
+
+| Method | Path | 권한 | 설명 |
+|---|---|---|---|
+| GET | `/admin/advanced/capabilities` | ADMIN | 기능별 flag, 실행/read-only mode와 action |
+| POST | `/admin/advanced/preview` | ADMIN | 대상·호환성·충돌·downtime·확인 문구 사전 검사 |
+| POST | `/admin/advanced/operations` | SUPER_ADMIN | immutable target snapshot으로 작업 접수 |
+| GET | `/admin/advanced/operations/{operation_id}` | ADMIN | requested/observed state와 결과 조회 |
+| GET | `/admin/advanced/workloads/{id}/inspection` | ADMIN | VM snapshot, HA 또는 Firewall/SDN 현재 구성 |
+
+기능은 `SNAPSHOT`, `MIGRATION`, `HA`, `NODE_MAINTENANCE`, `BULK`,
+`GUEST_CONFIG`, `FIREWALL_SDN`으로 분리하며 각각 독립 환경 flag가 기본
+`false`다. Firewall/SDN은 초기에는 `READ_ONLY`이고 변경 action은 제공하지 않는다.
+
+실행 요청은 preview 입력 전체와 정확한 typed confirmation, `Idempotency-Key`를
+요구한다. 위험 작업은 action-bound step-up token을 추가로 검사한다. 대상 이름,
+node, 종류, 전원 상태와 version은 접수 transaction에서 고정되고 모든 대상에 활성
+잠금을 둔다. 제출 timeout은 결과 불명확으로 `NEEDS_ATTENTION`에 남기며 일반 retry는
+허용하지 않고 새 preview를 요구한다.

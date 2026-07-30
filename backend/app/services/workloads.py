@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
@@ -22,10 +22,12 @@ class WorkloadService:
         session: AsyncSession,
         principal: Principal,
         request_id: str,
+        inventory_stale_after_seconds: int = 180,
     ) -> None:
         self._session = session
         self._principal = principal
         self._request_id = request_id
+        self._inventory_stale_after_seconds = inventory_stale_after_seconds
         require_service_role(principal, UserRole.SUPER_ADMIN, UserRole.OPERATOR)
 
     async def list_workloads(
@@ -33,14 +35,20 @@ class WorkloadService:
         *,
         organization_id: UUID | None,
         cluster_id: UUID | None,
+        is_present: bool = True,
     ) -> list[WorkloadResponse]:
         query = (
-            select(Workload, Cluster.name, Organization.name)
+            select(
+                Workload,
+                Cluster.name,
+                Cluster.sync_interval_seconds,
+                Organization.name,
+            )
             .join(Cluster, Cluster.id == Workload.cluster_id)
             .outerjoin(Organization, Organization.id == Workload.organization_id)
             .where(
                 Cluster.is_active.is_(True),
-                Workload.is_present.is_(True),
+                Workload.is_present.is_(is_present),
             )
             .order_by(Cluster.name.asc(), Workload.vmid.asc())
         )
@@ -49,39 +57,47 @@ class WorkloadService:
         if cluster_id is not None:
             query = query.where(Workload.cluster_id == cluster_id)
         rows = (await self._session.execute(query)).all()
-        assigned_ips = await self._assigned_ip_addresses([workload.id for workload, _, _ in rows])
+        assigned_ips = await self._assigned_ip_addresses(
+            [workload.id for workload, _, _, _ in rows]
+        )
         return [
             self._response(
                 workload,
                 cluster_name,
                 organization_name,
                 assigned_ip_addresses=assigned_ips.get(workload.id, []),
+                sync_interval_seconds=sync_interval_seconds,
             )
-            for workload, cluster_name, organization_name in rows
+            for workload, cluster_name, sync_interval_seconds, organization_name in rows
         ]
 
     async def get(self, workload_id: UUID) -> WorkloadResponse:
         row = (
             await self._session.execute(
-                select(Workload, Cluster.name, Organization.name)
+                select(
+                    Workload,
+                    Cluster.name,
+                    Cluster.sync_interval_seconds,
+                    Organization.name,
+                )
                 .join(Cluster, Cluster.id == Workload.cluster_id)
                 .outerjoin(Organization, Organization.id == Workload.organization_id)
                 .where(
                     Workload.id == workload_id,
-                    Workload.is_present.is_(True),
                     Cluster.is_active.is_(True),
                 )
             )
         ).one_or_none()
         if row is None:
             raise self._not_found()
-        workload, cluster_name, organization_name = row
+        workload, cluster_name, sync_interval_seconds, organization_name = row
         assigned_ips = await self._assigned_ip_addresses([workload.id])
         return self._response(
             workload,
             cluster_name,
             organization_name,
             assigned_ip_addresses=assigned_ips.get(workload.id, []),
+            sync_interval_seconds=sync_interval_seconds,
         )
 
     async def assign(self, workload_id: UUID, organization_id: UUID) -> WorkloadAssignmentResponse:
@@ -246,14 +262,19 @@ class WorkloadService:
                 result.setdefault(workload_id, []).append(str(address))
         return result
 
-    @staticmethod
     def _response(
+        self,
         workload: Workload,
         cluster_name: str,
         organization_name: str | None,
         *,
         assigned_ip_addresses: list[str],
+        sync_interval_seconds: int,
     ) -> WorkloadResponse:
+        is_stale = self._is_stale(
+            workload,
+            sync_interval_seconds=sync_interval_seconds,
+        )
         return WorkloadResponse(
             id=workload.id,
             cluster_id=workload.cluster_id,
@@ -268,12 +289,23 @@ class WorkloadService:
             disk_bytes=workload.disk_bytes,
             is_template=workload.is_template,
             is_present=workload.is_present,
+            sync_generation=workload.sync_generation,
+            missing_since=workload.missing_since,
             organization_id=workload.organization_id,
             organization_name=organization_name,
             assigned_ip_addresses=assigned_ip_addresses,
             observed_at=workload.observed_at,
+            is_stale=is_stale,
+            stale_reason="LAST_OBSERVATION_EXPIRED" if is_stale else None,
             version=workload.version,
         )
+
+    def _is_stale(self, workload: Workload, *, sync_interval_seconds: int) -> bool:
+        stale_after_seconds = max(
+            self._inventory_stale_after_seconds,
+            sync_interval_seconds * 3,
+        )
+        return workload.observed_at < datetime.now(UTC) - timedelta(seconds=stale_after_seconds)
 
     @staticmethod
     def _assignment_response(

@@ -165,11 +165,29 @@ URL 전체 유일 제약은 정규화된 endpoint 중복 등록을 막는다. ho
 ### `sync_runs`
 
 - `id UUID PK`, `cluster_id UUID FK`, `generation BIGINT`.
-- `status`, `started_at`, `finished_at`, `error_code`, `resource_counts JSONB`.
+- `status`: `QUEUED`, `RUNNING`, `SUCCEEDED`, `PARTIAL`, `FAILED`, `SKIPPED`.
+- `scope`: `FULL` 또는 `TARGET`; target은 `target_workload_id`를 가진다.
+- `partial_failure`, `started_at`, `finished_at`, `error_code`, `resource_counts JSONB`.
 - `triggered_by`: scheduler/admin/operation 구분, `requested_by_id NULL`.
 - `UNIQUE(cluster_id, generation)`.
+- 클러스터별 활성 전체 sync와 workload별 활성 target sync는 각각 최대 하나다.
 
 완전 성공한 run만 누락 리소스 tombstone에 사용할 수 있다.
+
+### `inventory_storages`
+
+- `id UUID PK`, `cluster_id UUID FK`, `natural_key`, `storage_id`, `node`.
+- 상태, 종류, 용량, content allowlist와 shared 여부를 저장한다.
+- `observed_at`, `sync_generation`, `is_present`, `missing_since`를 node/workload와
+  동일하게 사용한다.
+- `UNIQUE(cluster_id, natural_key)`.
+
+### `reconciliation_findings`, `workload_change_events`
+
+- finding은 종류, 심각도, 대상, 안전한 변경 요약, 최초·최근 관측 시각을 가진다.
+- 상태는 `OPEN`, `ACKNOWLEDGED`, `RESOLVED`이며 담당자와 해결 근거를 기록한다.
+- workload change event는 sync run과 workload에 연결된 append형 외부 변경 요약이다.
+- finding 처리로 workload assignment나 IP allocation을 자동 변경하지 않는다.
 
 ## 7. 고객 소유권
 
@@ -261,6 +279,7 @@ Cloud-Init SSH 공개키는 public 정보지만 별도 정규화 테이블 또�
 - `result JSONB NOT NULL DEFAULT '{}'`: 식별자/비민감 요약만.
 - `requested_at`, `queued_at`, `started_at`, `finished_at`, `heartbeat_at`.
 - `cancel_requested_at`, `version`.
+- `retry_of_id UUID FK UNIQUE NULL`: 안전한 재시도가 참조하는 원본 operation.
 
 인덱스: `(requested_by_id, requested_at DESC)`, `(cluster_id, status)`, `(workload_id, status)`, stuck 탐지용 `(status, heartbeat_at)`.
 
@@ -278,13 +297,57 @@ Cloud-Init SSH 공개키는 public 정보지만 별도 정규화 테이블 또�
 
 제약: `UNIQUE(cluster_id, upid)`, `UNIQUE(operation_id, step_name, upid)`. UPID는 클러스터 범위에서 해석한다.
 
+### `operation_events`
+
+- operation 또는 provisioning request 중 정확히 하나를 참조한다.
+- `event_type`, `status`, `step`, 안전한 `message`, 제한된 `details`, `actor_user_id`,
+  `occurred_at`을 저장한다.
+- 대상별 `(target_id, occurred_at)` 인덱스로 timeline을 조회한다.
+
+### `operation_assignments`
+
+- operation 또는 provisioning request 중 정확히 하나를 유일하게 참조한다.
+- 담당/확인/해결 사용자와 시각, 해결 메모, optimistic concurrency용 `version`을
+  저장한다.
+
 ### `operation_outbox`
 
 - `id BIGSERIAL PK`, `operation_id UUID FK`, `event_type`, `payload JSONB`(ID만).
-- `created_at`, `published_at`, `attempt_count`, `next_attempt_at`, `last_error_code`.
+- `status`는 `PENDING|PUBLISHED`이며 `created_at`, `published_at`, `attempt_count`,
+  `next_attempt_at`, `last_error_code`를 함께 저장한다.
 - `UNIQUE(operation_id, event_type)`로 중복 publish를 제어한다.
 
 API 트랜잭션에서 operation과 outbox를 함께 commit하고 별도 dispatcher가 Celery에 발행한다. 발행 중복은 정상으로 간주하고 워커 멱등성으로 흡수한다.
+
+### `scheduler_leases`
+
+- `name VARCHAR(120) PK`, `owner_id UUID`, `fencing_token BIGINT`.
+- `acquired_at`, `lease_expires_at`, `updated_at`.
+- lease 획득은 PostgreSQL transaction advisory lock과 행 잠금으로 직렬화한다.
+- 만료 후 소유권 이전마다 fencing token을 증가시키며 오래된 실행은 최종 쓰기 전에
+  현재 owner/token을 다시 확인한다.
+
+### `maintenance_runs`
+
+- `id UUID PK`, `job_name`, `status`, `owner_id`, `fencing_token`.
+- `started_at`, `finished_at`, `processed_count`, `error_code`.
+- 최근 성공 시각과 실패는 관리자 운영 상태 API 및 Prometheus 지표의 기준이다.
+
+완료·skip 행은 기본 7일 보존하고 실패 행은 incident 연결을 위해 별도 정책으로
+보존한다.
+
+## Alert와 notification
+
+- `alerts`는 fingerprint unique로 현재 incident 상태, 횟수, 담당자, silence와
+  first/last/resolved 시각을 유지한다.
+- `alert_events`는 OPEN/REPEAT/REOPEN/ACKNOWLEDGE/ASSIGN/SILENCE/RESOLVE의 append
+  이력이다.
+- `notification_channels`는 system 또는 organization scope이며 구성은 암호문,
+  nonce, key version만 저장한다.
+- `notification_rules`는 event/severity, quiet hours와 escalation을 channel에 연결한다.
+- `notification_deliveries`는 `(alert_event_id, channel_id)` unique로 중복 전송을
+  방지하고 시도 횟수, 다음 시도와 안전한 오류 코드만 저장한다.
+- `maintenance_windows`는 대상과 시간 범위, notification suppress 정책을 보관한다.
 
 ## 9.1 PBS 워크로드 백업
 
@@ -396,3 +459,148 @@ DB trigger가 모든 UPDATE를 차단하고 DELETE는 retention transaction flag
 - downgrade가 데이터 손실을 유발하면 revision에 비가역 이유와 복구 절차를 명시한다.
 - enum/check 변경은 구버전 API/worker가 새 값을 읽는 배포 호환성을 고려한다.
 - 운영 migration은 별도 one-shot job에서 advisory lock을 얻고 실행한다.
+
+## 15. 자동 백업 정책과 검증
+
+### `backup_policies`
+
+- PBS `backup_target_id`, 5-field `schedule`, IANA `timezone`, `next_run_at`.
+- `retention_reference`는 PBS prune job 이름 또는 운영 참조이며 삭제 권한을 뜻하지 않는다.
+- `verification_interval_days`, `is_enabled`, 마지막 dispatch, 다음 skip, version을 저장한다.
+
+### `backup_policy_assignments`
+
+- policy와 `organization_id` 또는 `workload_id` 중 정확히 하나를 연결한다.
+- 조직 할당은 실행 시점의 현재 workload로 확장하며 다른 cluster의 target은 preview와
+  dispatch에서 제외한다.
+- `backup_runs.policy_assignment_id`, `scheduled_for`, `trigger_type`으로 실제 실행과
+  예정 시각을 연결한다.
+
+### `backup_verifications`
+
+- 성공 snapshot의 metadata 확인과 격리 restore drill 결과를 보존한다.
+- 원본 `backup_run_id`, 선택적 `restore_run_id`, 상태, due/started/finished, 안전한 오류
+  코드와 결과 요약을 저장한다.
+- snapshot이 PBS에서 prune되어도 run과 검증 이력은 삭제하지 않는다.
+
+## 16. 고객 workload 성능 지표
+
+### `workload_metrics`
+
+- `workload_id`, 수집 당시 `organization_id`, `resolution_seconds`, `bucket_at`을
+  복합 유일 키로 사용한다.
+- CPU, memory used, disk read/write, network receive/transmit의 평균과 최대,
+  `sample_count`를 저장한다. 수집되지 않은 값은 0으로 대체하지 않고 NULL로 둔다.
+- 고객 query용 `(organization_id, workload_id, resolution_seconds, bucket_at)`
+  인덱스를 둔다.
+- raw 1분 값은 24시간, 5분 rollup은 30일, 1시간 rollup은 365일 보존한다.
+- rollup 평균은 `sample_count` 가중 평균, 최대는 원 구간의 최댓값이다. 같은 bucket
+  재실행은 upsert되어 중복 행을 만들지 않는다.
+- 수집 시 현재 미회수 assignment의 조직 snapshot을 저장하며 assignment 시작 전
+  PVE 점은 버린다. 재할당 후 새 조직 query가 과거 조직 점을 읽지 않는다.
+
+`workloads.uptime_seconds`는 inventory 관측 시 갱신되는 nullable 값이다. metric
+보존 삭제는 workload와 operation 이력을 삭제하지 않으며 scheduler의 별도
+maintenance 작업으로 실행한다.
+
+## 17. 고객 알림 설정과 전달
+
+### `customer_notification_preferences`
+
+- `(user_id, organization_id, event_type)`을 유일 키로 사용한다.
+- `email_enabled`와 optimistic concurrency용 `version`을 저장한다.
+- 현재 활성 조직 멤버십이 없으면 API와 전달 단계 모두에서 사용하지 않는다.
+
+### `organization_notification_policies`
+
+- `(organization_id, event_type)`을 유일 키로 사용한다.
+- `email_required=true`는 고객 설정보다 우선하며 생성 관리자와 `version`을 보존한다.
+
+### `customer_notification_deliveries`
+
+- `(user_id, event_key)` 유일 키로 동일 수신자에게 같은 사건을 중복 enqueue하지 않는다.
+- `status`, 시도 횟수, 다음 시도, 전달 시각과 일반화된 오류 코드만 저장한다.
+- `(status, next_attempt_at)` 인덱스로 due row를 `SKIP LOCKED` 처리한다.
+- 발송 직전에 사용자 활성 상태, 현재 조직 멤버십, 조직 정책과 고객 opt-out을 다시
+  확인한다. 자격을 잃은 row는 삭제하지 않고 `CANCELLED`로 남긴다.
+
+## 18. 제한된 고객 Self-service
+
+### `service_requests`와 `approval_steps`
+
+- request type, 요청자, 조직, workload와 요청 당시 assignment를 고정한다.
+- 유형별 allowlist를 통과한 `input_snapshot`과 변경 영향만 JSON으로 저장한다.
+  private key, 평문 비밀번호, 임의 firewall/Cloud-Init payload는 저장하지 않는다.
+- `(requested_by_id, idempotency_key_hash)`와 request fingerprint로 재전송을
+  멱등 처리한다.
+- 같은 workload/type의 활성 요청은 부분 unique index로 하나만 허용한다.
+- 승인 후 `operations`를 1:1 연결하고 승인자, 역할, 결정 사유와 시각을 보존한다.
+- `PENDING_APPROVAL → APPROVED → IN_PROGRESS → SUCCEEDED`가 정상 흐름이다.
+  거부·승인 전 취소는 terminal이며 실행 실패는 `NEEDS_ATTENTION`으로 남긴다.
+
+### `ssh_public_keys`
+
+- owner, 조직, label, 공개키와 fingerprint, revoke 시각을 저장한다.
+- private material은 schema에서 거부하며 workload 적용 상태는
+  `workload_ssh_public_keys`로 분리한다.
+
+### `security_groups`와 적용
+
+- global 또는 단일 조직 scope 중 하나를 사용한다.
+- rule은 IN/OUT, ACCEPT/DROP, tcp/udp/icmp, 정규화 CIDR과 1–65535 port만 허용한
+  구조화 JSON이다.
+- `workload_security_groups`는 성공한 service request와 적용 상태를 연결한다.
+
+### `organization_service_quotas`
+
+- VM당 최대 vCPU/RAM/disk와 활성 요청 수를 저장한다.
+- 설정 row가 없어도 보수적 서버 기본 상한을 적용한다. 단계 11의 조직 quota
+  관리 기능이 이 모델을 확장한다.
+
+## 19. 조직 RBAC와 자원 Governance
+
+### `organization_members`
+
+- 플랫폼 `users.role`과 별도로 조직별 `organization_role`을 저장한다.
+- `status`, `expires_at`, `version`으로 정지·만료·동시 변경을 통제한다.
+- 활성 상태와 만료 조건은 API 조회뿐 아니라 worker 실행 직전에도 다시 검사한다.
+
+### `organization_invitations`
+
+- 조직, 정규화 이메일, 역할, `token_hash`, 만료·수락·폐기 시각을 저장한다.
+- 같은 조직/이메일의 활성 초대는 partial unique index로 하나만 허용한다.
+- 원문 token은 DB에 저장하지 않으며 성공한 수락 후 재사용할 수 없다.
+
+### `organization_quotas`, `quota_usage_snapshots`, `quota_reservations`
+
+- vCPU, RAM, disk, VM 수, IP와 backup byte 상한 및 optimistic `version`을 저장한다.
+- snapshot은 시점별 관측 사용량을 보존하고, API의 현재값은 workload/IP/backup
+  원장과 활성 reservation을 분리해 반환한다.
+- reservation은 provisioning 또는 service request 중 하나만 참조한다. 성공 시
+  `CONSUMED`, 확정 실패 시 `RELEASED`로 전이한다.
+- 예약은 organization row를 먼저 잠근 transaction에서 현재 사용량과 활성 예약을
+  합산한다. 수동 검토처럼 외부 상태가 불명확한 요청은 보수적으로 예약을 유지한다.
+
+### `approval_policies`
+
+- 조직과 요청 유형을 복합 유일 키로 사용한다.
+- 승인 필요 여부, 최소 승인자 조직 역할, 자동 승인 한도와 version을 저장한다.
+
+## 20. 고급 PVE 운영 Intent와 대상 잠금
+
+### `advanced_operation_intents`
+
+- 기존 `operations`와 1:1이며 feature/action별 상태 머신의 안전한 입력을 저장한다.
+- `target_snapshot`은 workload UUID, 표시 이름, guest 종류, node, 전원 상태와 version을
+  접수 시점에 고정한다.
+- `options_snapshot`은 feature별 allowlist를 통과한 값만 담고, `preview_snapshot`은
+  경고·차단·typed confirmation·step-up action을 보존한다.
+- HA와 maintenance처럼 desired/actual이 다를 수 있는 기능은 `requested_state`와
+  `observed_state`를 분리한다.
+
+### `advanced_operation_targets`
+
+- operation과 모든 workload 대상을 ordinal로 연결한다.
+- `active=true` workload에는 partial unique index를 적용해 bulk의 두 번째 이후 대상도
+  다른 operation과 동시에 변경되지 않게 한다.
+- terminal 상태에서 active를 해제하되 이력 행과 immutable target snapshot은 남긴다.

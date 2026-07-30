@@ -5,9 +5,11 @@ import { createPortal } from "react-dom";
 
 import {
   AuditLog,
+  BackupPolicy,
   BackupRun,
   BackupStorageCandidate,
   BackupTarget,
+  BackupVerification,
   RestoreRun,
   AdminWorkloadJob,
   AdminApiError,
@@ -19,6 +21,8 @@ import {
   ClusterStorage,
   CurrentUser,
   IpPool,
+  InventoryFreshness,
+  InventorySyncRun,
   OperationsStatus,
   Organization,
   OrganizationPage,
@@ -28,13 +32,16 @@ import {
   Product,
   ProvisioningNode,
   ProvisionRequest,
+  ReconciliationFinding,
   Template,
   Workload,
   addOrganizationMember,
+  acknowledgeReconciliationFinding,
   activateOrganization,
   assignWorkload,
   createCluster,
   createBackupTarget,
+  createBackupPolicy,
   createIpPool,
   createOrganization,
   createOrganizationUser,
@@ -58,15 +65,21 @@ import {
   getAdminWorkloadJob,
   importClusterWorkloads,
   listAuditLogs,
+  listAlerts,
   listBackups,
+  listBackupPolicies,
   listBackupTargets,
+  listBackupVerifications,
   listClusters,
   listIpPools,
+  listInventoryFreshness,
+  listInventorySyncRuns,
   listOrganizations,
   listOrganizationMembers,
   listProducts,
   listProvisioningNodes,
   listProvisionRequests,
+  listReconciliationFindings,
   listTemplates,
   listUsers,
   listWorkloads,
@@ -75,8 +88,13 @@ import {
   requestAdminWorkloadAction,
   requestWorkloadBackup,
   requestBackupRestore,
+  requestBackupMetadataVerification,
+  requestClusterSync,
+  resolveReconciliationFinding,
+  reconcileBackupMetadata,
   discoverBackupStorages,
   searchOrganizations,
+  skipBackupPolicy,
   testCluster,
   unassignWorkload,
   updateAdminVmSpec,
@@ -87,6 +105,7 @@ import {
   updateUserStatus,
   updateTemplate,
   upsertProvisioningNode,
+  runBackupPolicyNow,
 } from "@/lib/admin-api";
 import { endBrowserSession } from "@/lib/browser-session";
 import { AuthSession, CustomerApiError } from "@/lib/customer-api";
@@ -109,6 +128,13 @@ import { validateSshPublicKeys } from "@/lib/ssh-public-key";
 import { generateSshRsaKeyPair } from "@/lib/ssh-keypair";
 import { VmConsoleModal } from "./vm-console-modal";
 import { ClusterMetricsPanel } from "./cluster-metrics";
+import { OperationCenterView } from "./operation-center-view";
+import { AlertCenterView } from "./alert-center-view";
+import { SecurityCenterDialog } from "./security-center-dialog";
+import { StepUpDialog } from "./step-up-dialog";
+import { ServiceRequestCenter } from "./service-request-center";
+import { OrganizationGovernanceView } from "./organization-governance-view";
+import { AdvancedOperationsView } from "./advanced-operations-view";
 import { useDialogFocus } from "./use-dialog-focus";
 
 type Section = AdminSection;
@@ -121,11 +147,17 @@ const CLUSTER_INVENTORY_REFRESH_INTERVAL_MS = 10_000;
 const sectionLabels: Record<Section, string> = {
   overview: "운영 개요",
   clusters: "클러스터",
+  inventory: "동기화와 재조정",
   vms: "가상 머신",
+  advanced: "고급 PVE 운영",
   backups: "백업",
   access: "사용자와 조직",
+  governance: "조직 권한과 Quota",
   networks: "IP 주소 관리",
   provisioning: "프로비저닝",
+  service_requests: "고객 변경 요청",
+  operations: "Operation 센터",
+  alerts: "경보와 알림",
   audit: "감사 로그",
 };
 
@@ -225,6 +257,7 @@ export function AdminDashboard({
   onSessionEnded: () => void;
 }) {
   const [section, setSection] = useState<Section>("overview");
+  const [securityDialogOpen, setSecurityDialogOpen] = useState(false);
   const [status, setStatus] = useState<OperationsStatus | null>(null);
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [clusterResources, setClusterResources] = useState<ClusterResourceOverview[]>([]);
@@ -243,6 +276,9 @@ export function AdminDashboard({
   const [nodes, setNodes] = useState<ClusterNode[]>([]);
   const [guests, setGuests] = useState<ClusterGuest[]>([]);
   const [storages, setStorages] = useState<ClusterStorage[]>([]);
+  const [inventoryFreshness, setInventoryFreshness] = useState<InventoryFreshness[]>([]);
+  const [inventorySyncRuns, setInventorySyncRuns] = useState<InventorySyncRun[]>([]);
+  const [reconciliationFindings, setReconciliationFindings] = useState<ReconciliationFinding[]>([]);
   const [users, setUsers] = useState<CurrentUser[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
@@ -253,6 +289,8 @@ export function AdminDashboard({
   const [backupTargets, setBackupTargets] = useState<BackupTarget[]>([]);
   const [backupCandidates, setBackupCandidates] = useState<BackupStorageCandidate[]>([]);
   const [backupRuns, setBackupRuns] = useState<BackupRun[]>([]);
+  const [backupPolicies, setBackupPolicies] = useState<BackupPolicy[]>([]);
+  const [backupVerifications, setBackupVerifications] = useState<BackupVerification[]>([]);
   const [activeBackupRun, setActiveBackupRun] = useState<BackupRun | null>(null);
   const [activeRestoreRun, setActiveRestoreRun] = useState<RestoreRun | null>(null);
   const [pools, setPools] = useState<IpPool[]>([]);
@@ -290,7 +328,7 @@ export function AdminDashboard({
   const navigation = useMemo<Section[]>(
     () => isSuperAdmin
       ? [...adminSections]
-      : ["overview", "clusters", "vms", "backups", "access"],
+      : ["overview", "clusters", "inventory", "vms", "advanced", "backups", "access", "governance", "service_requests", "operations", "alerts"],
     [isSuperAdmin],
   );
 
@@ -401,6 +439,21 @@ export function AdminDashboard({
             ? current
             : (nextClusters[0]?.id ?? null),
         );
+      } else if (next === "inventory") {
+        const [nextClusters, nextFreshness, nextRuns, nextFindings, nextUsers] = await Promise.all([
+          listClusters(apiBaseUrl, token),
+          listInventoryFreshness(apiBaseUrl, token),
+          listInventorySyncRuns(apiBaseUrl, token),
+          listReconciliationFindings(apiBaseUrl, token),
+          listUsers(apiBaseUrl, token),
+        ]);
+        setClusters(nextClusters);
+        setInventoryFreshness(nextFreshness);
+        setInventorySyncRuns(nextRuns);
+        setReconciliationFindings(nextFindings);
+        setUsers(nextUsers);
+      } else if (next === "advanced") {
+        setWorkloads(await listWorkloads(apiBaseUrl, token));
       } else if (next === "access") {
         const [nextUsers, organizationPage, nextWorkloads] = await Promise.all([
           listUsers(apiBaseUrl, token),
@@ -413,6 +466,8 @@ export function AdminDashboard({
         setWorkloads(nextWorkloads);
         if (!organizationPage.total) setOrganizationMembers([]);
         setSelectedOrganization((current) => current ?? organizationPage.items[0] ?? null);
+      } else if (next === "governance") {
+        setOrganizations(await listOrganizations(apiBaseUrl, token));
       } else if (next === "networks") {
         const [nextPools, nextClusters] = await Promise.all([
           listIpPools(apiBaseUrl, token),
@@ -438,16 +493,30 @@ export function AdminDashboard({
         const visible = nextWorkloads.filter((item) => item.is_present && !item.is_template);
         setSelectedWorkload((current) => current && visible.some((item) => item.id === current) ? current : (visible[0]?.id ?? null));
       } else if (next === "backups") {
-        const [nextTargets, nextRuns, nextWorkloads, nextClusters] = await Promise.all([
+        const [
+          nextTargets,
+          nextRuns,
+          nextWorkloads,
+          nextClusters,
+          nextPolicies,
+          nextVerifications,
+          nextOrganizations,
+        ] = await Promise.all([
           listBackupTargets(apiBaseUrl, token),
           listBackups(apiBaseUrl, token),
           listWorkloads(apiBaseUrl, token),
           listClusters(apiBaseUrl, token),
+          listBackupPolicies(apiBaseUrl, token),
+          listBackupVerifications(apiBaseUrl, token),
+          isSuperAdmin ? listOrganizations(apiBaseUrl, token) : Promise.resolve([]),
         ]);
         setBackupTargets(nextTargets);
         setBackupRuns(nextRuns);
         setWorkloads(nextWorkloads);
         setClusters(nextClusters);
+        setBackupPolicies(nextPolicies);
+        setBackupVerifications(nextVerifications);
+        if (isSuperAdmin) setOrganizations(nextOrganizations);
       } else if (next === "provisioning") {
         const [nextProducts, nextTemplates, nextRequests, nextNodes, nextWorkloads, nextClusters] = await Promise.all([
           listProducts(apiBaseUrl, token),
@@ -476,6 +545,8 @@ export function AdminDashboard({
         setAuditPageSize(result.limit);
         auditOffsetRef.current = result.offset;
         auditPageSizeRef.current = result.limit;
+      } else if (next === "alerts") {
+        await listAlerts(apiBaseUrl, token);
       }
     } catch (caught) {
       setError(readableError(caught));
@@ -588,6 +659,17 @@ export function AdminDashboard({
     }, 1500);
     return () => window.clearTimeout(timer);
   }, [activeRestoreRun, apiBaseUrl, loadSection, token]);
+
+  useEffect(() => {
+    if (
+      section !== "inventory"
+      || !inventorySyncRuns.some((run) => ["QUEUED", "RUNNING"].includes(run.status))
+    ) return;
+    const timer = window.setTimeout(() => {
+      void loadSection("inventory");
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [inventorySyncRuns, loadSection, section]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadSection(section); }, 0);
@@ -740,6 +822,61 @@ export function AdminDashboard({
     }
   }
 
+  async function runInventorySync(clusterId: string) {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const result = await requestClusterSync(apiBaseUrl, token, clusterId);
+      setNotice(`인벤토리 동기화를 요청했습니다 · ${result.operation_id.slice(0, 8)}`);
+      await loadSection("inventory");
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function acknowledgeFinding(findingId: string, assignedToId: string | null) {
+    setSaving(true); setError("");
+    try {
+      const updated = await acknowledgeReconciliationFinding(
+        apiBaseUrl,
+        token,
+        findingId,
+        assignedToId,
+      );
+      setReconciliationFindings((items) =>
+        items.map((item) => item.id === updated.id ? updated : item)
+      );
+      setNotice("재조정 항목을 확인 처리했습니다.");
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resolveFinding(findingId: string) {
+    const note = window.prompt("해결 근거를 입력하세요. (3자 이상)");
+    if (!note || note.trim().length < 3) return;
+    setSaving(true); setError("");
+    try {
+      const updated = await resolveReconciliationFinding(
+        apiBaseUrl,
+        token,
+        findingId,
+        note.trim(),
+      );
+      setReconciliationFindings((items) =>
+        items.map((item) => item.id === updated.id ? updated : item)
+      );
+      setNotice("재조정 항목을 해결 처리했습니다.");
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function discoverClusterBackups(clusterId: string) {
     setSaving(true); setError("");
     try {
@@ -800,6 +937,69 @@ export function AdminDashboard({
       );
       setActiveRestoreRun(run);
       setNotice(`복구 작업을 접수했습니다 · VMID ${run.target_vmid}`);
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function createPolicy(payload: {
+    name: string;
+    backup_target_id: string;
+    schedule: string;
+    timezone: string;
+    retention_reference: string | null;
+    verification_interval_days: number;
+    assignments: Array<{ organization_id?: string; workload_id?: string }>;
+  }) {
+    setSaving(true); setError("");
+    try {
+      await createBackupPolicy(apiBaseUrl, token, payload);
+      setNotice("자동 백업 정책을 생성했습니다.");
+      await loadSection("backups");
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function runPolicyNow(policyId: string) {
+    setSaving(true); setError("");
+    try {
+      const result = await runBackupPolicyNow(apiBaseUrl, token, policyId);
+      setNotice(`정책 백업 ${result.dispatched_count}건을 접수했습니다.`);
+      await loadSection("backups");
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function skipPolicy(policy: BackupPolicy) {
+    setSaving(true); setError("");
+    try {
+      await skipBackupPolicy(apiBaseUrl, token, policy);
+      setNotice("다음 정책 실행을 건너뛰도록 예약했습니다.");
+      await loadSection("backups");
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function reconcileMetadata() {
+    setSaving(true); setError("");
+    try {
+      const result = await reconcileBackupMetadata(apiBaseUrl, token);
+      setNotice(`스냅샷 메타데이터 ${result.processed_count}건을 보정했습니다.`);
+      await loadSection("backups");
+    } catch (caught) { setError(readableError(caught)); }
+    finally { setSaving(false); }
+  }
+
+  async function verifyBackupMetadata(runId: string) {
+    setSaving(true); setError("");
+    try {
+      await requestBackupMetadataVerification(
+        apiBaseUrl,
+        token,
+        runId,
+        crypto.randomUUID(),
+      );
+      setNotice("스냅샷 메타데이터 검증을 완료했습니다.");
+      await loadSection("backups");
     } catch (caught) { setError(readableError(caught)); }
     finally { setSaving(false); }
   }
@@ -882,6 +1082,7 @@ export function AdminDashboard({
         token_identifier: String(data.get("token_identifier")),
         token_secret: String(data.get("token_secret")),
         ca_bundle_pem: String(data.get("ca_bundle_pem") || "") || null,
+        sync_interval_seconds: Number(data.get("sync_interval_seconds") || 60),
       });
       setForm(null);
       setNotice("클러스터를 등록하고 최소 권한 연결 시험을 완료했습니다.");
@@ -1304,6 +1505,7 @@ export function AdminDashboard({
         <div className="admin-identity">
           <span>{user.display_name.slice(0, 1).toUpperCase()}</span>
           <div><strong>{user.display_name}</strong><small>{user.role}</small></div>
+          <button onClick={() => setSecurityDialogOpen(true)} aria-label="보안 설정">⚿</button>
           <button onClick={logout} aria-label="로그아웃">↗</button>
         </div>
       </aside>
@@ -1322,11 +1524,53 @@ export function AdminDashboard({
           <ClustersView clusters={clusters} current={currentCluster} nodes={nodes} guests={guests} storages={storages}
             selectedId={selectedCluster} onSelect={setSelectedCluster} onTest={runClusterTest} onImport={runWorkloadImport} onCreate={() => setForm("cluster")} onDelete={openClusterRemoval} saving={saving || loading} canDelete={isSuperAdmin} />
         )}
+        {section === "inventory" && (
+          <InventoryReconciliationView
+            freshness={inventoryFreshness}
+            runs={inventorySyncRuns}
+            findings={reconciliationFindings}
+            users={users}
+            saving={saving}
+            onSync={runInventorySync}
+            onAcknowledge={acknowledgeFinding}
+            onResolve={resolveFinding}
+          />
+        )}
         {section === "vms" && <VmOperationsView workloads={workloads} backupRuns={backupRuns} onSelect={setSelectedWorkload} onCreate={() => setForm("vm")} onEdit={() => setForm("vm-spec")} onDelete={() => setForm("vm-delete")} onBackup={openBackupForWorkload} onAction={runVmAction} onConsole={openConsole} activeJob={activeVmJob} saving={saving} canManage={isSuperAdmin} />}
-        {section === "backups" && <BackupsView clusters={clusters} workloads={workloads} targets={backupTargets} candidates={backupCandidates} runs={backupRuns} preferredWorkloadId={backupFocusWorkload} activeRun={activeBackupRun} activeRestore={activeRestoreRun} saving={saving} canConfigure={isSuperAdmin} onClearPreferredWorkload={() => setBackupFocusWorkload(null)} onDiscover={discoverClusterBackups} onRegister={registerBackupTarget} onToggle={toggleBackupTarget} onBackup={runBackup} onRestore={runRestore} />}
+        {section === "advanced" && <AdvancedOperationsView apiBaseUrl={apiBaseUrl} token={token} workloads={workloads} canWrite={isSuperAdmin} />}
+        {section === "backups" && <BackupsView
+          clusters={clusters}
+          workloads={workloads}
+          organizations={organizations}
+          targets={backupTargets}
+          candidates={backupCandidates}
+          runs={backupRuns}
+          policies={backupPolicies}
+          verifications={backupVerifications}
+          preferredWorkloadId={backupFocusWorkload}
+          activeRun={activeBackupRun}
+          activeRestore={activeRestoreRun}
+          saving={saving}
+          canConfigure={isSuperAdmin}
+          onClearPreferredWorkload={() => setBackupFocusWorkload(null)}
+          onDiscover={discoverClusterBackups}
+          onRegister={registerBackupTarget}
+          onToggle={toggleBackupTarget}
+          onBackup={runBackup}
+          onRestore={runRestore}
+          onCreatePolicy={createPolicy}
+          onRunPolicy={runPolicyNow}
+          onSkipPolicy={skipPolicy}
+          onReconcileMetadata={reconcileMetadata}
+          onVerifyMetadata={verifyBackupMetadata}
+        />}
         {section === "access" && <AccessView currentUserId={user.id} users={users} organizations={organizations} organizationTotal={organizationTotal} members={organizationMembers} workloads={workloads} selectedOrganization={selectedOrganization} canWrite={isSuperAdmin} saving={saving} onSelectOrganization={(organization) => { setSelectedOrganization(organization); setOrganizations((current) => current.some((item) => item.id === organization.id) ? current : [organization, ...current]); }} onSearchOrganizations={searchOrganizationOptions} onAddMember={addMember} onRemoveMember={removeMember} onAssign={assignToOrganization} onUnassign={unassignFromOrganization} onUser={() => setForm("user")} onResetPassword={(targetUser) => { setPasswordResetUser(targetUser); setForm("user-password-reset"); }} onUserStatus={(targetUser) => { setManagedUser(targetUser); setForm("user-status"); }} onDeleteUser={(targetUser) => { setManagedUser(targetUser); setForm("user-delete"); }} onCreateMember={() => setForm("organization-user")} onOrganization={() => { setEditingOrganization(null); setForm("organization"); }} onEditOrganization={(organization) => { setEditingOrganization(organization); setForm("organization"); }} onActivateOrganization={reactivateOrganization} onDeleteOrganization={(organization) => { setEditingOrganization(organization); setForm("organization-delete"); }} />}
+        {section === "governance" && <OrganizationGovernanceView apiBaseUrl={apiBaseUrl} token={token} organizations={organizations} canWrite={isSuperAdmin} />}
         {section === "networks" && <NetworksView pools={pools} clusters={clusters} onCreate={() => { setEditingPool(null); setForm("pool"); }} onEdit={(pool) => { setEditingPool(pool); setForm("pool"); }} onDelete={(pool) => { setEditingPool(pool); setForm("pool-delete"); }} />}
         {section === "provisioning" && <ProvisioningView products={products} templates={templates} workloads={workloads} nodes={provisioningNodes} clusters={clusters} requests={requests} onCreateProduct={() => { setEditingProduct(null); setForm("product"); }} onEditProduct={(product) => { setEditingProduct(product); setForm("product"); }} onDeleteProduct={(product) => { setEditingProduct(product); setEditingTemplate(null); setForm("product-delete"); }} onCreateTemplate={() => { setEditingTemplate(null); setForm("template"); }} onEditTemplate={(template) => { setEditingTemplate(template); setForm("template"); }} onDeleteTemplate={(template) => { setEditingTemplate(template); setEditingProduct(null); setForm("template-delete"); }} onCreateNode={() => { setEditingProvisioningNode(null); setForm("node"); }} onEditNode={(node) => { setEditingProvisioningNode(node); setForm("node"); }} />}
+        {section === "service_requests" && <ServiceRequestCenter apiBaseUrl={apiBaseUrl} token={token} canApprove={isSuperAdmin} />}
+        {section === "operations" && <OperationCenterView apiBaseUrl={apiBaseUrl} token={token} />}
+        {section === "alerts" && <AlertCenterView apiBaseUrl={apiBaseUrl} token={token} />}
         {section === "audit" && <AuditView audits={audits} total={auditTotal} offset={auditOffset} pageSize={auditPageSize} loading={loading} onPageChange={(offset) => { void loadSection("audit", offset); }} onPageSizeChange={(limit) => { void loadSection("audit", 0, limit); }} />}
       </section>
 
@@ -1366,7 +1610,162 @@ export function AdminDashboard({
           onClose={() => setConsoleWorkload(null)}
         />
       )}
+      {securityDialogOpen && (
+        <SecurityCenterDialog
+          apiBaseUrl={apiBaseUrl}
+          accessToken={token}
+          onClose={() => setSecurityDialogOpen(false)}
+          onCurrentSessionRevoked={logout}
+        />
+      )}
+      <StepUpDialog apiBaseUrl={apiBaseUrl} accessToken={token} />
     </main>
+  );
+}
+
+function InventoryReconciliationView({
+  freshness,
+  runs,
+  findings,
+  users,
+  saving,
+  onSync,
+  onAcknowledge,
+  onResolve,
+}: {
+  freshness: InventoryFreshness[];
+  runs: InventorySyncRun[];
+  findings: ReconciliationFinding[];
+  users: CurrentUser[];
+  saving: boolean;
+  onSync: (clusterId: string) => void;
+  onAcknowledge: (findingId: string, assignedToId: string | null) => void;
+  onResolve: (findingId: string) => void;
+}) {
+  const activeFindings = findings.filter((item) => item.status !== "RESOLVED");
+  const assignableUsers = users.filter(
+    (item) => item.is_active && ["SUPER_ADMIN", "OPERATOR"].includes(item.role),
+  );
+  const [assigneeByFinding, setAssigneeByFinding] = useState<Record<string, string>>({});
+  const displayNameByUserId = new Map(users.map((item) => [item.id, item.display_name]));
+  return (
+    <div className="admin-content enter-admin inventory-reconciliation">
+      <section className="admin-section">
+        <div className="admin-section-title">
+          <div><p className="eyebrow">Freshness</p><h2>클러스터 동기화 상태</h2></div>
+          <span>{freshness.filter((item) => item.is_stale).length} stale</span>
+        </div>
+        <div className="inventory-freshness-grid">
+          {freshness.map((item) => (
+            <article key={item.cluster_id} className={item.is_stale ? "is-stale" : ""}>
+              <div>
+                <strong>{item.cluster_name}</strong>
+                <StatusMark ok={!item.is_stale} label={item.is_stale ? "정보 오래됨" : "정상"} />
+              </div>
+              <dl>
+                <div><dt>마지막 전체 성공</dt><dd>{formatTime(item.last_full_success_at)}</dd></div>
+                <div><dt>최근 상태</dt><dd>{item.latest_status ?? "기록 없음"}</dd></div>
+                <div><dt>stale 기준</dt><dd>{item.stale_after_seconds}초</dd></div>
+              </dl>
+              <button type="button" disabled={saving} onClick={() => onSync(item.cluster_id)}>
+                전체 동기화
+              </button>
+            </article>
+          ))}
+          {!freshness.length && <div className="admin-empty">활성 클러스터가 없습니다.</div>}
+        </div>
+      </section>
+
+      <section className="admin-section">
+        <div className="admin-section-title">
+          <div><p className="eyebrow">Drift queue</p><h2>재조정 항목</h2></div>
+          <span>{activeFindings.length} active</span>
+        </div>
+        <div className="inventory-finding-list" aria-live="polite">
+          {activeFindings.map((finding) => (
+            <article key={finding.id}>
+              <span className={`finding-severity ${finding.severity.toLowerCase()}`}>
+                {finding.severity}
+              </span>
+              <div>
+                <strong>{finding.kind.replaceAll("_", " ")}</strong>
+                <p>{finding.summary}</p>
+                <small>{finding.cluster_name} · 마지막 관측 {formatTime(finding.last_observed_at)}</small>
+              </div>
+              <span className="finding-status">{finding.status}</span>
+              <div className="finding-actions">
+                {finding.status === "OPEN" && (
+                  <>
+                    <select
+                      aria-label={`${finding.summary} 담당자`}
+                      disabled={saving}
+                      value={assigneeByFinding[finding.id] ?? finding.assigned_to_id ?? ""}
+                      onChange={(event) => setAssigneeByFinding((current) => ({
+                        ...current,
+                        [finding.id]: event.target.value,
+                      }))}
+                    >
+                      <option value="">담당자 미지정</option>
+                      {assignableUsers.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.display_name} · {item.role}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      disabled={saving}
+                      onClick={() => onAcknowledge(
+                        finding.id,
+                        assigneeByFinding[finding.id] || finding.assigned_to_id,
+                      )}
+                    >
+                      확인
+                    </button>
+                  </>
+                )}
+                {finding.status === "ACKNOWLEDGED" && (
+                  <small>
+                    담당자 {finding.assigned_to_id
+                      ? displayNameByUserId.get(finding.assigned_to_id) ?? "확인 필요"
+                      : "미지정"}
+                  </small>
+                )}
+                <button disabled={saving} onClick={() => onResolve(finding.id)}>해결</button>
+              </div>
+            </article>
+          ))}
+          {!activeFindings.length && <div className="admin-empty">열린 drift 항목이 없습니다.</div>}
+        </div>
+      </section>
+
+      <section className="admin-section">
+        <div className="admin-section-title">
+          <div><p className="eyebrow">Recent runs</p><h2>최근 동기화 실행</h2></div>
+          <span>{runs.length} runs</span>
+        </div>
+        <div className="inventory-run-table">
+          <div className="inventory-run-head" aria-hidden="true">
+            <span>클러스터</span><span>범위</span><span>상태</span><span>변경</span><span>시작</span>
+          </div>
+          {runs.map((run) => (
+            <div key={run.id} className="inventory-run-row">
+              <strong>{run.cluster_name}</strong>
+              <span>{run.scope} · #{run.generation}</span>
+              <StatusMark
+                ok={run.status === "SUCCEEDED" ? true : run.status === "FAILED" ? false : null}
+                label={run.partial_failure ? `${run.status} · 부분 실패` : run.status}
+              />
+              <span>
+                +{String(run.resource_counts.created ?? 0)} / Δ{String(run.resource_counts.updated ?? 0)}
+                {" "}/ −{String(run.resource_counts.missing ?? 0)}
+              </span>
+              <span>{formatTime(run.started_at)}</span>
+            </div>
+          ))}
+          {!runs.length && <div className="admin-empty">동기화 실행 기록이 없습니다.</div>}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1395,6 +1794,7 @@ function Overview({ apiBaseUrl, token, status, clusters, resources, loading, ref
     </section>
     <section className="admin-section"><div className="admin-section-title"><div><p className="eyebrow">Current state</p><h2>운영 신호</h2></div><span>실시간 운영 API 기준</span></div>
       {status?.alerts.length ? <div className="alert-list">{status.alerts.map((alert) => <div key={`${alert.code}-${alert.resource_id}`}><StatusMark ok={false} label={alert.severity} /><strong>{alert.code}</strong><p>{alert.message}</p></div>)}</div> : <div className="calm-state"><span>✓</span><div><strong>활성 경보가 없습니다.</strong><p>클러스터 연결, 작업 처리, 프로비저닝과 IP 풀 가용성이 정상 범위입니다.</p></div></div>}
+      {status?.scheduler?.length ? <div className="scheduler-status-grid" aria-label="정기 작업 최근 실행 상태">{status.scheduler.map((job) => <article key={job.job_name}><header><code>{job.job_name}</code><StatusMark ok={job.status === "SUCCEEDED"} label={job.status} /></header><strong>{job.last_success_at ? `최근 성공 ${formatTime(job.last_success_at)}` : "성공 기록 없음"}</strong><small>{job.error_code ? `오류 ${job.error_code}` : `최근 처리 ${job.processed_count}건`}</small></article>)}</div> : null}
     </section>
     <section className="admin-section cluster-fleet-section"><div className="admin-section-title"><div><p className="eyebrow">Resource fleet</p><h2>클러스터 자원 현황</h2></div><div className={`overview-refresh-status${stale ? " stale" : ""}`} aria-live="polite"><span className={refreshing ? "refreshing" : ""}><i />{refreshing ? "갱신 중" : stale ? "갱신 실패 · 이전 데이터" : secondsUntilRefresh === null ? "일시 중지" : `${secondsUntilRefresh}초 후 갱신`}</span><time>{lastUpdatedAt ? `최근 갱신 ${formatTime(lastUpdatedAt)}` : "첫 상태 확인 중"}</time></div></div>
       {loading && !resources.length ? <ClusterResourceSkeleton /> : resources.length ? <div className="cluster-resource-grid">{resources.map((cluster) => <ClusterResourceCard key={cluster.cluster_id} cluster={cluster} apiBaseUrl={apiBaseUrl} token={token} />)}</div> : <p className="empty-state">등록된 클러스터가 없습니다.</p>}
@@ -1527,9 +1927,12 @@ function InventoryTable({ title, columns, rows, className = "" }: { title: strin
 function BackupsView({
   clusters,
   workloads,
+  organizations,
   targets,
   candidates,
   runs,
+  policies,
+  verifications,
   preferredWorkloadId,
   activeRun,
   activeRestore,
@@ -1541,12 +1944,20 @@ function BackupsView({
   onToggle,
   onBackup,
   onRestore,
+  onCreatePolicy,
+  onRunPolicy,
+  onSkipPolicy,
+  onReconcileMetadata,
+  onVerifyMetadata,
 }: {
   clusters: Cluster[];
   workloads: Workload[];
+  organizations: Organization[];
   targets: BackupTarget[];
   candidates: BackupStorageCandidate[];
   runs: BackupRun[];
+  policies: BackupPolicy[];
+  verifications: BackupVerification[];
   preferredWorkloadId: string | null;
   activeRun: BackupRun | null;
   activeRestore: RestoreRun | null;
@@ -1561,6 +1972,19 @@ function BackupsView({
     backupRunId: string,
     payload: { target_node: string; target_vmid: number; target_name: string },
   ) => void;
+  onCreatePolicy: (payload: {
+    name: string;
+    backup_target_id: string;
+    schedule: string;
+    timezone: string;
+    retention_reference: string | null;
+    verification_interval_days: number;
+    assignments: Array<{ organization_id?: string; workload_id?: string }>;
+  }) => void;
+  onRunPolicy: (policyId: string) => void;
+  onSkipPolicy: (policy: BackupPolicy) => void;
+  onReconcileMetadata: () => void;
+  onVerifyMetadata: (runId: string) => void;
 }) {
   const visibleWorkloads = useMemo(
     () => workloads.filter((item) => item.is_present && !item.is_template),
@@ -1596,6 +2020,25 @@ function BackupsView({
   const [restoreNode, setRestoreNode] = useState("");
   const [restoreVmid, setRestoreVmid] = useState("");
   const [restoreName, setRestoreName] = useState("");
+  const [policyName, setPolicyName] = useState("");
+  const [policyTargetId, setPolicyTargetId] = useState(targets[0]?.id ?? "");
+  const [policySchedule, setPolicySchedule] = useState("0 2 * * *");
+  const [policyTimezone, setPolicyTimezone] = useState("Asia/Seoul");
+  const [policyScopeType, setPolicyScopeType] = useState<"organization" | "workload">("organization");
+  const [policyScopeId, setPolicyScopeId] = useState(organizations[0]?.id ?? "");
+  const [retentionReference, setRetentionReference] = useState("");
+  const policyScopeOptions = policyScopeType === "organization"
+    ? organizations.map((item) => ({ id: item.id, label: item.name }))
+    : visibleWorkloads.map((item) => ({
+      id: item.id,
+      label: `${item.name ?? `VMID ${item.vmid}`} · ${item.cluster_name}`,
+    }));
+  const effectivePolicyTargetId = targets.some((item) => item.id === policyTargetId)
+    ? policyTargetId
+    : (targets[0]?.id ?? "");
+  const effectivePolicyScopeId = policyScopeOptions.some((item) => item.id === policyScopeId)
+    ? policyScopeId
+    : (policyScopeOptions[0]?.id ?? "");
   const filteredRuns = useMemo(() => {
     const normalizedQuery = historyQuery.trim().toLocaleLowerCase("ko");
     return runs.filter((item) => {
@@ -1679,6 +2122,49 @@ function BackupsView({
       <article><small>백업 없음</small><strong>{unprotectedCount}</strong><span>VM / CT</span></article>
     </section>
 
+    <section className="backup-panel backup-policy-panel">
+      <div className="admin-section-title">
+        <div>
+          <p className="eyebrow">Protection calendar</p>
+          <h2>자동 백업 정책</h2>
+          <p>표준 cron과 명시적 timezone으로 다음 실행을 계산합니다. 보존·prune은 PBS 정책을 참조만 합니다.</p>
+        </div>
+        <span>{policies.filter((item) => item.is_enabled).length} active</span>
+      </div>
+      {canConfigure && <form className="backup-policy-form" onSubmit={(event) => {
+        event.preventDefault();
+        if (!policyName.trim() || !effectivePolicyTargetId || !effectivePolicyScopeId) return;
+        onCreatePolicy({
+          name: policyName.trim(),
+          backup_target_id: effectivePolicyTargetId,
+          schedule: policySchedule,
+          timezone: policyTimezone,
+          retention_reference: retentionReference.trim() || null,
+          verification_interval_days: 90,
+          assignments: [policyScopeType === "organization"
+            ? { organization_id: effectivePolicyScopeId }
+            : { workload_id: effectivePolicyScopeId }],
+        });
+      }}>
+        <label><span>정책 이름</span><input value={policyName} onChange={(event) => setPolicyName(event.target.value)} maxLength={160} required /></label>
+        <label><span>PBS 대상</span><select value={effectivePolicyTargetId} onChange={(event) => setPolicyTargetId(event.target.value)} required><option value="">대상 선택</option>{targets.filter((item) => item.is_enabled).map((item) => <option key={item.id} value={item.id}>{item.cluster_name} · {item.storage_id}</option>)}</select></label>
+        <label><span>cron</span><input value={policySchedule} onChange={(event) => setPolicySchedule(event.target.value)} placeholder="0 2 * * *" required /></label>
+        <label><span>timezone</span><input value={policyTimezone} onChange={(event) => setPolicyTimezone(event.target.value)} placeholder="Asia/Seoul" required /></label>
+        <label><span>적용 범위</span><select value={policyScopeType} onChange={(event) => { const type = event.target.value as "organization" | "workload"; setPolicyScopeType(type); setPolicyScopeId(""); }}><option value="organization">조직 전체</option><option value="workload">개별 VM / CT</option></select></label>
+        <label><span>대상</span><select value={effectivePolicyScopeId} onChange={(event) => setPolicyScopeId(event.target.value)} required><option value="">범위 선택</option>{policyScopeOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+        <label><span>PBS 보존 정책 참조</span><input value={retentionReference} onChange={(event) => setRetentionReference(event.target.value)} placeholder="daily-30 / protected" /></label>
+        <button className="accent-button" type="submit" disabled={saving || !effectivePolicyTargetId || !effectivePolicyScopeId}>정책 생성</button>
+      </form>}
+      <div className="backup-policy-calendar">
+        {policies.map((policy) => <article key={policy.id} className={policy.consecutive_failures ? "degraded" : ""}>
+          <div><StatusMark ok={policy.is_enabled && !policy.consecutive_failures} label={policy.is_enabled ? policy.consecutive_failures ? "연속 실패" : "보호 중" : "비활성"} /><strong>{policy.name}</strong></div>
+          <dl><div><dt>다음 실행</dt><dd>{formatTime(policy.next_run_at)}</dd></div><div><dt>최근 성공</dt><dd>{formatTime(policy.recent_success_at)}</dd></div><div><dt>일정</dt><dd><code>{policy.schedule}</code> · {policy.timezone}</dd></div><div><dt>범위</dt><dd>{policy.assignments.map((item) => item.organization_name ?? item.workload_name ?? "삭제된 대상").join(", ")}</dd></div><div><dt>보존</dt><dd>{policy.retention_reference ?? "PBS 기본 정책"}</dd></div></dl>
+          <div className="backup-policy-actions"><button type="button" onClick={() => onRunPolicy(policy.id)} disabled={saving || !policy.is_enabled}>지금 실행</button>{canConfigure && <button type="button" onClick={() => onSkipPolicy(policy)} disabled={saving || !policy.is_enabled || Boolean(policy.skip_next_at)}>{policy.skip_next_at ? "skip 예약됨" : "다음 실행 건너뛰기"}</button>}</div>
+        </article>)}
+        {!policies.length && <p className="empty-state">아직 자동 백업 정책이 없습니다.</p>}
+      </div>
+    </section>
+
     <section className="backup-command-grid">
       <div className="backup-panel">
         <div className="admin-section-title"><div><p className="eyebrow">Manual backup</p><h2>지금 백업</h2><p>VM/CT와 같은 클러스터의 PBS 대상만 선택할 수 있습니다.</p></div></div>
@@ -1708,6 +2194,14 @@ function BackupsView({
       </div>
     </section>
 
+    <section className="backup-panel backup-verification-panel">
+      <div className="admin-section-title"><div><p className="eyebrow">Restore assurance</p><h2>복구 검증</h2><p>스냅샷 존재 여부와 격리 복구 훈련 결과를 보존합니다.</p></div><button type="button" onClick={onReconcileMetadata} disabled={saving}>메타데이터 재조정</button></div>
+      <div className="backup-verification-list">
+        {verifications.map((item) => <div key={item.id}><span><StatusMark ok={item.status === "SUCCEEDED" ? true : item.status === "FAILED" ? false : null} label={item.status} /><strong>{item.verification_type === "RESTORE_DRILL" ? "격리 복구 훈련" : "스냅샷 메타데이터"}</strong><small>{item.result_summary ?? (item.due_at ? `${formatTime(item.due_at)}까지 검증 필요` : "검증 진행 중")}</small></span><time>{formatTime(item.finished_at ?? item.created_at)}</time></div>)}
+        {!verifications.length && <p className="empty-state">기록된 복구 검증이 없습니다.</p>}
+      </div>
+    </section>
+
     <section className="backup-panel backup-history-panel">
       <div className="admin-section-title"><div><p className="eyebrow">Backup history</p><h2>백업 내역 관리</h2><p>전체 이력을 검색하고 VM별 실행 결과와 저장 정보를 확인합니다.</p></div><span>{filteredRuns.length} / {runs.length} runs</span></div>
       {preferredWorkloadId && historyWorkloadId !== "ALL" && <div className="backup-history-context"><span>VM에서 이동한 내역만 표시 중</span><button type="button" onClick={resetHistoryFilters}>전체 내역 보기</button></div>}
@@ -1734,6 +2228,7 @@ function BackupsView({
         <p className={`backup-size-note ${selectedRun.transferred_bytes === 0 ? "fully-reused" : ""}`}>{selectedRun.transferred_bytes === 0 ? "정상 백업입니다. PBS가 기존 청크를 100% 재사용해 이번 실행에서 새로 전송할 데이터가 없었습니다." : "논리 크기는 백업 데이터 전체 크기이며, 신규 전송 데이터는 PBS 중복제거로 재사용된 데이터를 제외하고 이번 실행에서 새로 전송된 양입니다."}</p>
         <div className="backup-detail-actions">
           <button className="accent-button" type="button" disabled={saving || !targets.some((item) => item.id === selectedRun.backup_target_id && item.is_enabled)} onClick={() => onBackup(selectedRun.workload_id, selectedRun.backup_target_id)}>같은 대상으로 다시 백업</button>
+          {canConfigure && selectedRun.status === "SUCCEEDED" && selectedRun.snapshot_volume_id && <button type="button" disabled={saving} onClick={() => onVerifyMetadata(selectedRun.id)}>스냅샷 메타데이터 검증</button>}
           {canConfigure && selectedRun.status === "SUCCEEDED" && selectedRun.snapshot_volume_id && <button className="restore-button" type="button" disabled={saving || Boolean(activeRestore && !["SUCCEEDED", "FAILED", "TIMEOUT"].includes(activeRestore.status))} onClick={() => setRestoreFormOpen((current) => !current)}>{restoreFormOpen ? "복구 입력 닫기" : "새 VM/CT로 복구"}</button>}
         </div>
         {activeRestore?.backup_run_id === selectedRun.id && <div className={`restore-progress ${activeRestore.status.toLowerCase()}`} role="status"><span>복구 작업</span><strong>VMID {activeRestore.target_vmid} · {activeRestore.status}</strong>{activeRestore.error_code && <small>{activeRestore.error_code}</small>}</div>}
@@ -1746,6 +2241,12 @@ function BackupsView({
           <div className="restore-safety-note"><strong>새 VM/CT로만 복구됩니다.</strong><span>기존 VMID는 덮어쓰지 않으며 복구 후 전원은 꺼진 상태로 유지됩니다.</span></div>
           <label><span>대상 노드</span><select value={restoreNode} onChange={(event) => setRestoreNode(event.target.value)} required><option value="">노드 선택</option>{restoreNodes.map((node) => <option key={node} value={node}>{node}</option>)}</select></label>
           <div className="restore-target-grid"><label><span>새 VMID</span><input type="number" min="100" max="999999999" value={restoreVmid} onChange={(event) => setRestoreVmid(event.target.value)} required /></label><label><span>새 이름</span><input type="text" minLength={1} maxLength={63} pattern="[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?" value={restoreName} onChange={(event) => setRestoreName(event.target.value)} required /></label></div>
+          <dl className="restore-impact-preview" aria-label="복구 영향 미리보기">
+            <div><dt>Node / VMID</dt><dd>{restoreNode || "선택 필요"} / {restoreVmid || "입력 필요"}</dd></div>
+            <div><dt>디스크 storage</dt><dd>snapshot 원본 mapping · PVE 검증</dd></div>
+            <div><dt>IP 영향</dt><dd>자동 할당 없음 · 격리 확인 필요</dd></div>
+            <div><dt>조직 영향</dt><dd>복구 후 미할당 · 수동 검토</dd></div>
+          </dl>
           <button className="accent-button" type="submit" disabled={saving || !restoreNode || !restoreName || Number(restoreVmid) < 100}>{saving ? "복구 요청 중…" : "복구 시작"}</button>
         </form>}
       </aside>
@@ -2147,7 +2648,7 @@ function AuditView({ audits, total, offset, pageSize, loading, onPageChange, onP
 
 function DrawerIntro({ eyebrow, title, copy }: { eyebrow: string; title: string; copy: string }) { return <div className="drawer-intro"><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p>{copy}</p></div>; }
 function SubmitButton({ saving, label, disabled = false }: { saving: boolean; label: string; disabled?: boolean }) { return <button className="drawer-submit" type="submit" disabled={saving || disabled}>{saving ? "검증 중…" : label}<span>↗</span></button>; }
-function ClusterForm({ onSubmit, saving }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) { return <form className="admin-form" onSubmit={onSubmit}><DrawerIntro eyebrow="New cluster" title="Proxmox 연결" copy="등록 전에 TLS, 인증, 최소 권한을 실제 endpoint에서 확인합니다." /><label>표시 이름<input name="name" required placeholder="seoul-pve-1" /></label><label>API endpoint<input name="api_base_url" type="url" required placeholder="https://pve.example.internal:8006" /></label><label>Token identifier<input name="token_identifier" required placeholder="svc@pve!pvemaster" /></label><label>Token secret<input name="token_secret" type="password" required autoComplete="off" /></label><label>사설 CA PEM <small>선택</small><textarea name="ca_bundle_pem" rows={6} spellCheck={false} /></label><p className="form-security">Secret은 응답과 로그에 표시되지 않으며 암호화되어 저장됩니다.</p><SubmitButton saving={saving} label="검증 후 등록" /></form>; }
+function ClusterForm({ onSubmit, saving }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) { return <form className="admin-form" onSubmit={onSubmit}><DrawerIntro eyebrow="New cluster" title="Proxmox 연결" copy="등록 전에 TLS, 인증, 최소 권한을 실제 endpoint에서 확인합니다." /><label>표시 이름<input name="name" required placeholder="seoul-pve-1" /></label><label>API endpoint<input name="api_base_url" type="url" required placeholder="https://pve.example.internal:8006" /></label><label>동기화 주기(초)<input name="sync_interval_seconds" type="number" min={15} max={86400} defaultValue={60} required /></label><label>Token identifier<input name="token_identifier" required placeholder="svc@pve!pvemaster" /></label><label>Token secret<input name="token_secret" type="password" required autoComplete="off" /></label><label>사설 CA PEM <small>선택</small><textarea name="ca_bundle_pem" rows={6} spellCheck={false} /></label><p className="form-security">Secret은 응답과 로그에 표시되지 않으며 암호화되어 저장됩니다.</p><SubmitButton saving={saving} label="검증 후 등록" /></form>; }
 function ClusterDeleteForm({ cluster, check, checking, onSubmit, saving }: { cluster: Cluster; check: ClusterRemovalCheck | null; checking: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean }) {
   const pattern = cluster.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const blockLabels: Record<string, string> = { ASSIGNED_WORKLOADS: "조직 할당 VM/CT", ACTIVE_OPERATIONS: "진행 중 VM 작업", ACTIVE_PROVISIONING_REQUESTS: "진행 중 프로비저닝", PROVISIONING_NODES: "프로비저닝 노드 정책", TEMPLATES: "등록 템플릿", CLUSTER_IP_POOLS: "클러스터 전용 IP 풀" };
