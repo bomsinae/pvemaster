@@ -122,7 +122,7 @@ PENDING -> QUEUED -> RUNNING -> SUCCEEDED
 2. 대상 클러스터/노드/스토리지/VMID 결정 및 DB에 입력 스냅샷 저장.
 3. IP 주소 `RESERVED`.
 4. 템플릿 clone 요청, UPID 저장 및 완료 확인.
-5. CPU/메모리/디스크/네트워크와 Cloud-Init 설정.
+5. CPU/메모리/디스크/네트워크와 템플릿 OS에 따른 Cloud-Init 또는 Cloudbase-Init 설정.
 6. 필요 시 VM 시작, 각 PVE 작업의 UPID 추적.
 7. PVE에서 생성 VM과 네트워크 설정을 재조회.
 8. `workloads` 투영 갱신, IP `ASSIGNED`, 선택한 고객에게 할당.

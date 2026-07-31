@@ -33,6 +33,7 @@ from app.models.provisioning import (
     ProvisioningStep,
     ProvisioningStepStatus,
     Template,
+    TemplateOsType,
 )
 from app.schemas.provisioning import CloudInitRequest, ProvisioningRequestCreate
 from app.security.access import Principal
@@ -181,7 +182,18 @@ async def test_resumable_template_provisioning_and_failure_boundaries() -> None:
     await _clear(app)
     ids = {
         name: uuid4()
-        for name in ("admin", "org", "cluster", "source", "product", "template", "node", "pool")
+        for name in (
+            "admin",
+            "org",
+            "cluster",
+            "source",
+            "windows_source",
+            "product",
+            "template",
+            "windows_template",
+            "node",
+            "pool",
+        )
     }
     ssh_key = "ssh-ed25519 " + base64.b64encode(b"0123456789abcdef0123456789abcdef").decode()
     principal = Principal(ids["admin"], "provision@example.test", UserRole.SUPER_ADMIN, 0)
@@ -228,6 +240,19 @@ async def test_resumable_template_provisioning_and_failure_boundaries() -> None:
             observed_at=datetime.now(UTC),
             version=1,
         )
+        windows_source = Workload(
+            id=ids["windows_source"],
+            cluster_id=ids["cluster"],
+            vmid=9001,
+            node="pve-source",
+            kind="QEMU",
+            name="windows-cloudbase-template",
+            power_state="STOPPED",
+            is_template=True,
+            is_present=True,
+            observed_at=datetime.now(UTC),
+            version=1,
+        )
         product = Product(
             id=ids["product"],
             name="standard-linux",
@@ -247,6 +272,21 @@ async def test_resumable_template_provisioning_and_failure_boundaries() -> None:
             default_vlan_tag=120,
             cloud_init_enabled=True,
             linux_only=True,
+            os_type=TemplateOsType.LINUX.value,
+            is_enabled=True,
+            created_by_id=admin.id,
+        )
+        windows_template = Template(
+            id=ids["windows_template"],
+            name="windows-server-2025",
+            source_workload_id=windows_source.id,
+            source_disk="scsi0",
+            default_storage="local-lvm",
+            default_bridge="vmbr0",
+            default_vlan_tag=120,
+            cloud_init_enabled=True,
+            linux_only=False,
+            os_type=TemplateOsType.WINDOWS.value,
             is_enabled=True,
             created_by_id=admin.id,
         )
@@ -276,13 +316,23 @@ async def test_resumable_template_provisioning_and_failure_boundaries() -> None:
             created_by_id=admin.id,
             version=1,
         )
-        session.add_all([source, product, template, node, pool])
+        session.add_all(
+            [source, windows_source, product, template, windows_template, node, pool]
+        )
         await session.commit()
 
     published: list[UUID] = []
+    revealed_passwords: dict[str, str | None] = {}
 
     async def create_request(
-        name: str, key: str, *, vmid: int | None = None, pool_id: UUID | None = None
+        name: str,
+        key: str,
+        *,
+        vmid: int | None = None,
+        pool_id: UUID | None = None,
+        template_id: UUID | None = None,
+        username: str = "clouduser",
+        ssh_keys: list[str] | None = None,
     ) -> ProvisioningRequest:
         async with app.state.db_session_factory() as session:
             service = ProvisioningService(
@@ -295,16 +345,20 @@ async def test_resumable_template_provisioning_and_failure_boundaries() -> None:
             )
             payload = ProvisioningRequestCreate(
                 product_id=ids["product"],
-                template_id=ids["template"],
+                template_id=template_id or ids["template"],
                 organization_id=ids["org"],
                 target_cluster_id=ids["cluster"],
                 target_vmid=vmid,
                 target_name=name,
                 ip_pool_id=pool_id or ids["pool"],
-                cloud_init=CloudInitRequest(username="clouduser", ssh_public_keys=[ssh_key]),
+                cloud_init=CloudInitRequest(
+                    username=username,
+                    ssh_public_keys=[ssh_key] if ssh_keys is None else ssh_keys,
+                ),
                 start_after_create=True,
             )
             response, _created = await service.create_request(payload, key)
+            revealed_passwords[name] = response.initial_password
             request = await session.get(ProvisioningRequest, response.id)
             assert request is not None
             return request
@@ -325,6 +379,21 @@ async def test_resumable_template_provisioning_and_failure_boundaries() -> None:
             await runner.run(request_id)
 
     try:
+        with pytest.raises(AppError) as invalid_linux_identity:
+            await create_request(
+                "invalid-linux-user",
+                "invalid-linux-user-idempotency",
+                username="Administrator",
+            )
+        assert invalid_linux_identity.value.code == "LINUX_USERNAME_INVALID"
+        with pytest.raises(AppError) as missing_linux_key:
+            await create_request(
+                "missing-linux-key",
+                "missing-linux-key-idempotency",
+                ssh_keys=[],
+            )
+        assert missing_linux_key.value.code == "SSH_KEYS_REQUIRED"
+
         normal = await create_request("normal-vm", "normal-idempotency")
         fake = FakeProvisioningApi()
         await run_request(normal.id, fake)
@@ -356,6 +425,80 @@ async def test_resumable_template_provisioning_and_failure_boundaries() -> None:
             ).list_workloads(organization_id=None, cluster_id=None)
             listed = next(item for item in workloads if item.id == completed.workload_id)
             assert listed.assigned_ip_addresses == ["192.0.2.2"]
+
+        windows = await create_request(
+            "windows-vm",
+            "windows-idempotency",
+            template_id=ids["windows_template"],
+            username="Administrator",
+            ssh_keys=[],
+        )
+        async with app.state.db_session_factory() as session:
+            service = ProvisioningService(
+                session=session,
+                settings=settings,
+                principal=principal,
+                publisher=lambda request_id, _task: published.append(request_id),
+                request_id="windows-idempotency-replay",
+                source_ip="127.0.0.1",
+            )
+            replay, created = await service.create_request(
+                ProvisioningRequestCreate(
+                    product_id=ids["product"],
+                    template_id=ids["windows_template"],
+                    organization_id=ids["org"],
+                    target_cluster_id=ids["cluster"],
+                    target_name="windows-vm",
+                    ip_pool_id=ids["pool"],
+                    cloud_init=CloudInitRequest(
+                        username="Administrator",
+                        ssh_public_keys=[],
+                    ),
+                    start_after_create=True,
+                ),
+                "windows-idempotency",
+            )
+            assert created is False
+            assert replay.id == windows.id
+            assert replay.initial_password is None
+        windows_fake = FakeProvisioningApi()
+        windows_fake.guests.add(9001)
+        await run_request(windows.id, windows_fake)
+        async with app.state.db_session_factory() as session:
+            completed_windows = await session.get(ProvisioningRequest, windows.id)
+            assert completed_windows is not None
+            assert completed_windows.status == ProvisioningStatus.SUCCEEDED.value
+            assert completed_windows.spec_snapshot["os_type"] == TemplateOsType.WINDOWS.value
+            initial_password = revealed_passwords["windows-vm"]
+            assert initial_password is not None and len(initial_password) == 24
+            assert {
+                "ciuser": "Administrator",
+                "cipassword": initial_password,
+            } in windows_fake.configure_calls
+            assert completed_windows.initial_password_ciphertext is None
+            assert completed_windows.initial_password_nonce is None
+            assert completed_windows.initial_password_key_version is None
+            assert completed_windows.initial_password_cleared_at is not None
+            assert "password" not in str(completed_windows.spec_snapshot).lower()
+
+        windows_failed = await create_request(
+            "windows-fail-vm",
+            "windows-fail-idempotency",
+            template_id=ids["windows_template"],
+            username="Administrator",
+            ssh_keys=[],
+        )
+        windows_fail_fake = FakeProvisioningApi(fail_clone=True)
+        windows_fail_fake.guests.add(9001)
+        await run_request(windows_failed.id, windows_fail_fake)
+        async with app.state.db_session_factory() as session:
+            failed_windows = await session.get(ProvisioningRequest, windows_failed.id)
+            assert failed_windows is not None
+            assert failed_windows.status == ProvisioningStatus.MANUAL_REVIEW.value
+            assert failed_windows.initial_password_ciphertext is None
+            assert failed_windows.initial_password_nonce is None
+            assert failed_windows.initial_password_key_version is None
+            assert failed_windows.initial_password_cleared_at is not None
 
         async with app.state.db_session_factory() as session:
             service = ProvisioningService(

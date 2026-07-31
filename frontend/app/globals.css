@@ -3076,6 +3076,188 @@ body,
   font-family: var(--font-mono);
 }
 
+.os-type-fieldset {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.os-type-fieldset legend {
+  margin-bottom: 0.5rem;
+  color: var(--table-ink);
+  font-size: 0.72rem;
+}
+
+.os-type-selector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.os-type-selector button {
+  display: grid;
+  min-height: 6.2rem;
+  align-content: space-between;
+  gap: 0.25rem;
+  padding: 0.85rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.os-type-selector button:hover {
+  border-color: var(--accent-border);
+  transform: translateY(-1px);
+}
+
+.os-type-selector button.active {
+  color: var(--ink);
+  border-color: var(--accent);
+  background: var(--accent-faint);
+  box-shadow: inset 0 -2px var(--accent);
+}
+
+.os-type-selector button > span,
+.os-type-selector button > small {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+}
+
+.os-type-selector button > strong { font-size: 0.78rem; }
+.os-type-selector button > small { color: var(--muted); letter-spacing: 0.02em; }
+
+.os-badge {
+  display: inline-flex;
+  margin-left: 0.45rem;
+  padding: 0.14rem 0.3rem;
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+  font-family: var(--font-mono);
+  font-size: 0.52rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  vertical-align: 0.12rem;
+}
+
+.os-badge.windows {
+  color: var(--notice-ink);
+  background: var(--notice-bg);
+}
+
+.windows-auth-note {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  border: 1px solid var(--accent-border);
+  background:
+    linear-gradient(120deg, var(--accent-faint), transparent 70%),
+    var(--panel-bg);
+}
+
+.windows-auth-note > span,
+.credential-warning > span {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+}
+
+.windows-auth-note > strong { color: var(--ink); font-size: 0.76rem; }
+
+.windows-auth-note > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.66rem;
+  line-height: 1.6;
+}
+
+.windows-credential-result {
+  display: grid;
+  gap: 1.15rem;
+}
+
+.credential-warning {
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.9rem 0;
+  border-block: 1px solid var(--accent-border);
+}
+
+.credential-warning p {
+  margin: 0;
+  color: var(--table-ink);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
+.windows-credential-result dl {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
+.windows-credential-result dl > div {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+  min-height: 3.7rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.windows-credential-result dt {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+}
+
+.windows-credential-result dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.74rem;
+}
+
+.windows-credential-result dd code {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.windows-credential-result .password-row dd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.windows-credential-result .password-row button {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.65rem;
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.62rem;
+}
+
+.credential-confirm {
+  width: 100%;
+  color: var(--accent-ink);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
 .ssh-key-fieldset {
   display: grid;
   gap: 0.9rem;

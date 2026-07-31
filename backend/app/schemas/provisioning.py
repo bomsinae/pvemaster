@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.provisioning import ProvisioningStatus, ProvisioningStepStatus
+from app.models.provisioning import ProvisioningStatus, ProvisioningStepStatus, TemplateOsType
 
 
 class StrictModel(BaseModel):
@@ -48,6 +48,7 @@ class TemplateCreate(StrictModel):
     default_storage: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     default_bridge: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     default_vlan_tag: int | None = Field(default=None, ge=1, le=4094)
+    os_type: TemplateOsType = TemplateOsType.LINUX
 
 
 class TemplateUpdate(StrictModel):
@@ -61,6 +62,7 @@ class TemplateUpdate(StrictModel):
         default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"
     )
     default_vlan_tag: int | None = Field(default=None, ge=1, le=4094)
+    os_type: TemplateOsType | None = None
     is_enabled: bool | None = None
 
 
@@ -74,6 +76,7 @@ class TemplateResponse(BaseModel):
     default_vlan_tag: int | None
     cloud_init_enabled: bool
     linux_only: bool
+    os_type: TemplateOsType
     is_enabled: bool
 
 
@@ -106,8 +109,8 @@ class ProvisioningNodeListResponse(BaseModel):
 
 
 class CloudInitRequest(StrictModel):
-    username: str = Field(pattern=r"^[a-z_][a-z0-9_-]{0,31}$")
-    ssh_public_keys: list[str] = Field(min_length=1, max_length=8)
+    username: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]{0,31}$")
+    ssh_public_keys: list[str] = Field(default_factory=list, max_length=8)
 
     @field_validator("ssh_public_keys")
     @classmethod
@@ -168,6 +171,7 @@ class ProvisioningRequestResponse(BaseModel):
     current_step: str
     product_id: UUID
     template_id: UUID
+    os_type: TemplateOsType
     organization_id: UUID
     target_cluster_id: UUID
     target_node_id: UUID | None
@@ -178,6 +182,7 @@ class ProvisioningRequestResponse(BaseModel):
     workload_id: UUID | None
     error_code: str | None
     error_summary: str | None
+    initial_password: str | None = None
     requested_at: datetime
     started_at: datetime | None
     finished_at: datetime | None

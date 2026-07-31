@@ -203,6 +203,7 @@ URL 전체 유일 제약은 정규화된 endpoint 중복 등록을 막는다. ho
 - 허용 기본값: `default_cpu_cores`, `default_memory_bytes`, `default_disk_bytes`, `default_storage`, `default_bridge`, `default_vlan_tag`.
 - 제한: `min_*`, `max_*` 사양.
 - `cloud_init_enabled BOOLEAN`, `created_by_id`, `created_at`, `updated_at`, `version`.
+- `os_type VARCHAR(16)`은 `LINUX|WINDOWS`이며 Windows는 Cloudbase-Init 준비 템플릿을 의미한다. 기존 `linux_only`는 API 하위 호환을 위해 함께 유지한다.
 
 `source_workload_id`는 `QEMU`, `is_template=true`, `is_present=true`여야 한다. 이는 서비스 계층과 주기 검증으로 강제한다.
 
@@ -229,6 +230,7 @@ URL 전체 유일 제약은 정규화된 endpoint 중복 등록을 막는다. ho
 | `customer_user_id` | UUID FK NULL | 성공 후 선택적 할당 |
 | `status`, `current_step` | VARCHAR | 상태 머신 |
 | `spec_snapshot` | JSONB | 검증·정규화된 CPU/메모리/디스크/네트워크 입력; 비밀 제외 |
+| `initial_password_*` | BYTEA/VARCHAR/TIMESTAMPTZ NULL | Windows 일회성 초기 비밀번호 암호문·nonce·키 버전·제거 시각; 적용 또는 terminal 실패 시 암호문 제거 |
 | `error_code`, `error_summary` | VARCHAR/TEXT NULL | 비민감 오류 |
 | `created_at`, `started_at`, `finished_at` | TIMESTAMPTZ | 실행 시각 |
 | `version` | INTEGER | CAS 상태 전이 |

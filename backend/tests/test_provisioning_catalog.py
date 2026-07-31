@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.models.auth import UserRole
-from app.models.provisioning import Product, Template
+from app.models.provisioning import Product, Template, TemplateOsType
 from app.schemas.provisioning import ProductUpdate, TemplateUpdate
 from app.security.access import Principal
 from app.services.provisioning import ProvisioningService
@@ -71,6 +71,7 @@ async def test_product_and_template_can_be_updated_and_deleted(settings: Setting
         default_vlan_tag=None,
         cloud_init_enabled=True,
         linux_only=True,
+        os_type=TemplateOsType.LINUX.value,
         is_enabled=True,
         created_by_id=uuid4(),
     )
@@ -83,7 +84,12 @@ async def test_product_and_template_can_be_updated_and_deleted(settings: Setting
     )
     updated_template = await catalog.update_template(
         template.id,
-        TemplateUpdate(default_bridge="vmbr1", default_vlan_tag=120, is_enabled=False),
+        TemplateUpdate(
+            default_bridge="vmbr1",
+            default_vlan_tag=120,
+            os_type=TemplateOsType.WINDOWS,
+            is_enabled=False,
+        ),
     )
     await catalog.delete_product(product.id)
     await catalog.delete_template(template.id)
@@ -93,6 +99,8 @@ async def test_product_and_template_can_be_updated_and_deleted(settings: Setting
     assert updated_product.is_enabled is False
     assert updated_template.default_bridge == "vmbr1"
     assert updated_template.default_vlan_tag == 120
+    assert updated_template.os_type == TemplateOsType.WINDOWS
+    assert updated_template.linux_only is False
     assert updated_template.is_enabled is False
     assert session.deleted == [product, template]
 
@@ -123,6 +131,7 @@ async def test_referenced_catalog_items_cannot_be_deleted(
         default_vlan_tag=None,
         cloud_init_enabled=True,
         linux_only=True,
+        os_type=TemplateOsType.LINUX.value,
         is_enabled=True,
         created_by_id=uuid4(),
     )

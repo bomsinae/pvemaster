@@ -27,10 +27,15 @@ from app.models.provisioning import (
     ProvisioningStep,
     ProvisioningStepStatus,
     Template,
+    TemplateOsType,
 )
 from app.proxmox.client import ProxmoxClient
 from app.security.access import Principal
 from app.security.credentials import CredentialCipher, EncryptedCredential
+from app.security.provisioning_secrets import (
+    EncryptedProvisioningSecret,
+    ProvisioningSecretCipher,
+)
 from app.services.audit import add_audit_event
 from app.services.ipam import IpamService
 
@@ -389,9 +394,15 @@ class ProvisioningRunner:
             template is None
             or not template.is_enabled
             or not template.cloud_init_enabled
-            or not template.linux_only
+            or template.os_type not in {item.value for item in TemplateOsType}
         ):
-            raise AppError(409, "TEMPLATE_UNAVAILABLE", "The Linux template is unavailable.")
+            raise AppError(409, "TEMPLATE_UNAVAILABLE", "The QEMU template is unavailable.")
+        if self._request.spec_snapshot.get("os_type") != template.os_type:
+            raise AppError(
+                409,
+                "TEMPLATE_OS_TYPE_CHANGED",
+                "The template operating system type changed.",
+            )
         spec = self._request.spec_snapshot
         if (
             spec.get("cpu_cores") != product.cpu_cores
@@ -583,11 +594,39 @@ class ProvisioningRunner:
         await client.configure_qemu(
             node=(await self._node()).name, vmid=self._vmid(), values=values
         )
-        return {"network_configured": True}
+        return {
+            "network_configured": True,
+            "initializer": (
+                "CLOUDBASE_INIT"
+                if self._request.spec_snapshot.get("os_type") == TemplateOsType.WINDOWS.value
+                else "CLOUD_INIT"
+            ),
+        }
 
     async def _configure_identity(self, client: ProvisioningApi) -> dict[str, object]:
+        if self._request.spec_snapshot.get("os_type") == TemplateOsType.WINDOWS.value:
+            password = self._decrypt_initial_password()
+            await client.configure_qemu(
+                node=(await self._node()).name,
+                vmid=self._vmid(),
+                values={
+                    "ciuser": self._str_spec("cloud_init_username"),
+                    "cipassword": password,
+                },
+            )
+            self._clear_initial_password()
+            await self._session.commit()
+            return {
+                "credential": "ONE_TIME_PASSWORD",
+                "initializer": "CLOUDBASE_INIT",
+            }
+
         keys = self._request.spec_snapshot.get("ssh_public_keys")
-        if not isinstance(keys, list) or not all(isinstance(item, str) for item in keys):
+        if (
+            not isinstance(keys, list)
+            or not keys
+            or not all(isinstance(item, str) for item in keys)
+        ):
             raise AppError(409, "SSH_KEYS_INVALID", "The SSH public keys are invalid.")
         await client.configure_qemu(
             node=(await self._node()).name,
@@ -597,7 +636,14 @@ class ProvisioningRunner:
                 "sshkeys": "\n".join(cast(list[str], keys)),
             },
         )
-        return {"ssh_key_count": len(keys)}
+        return {
+            "ssh_key_count": len(keys),
+            "initializer": (
+                "CLOUDBASE_INIT"
+                if self._request.spec_snapshot.get("os_type") == TemplateOsType.WINDOWS.value
+                else "CLOUD_INIT"
+            ),
+        }
 
     async def _start_vm(self, step: ProvisioningStep, client: ProvisioningApi) -> dict[str, object]:
         if self._request.spec_snapshot.get("start_after_create") is not True:
@@ -722,6 +768,7 @@ class ProvisioningRunner:
         request.finished_at = datetime.now(UTC)
         request.runner_id = None
         request.lease_expires_at = None
+        self._clear_initial_password()
         add_audit_event(
             self._session,
             action="VM_PROVISION",
@@ -835,6 +882,49 @@ class ProvisioningRunner:
         if not isinstance(value, str):
             raise AppError(409, "SPEC_SNAPSHOT_INVALID", "The saved specification is invalid.")
         return value
+
+    def _decrypt_initial_password(self) -> str:
+        request = self._request
+        if (
+            request.initial_password_ciphertext is None
+            or request.initial_password_nonce is None
+            or request.initial_password_key_version is None
+        ):
+            raise AppError(
+                409,
+                "WINDOWS_INITIAL_PASSWORD_UNAVAILABLE",
+                "The Windows initial password is unavailable.",
+            )
+        try:
+            return ProvisioningSecretCipher(
+                self._settings.app_secret_key.get_secret_value()
+            ).decrypt(
+                EncryptedProvisioningSecret(
+                    ciphertext=request.initial_password_ciphertext,
+                    nonce=request.initial_password_nonce,
+                    key_version=request.initial_password_key_version,
+                ),
+                cluster_id=request.target_cluster_id,
+                request_id=request.id,
+            )
+        except (InvalidTag, UnicodeDecodeError) as exc:
+            raise AppError(
+                500,
+                "WINDOWS_INITIAL_PASSWORD_DECRYPTION_FAILED",
+                "The Windows initial password could not be decrypted.",
+            ) from exc
+
+    def _clear_initial_password(self) -> None:
+        request = self._request
+        if (
+            request.initial_password_ciphertext is not None
+            or request.initial_password_nonce is not None
+            or request.initial_password_key_version is not None
+        ):
+            request.initial_password_ciphertext = None
+            request.initial_password_nonce = None
+            request.initial_password_key_version = None
+            request.initial_password_cleared_at = datetime.now(UTC)
 
     @asynccontextmanager
     async def _open_client(self, cluster_id: UUID) -> AsyncIterator[ProvisioningApi]:

@@ -98,7 +98,7 @@ test("admin login, operations, cluster registration and inventory flow", async (
     id: "8b7da9a7-e486-4fcb-bb95-c77cbe6e5690", name: "ubuntu-2404",
     source_workload_id: workload.id, source_disk: "scsi0", default_storage: "local-lvm",
     default_bridge: "vmbr0", default_vlan_tag: null, cloud_init_enabled: true,
-    linux_only: true, is_enabled: true,
+    linux_only: true, os_type: "LINUX", is_enabled: true,
   };
   const node = {
     id: "8f63769b-f060-488c-b80d-e8b4084e16a9", cluster_id: cluster.id, name: "pve-a",
@@ -153,7 +153,7 @@ test("admin login, operations, cluster registration and inventory flow", async (
     if (url.endsWith("/admin/provisioning-nodes")) return response({ items: [node] });
     if (url.endsWith("/admin/provision-requests") && init?.method === "POST") {
       assert.equal(new Headers(init.headers).get("Idempotency-Key"), "provision-key-123");
-      return response({ id: "request-id", job_id: "provision-job-id", status: "QUEUED", current_step: "VALIDATE_REQUEST", target_name: "web-01", target_vmid: null, ip_address: null, error_code: null, requested_at: "2026-07-14T12:00:00Z", steps: [] }, 202);
+      return response({ id: "request-id", job_id: "provision-job-id", status: "QUEUED", current_step: "VALIDATE_REQUEST", os_type: "LINUX", target_name: "web-01", target_vmid: null, ip_address: null, error_code: null, initial_password: null, requested_at: "2026-07-14T12:00:00Z", steps: [] }, 202);
     }
     if (url.endsWith("/admin/provision-requests")) return response({ items: [] });
     if (url.endsWith(`/admin/workloads/${workload.id}/actions/start`)) {
@@ -190,7 +190,7 @@ test("admin login, operations, cluster registration and inventory flow", async (
   await removeOrganizationMember("http://api.test", session.accessToken, organizationId, customerId, fetcher);
   await createTemplate("http://api.test", session.accessToken, {
     name: template.name, source_workload_id: workload.id, source_disk: "scsi0",
-    default_storage: "local-lvm", default_bridge: "vmbr0", default_vlan_tag: null,
+    default_storage: "local-lvm", default_bridge: "vmbr0", default_vlan_tag: null, os_type: "WINDOWS",
   }, fetcher);
   const updatedProduct = await updateProduct("http://api.test", session.accessToken, "product-id", {
     name: "standard-2", cpu_cores: 4, memory_bytes: 4_294_967_296,
@@ -249,6 +249,13 @@ test("admin login, operations, cluster registration and inventory flow", async (
   assert.equal(listedNodes[0].name, "pve-a");
   assert.equal(updatedProduct.is_enabled, false);
   assert.equal(updatedTemplate.name, "ubuntu-2404-v2");
+  const templateCreateRequest = requests.find((request) =>
+    request.url.endsWith("/admin/templates") && request.init?.method === "POST"
+  );
+  assert.equal(
+    JSON.parse(String(templateCreateRequest?.init?.body)).os_type,
+    "WINDOWS",
+  );
   assert.ok(requests.some((request) => request.url.endsWith("/admin/audit-logs?limit=100&offset=0")));
   assert.equal(requests.length, 37);
 });

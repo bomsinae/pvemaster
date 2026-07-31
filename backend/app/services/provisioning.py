@@ -2,8 +2,11 @@ import hmac
 import ipaddress
 import json
 import logging
+import re
+import string
 from collections.abc import Callable
 from hashlib import sha256
+from random import SystemRandom
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -24,6 +27,7 @@ from app.models.provisioning import (
     ProvisioningStep,
     ProvisioningStepStatus,
     Template,
+    TemplateOsType,
 )
 from app.schemas.provisioning import (
     ProductCreate,
@@ -39,6 +43,7 @@ from app.schemas.provisioning import (
     TemplateUpdate,
 )
 from app.security.access import Principal, require_service_role
+from app.security.provisioning_secrets import ProvisioningSecretCipher
 from app.services.audit import add_audit_event
 
 ProvisioningPublisher = Callable[[UUID, str], None]
@@ -61,6 +66,7 @@ PROVISIONING_STEPS = (
     "ASSIGN_ORGANIZATION",
     "CONFIRM_IP",
 )
+WINDOWS_PASSWORD_LENGTH = 24
 
 
 class ProvisioningService:
@@ -163,7 +169,8 @@ class ProvisioningService:
             default_bridge=payload.default_bridge,
             default_vlan_tag=payload.default_vlan_tag,
             cloud_init_enabled=True,
-            linux_only=True,
+            linux_only=payload.os_type == TemplateOsType.LINUX,
+            os_type=payload.os_type.value,
             is_enabled=True,
             created_by_id=self._principal.user_id,
         )
@@ -193,6 +200,9 @@ class ProvisioningService:
             template.default_bridge = payload.default_bridge
         if "default_vlan_tag" in payload.model_fields_set:
             template.default_vlan_tag = payload.default_vlan_tag
+        if payload.os_type is not None:
+            template.os_type = payload.os_type.value
+            template.linux_only = payload.os_type == TemplateOsType.LINUX
         if payload.is_enabled is not None:
             template.is_enabled = payload.is_enabled
         add_audit_event(
@@ -286,8 +296,25 @@ class ProvisioningService:
         if payload.target_node_id is not None:
             await self._validate_node(payload.target_node_id, payload.target_cluster_id, product)
         task_id = str(uuid4())
+        request_id = uuid4()
+        initial_password = (
+            self._generate_windows_password()
+            if template.os_type == TemplateOsType.WINDOWS.value
+            else None
+        )
+        encrypted_password = (
+            ProvisioningSecretCipher(
+                self._settings.app_secret_key.get_secret_value()
+            ).encrypt(
+                initial_password,
+                cluster_id=payload.target_cluster_id,
+                request_id=request_id,
+            )
+            if initial_password is not None
+            else None
+        )
         request = ProvisioningRequest(
-            id=uuid4(),
+            id=request_id,
             requested_by_id=self._principal.user_id,
             idempotency_key_hash=key_hash,
             request_fingerprint=fingerprint,
@@ -315,7 +342,17 @@ class ProvisioningService:
                 "source_node": source.node,
                 "source_vmid": source.vmid,
                 "source_disk": template.source_disk,
+                "os_type": template.os_type,
             },
+            initial_password_ciphertext=(
+                encrypted_password.ciphertext if encrypted_password is not None else None
+            ),
+            initial_password_nonce=(
+                encrypted_password.nonce if encrypted_password is not None else None
+            ),
+            initial_password_key_version=(
+                encrypted_password.key_version if encrypted_password is not None else None
+            ),
             celery_task_id=task_id,
             clone_submitted=False,
             version=1,
@@ -364,7 +401,10 @@ class ProvisioningService:
                 "Provisioning enqueue failed; worker recovery will retry",
                 extra={"provisioning_request_id": str(request.id)},
             )
-        return await self._request_response(request), True
+        return await self._request_response(
+            request,
+            initial_password=initial_password,
+        ), True
 
     async def get_request(self, request_id: UUID) -> ProvisioningRequestResponse:
         request = await self._session.get(ProvisioningRequest, request_id)
@@ -397,13 +437,30 @@ class ProvisioningService:
             template is None
             or not template.is_enabled
             or not template.cloud_init_enabled
-            or not template.linux_only
+            or template.os_type not in {item.value for item in TemplateOsType}
             or source is None
             or source.kind != "QEMU"
             or not source.is_template
             or not source.is_present
         ):
-            raise AppError(422, "TEMPLATE_UNAVAILABLE", "The Linux QEMU template is unavailable.")
+            raise AppError(422, "TEMPLATE_UNAVAILABLE", "The QEMU template is unavailable.")
+        if template.os_type == TemplateOsType.LINUX.value and re.fullmatch(
+            r"[a-z_][a-z0-9_-]{0,31}", payload.cloud_init.username
+        ) is None:
+            raise AppError(
+                422,
+                "LINUX_USERNAME_INVALID",
+                "The Linux Cloud-Init username is invalid.",
+            )
+        if (
+            template.os_type == TemplateOsType.LINUX.value
+            and not payload.cloud_init.ssh_public_keys
+        ):
+            raise AppError(
+                422,
+                "SSH_KEYS_REQUIRED",
+                "At least one SSH public key is required for Linux Cloud-Init.",
+            )
         if cluster is None or not cluster.is_active or source.cluster_id != cluster.id:
             raise AppError(422, "CLUSTER_INCOMPATIBLE", "The target cluster is incompatible.")
         if organization is None or not organization.is_active:
@@ -438,7 +495,12 @@ class ProvisioningService:
             raise AppError(422, "NO_ELIGIBLE_NODE", "No eligible node has sufficient capacity.")
         return node
 
-    async def _request_response(self, request: ProvisioningRequest) -> ProvisioningRequestResponse:
+    async def _request_response(
+        self,
+        request: ProvisioningRequest,
+        *,
+        initial_password: str | None = None,
+    ) -> ProvisioningRequestResponse:
         steps = await self._session.scalars(
             select(ProvisioningStep)
             .where(ProvisioningStep.provisioning_request_id == request.id)
@@ -456,6 +518,7 @@ class ProvisioningService:
             current_step=request.current_step,
             product_id=request.product_id,
             template_id=request.template_id,
+            os_type=TemplateOsType(str(request.spec_snapshot.get("os_type", "LINUX"))),
             organization_id=request.organization_id,
             target_cluster_id=request.target_cluster_id,
             target_node_id=request.target_node_id,
@@ -466,6 +529,7 @@ class ProvisioningService:
             workload_id=request.workload_id,
             error_code=request.error_code,
             error_summary=request.error_summary,
+            initial_password=initial_password,
             requested_at=request.requested_at,
             started_at=request.started_at,
             finished_at=request.finished_at,
@@ -502,6 +566,23 @@ class ProvisioningService:
         ).digest()
 
     @staticmethod
+    def _generate_windows_password() -> str:
+        random = SystemRandom()
+        characters = string.ascii_letters + string.digits + "!@#%_-"
+        password = [
+            random.choice(string.ascii_lowercase),
+            random.choice(string.ascii_uppercase),
+            random.choice(string.digits),
+            random.choice("!@#%_-"),
+        ]
+        password.extend(
+            random.choice(characters)
+            for _ in range(WINDOWS_PASSWORD_LENGTH - len(password))
+        )
+        random.shuffle(password)
+        return "".join(password)
+
+    @staticmethod
     def _product_response(item: Product) -> ProductResponse:
         return ProductResponse.model_validate(item, from_attributes=True)
 
@@ -528,6 +609,7 @@ class ProvisioningService:
             "default_storage": item.default_storage,
             "default_bridge": item.default_bridge,
             "default_vlan_tag": item.default_vlan_tag,
+            "os_type": item.os_type,
             "is_enabled": item.is_enabled,
         }
 

@@ -170,6 +170,7 @@ PVE API token은 일반적으로 token ID와 secret으로 나뉜다.
 - SSH 공개키 기반 로그인을 기본으로 한다.
 - 관리 UI의 새 키 생성 기능은 브라우저 Web Crypto에서 RSA 3072 키 쌍을 만들고 개인키를 PEM 파일로 즉시 한 번만 다운로드한다. 개인키는 서버 API로 전송하거나 브라우저 저장소, DB, Redis, Celery payload, 로그, 감사 로그에 저장하지 않으며 공개키와 fingerprint만 화면에 남긴다. 키 생성은 HTTPS 또는 localhost의 secure context에서만 제공한다.
 - Cloud-Init user-data/network-data는 허용된 구조화 필드에서 서버가 생성한다. 임의 스크립트 user-data는 초기 버전에서 허용하지 않는다.
+- Windows Cloudbase-Init 초기 비밀번호는 서버에서 생성해 최초 응답에서 한 번만 반환한다. worker 적용 전까지 별도 키 파생 영역으로 암호화하고, 적용 성공 또는 terminal 실패 시 암호문을 제거한다. 요청 snapshot, 감사 로그, 작업 인자에는 포함하지 않는다.
 - 평문 비밀번호, private SSH key, API key를 DB/감사/로그/Celery 결과에 저장하지 않는다.
 - 초기 비밀번호가 필요하면 CSPRNG로 생성하고 강한 해시 또는 외부 secret store만 보존하며 사용자에게 한 번만 전달한다.
 - 템플릿에는 고정 호스트 키, machine-id, 이전 cloud-init instance data가 남지 않도록 템플릿 준비 체크리스트를 둔다.

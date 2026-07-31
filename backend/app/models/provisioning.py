@@ -38,6 +38,11 @@ class ProvisioningStepStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class TemplateOsType(StrEnum):
+    LINUX = "LINUX"
+    WINDOWS = "WINDOWS"
+
+
 class Product(Base):
     __tablename__ = "products"
     __table_args__ = (
@@ -63,7 +68,18 @@ class Product(Base):
 
 class Template(Base):
     __tablename__ = "templates"
-    __table_args__ = (UniqueConstraint("source_workload_id"),)
+    __table_args__ = (
+        UniqueConstraint("source_workload_id"),
+        CheckConstraint(
+            "os_type IN ('LINUX','WINDOWS')",
+            name="ck_templates_os_type",
+        ),
+        CheckConstraint(
+            "(os_type = 'LINUX' AND linux_only) "
+            "OR (os_type = 'WINDOWS' AND NOT linux_only)",
+            name="ck_templates_os_type_legacy_flag",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
@@ -76,6 +92,9 @@ class Template(Base):
     default_vlan_tag: Mapped[int | None] = mapped_column(Integer)
     cloud_init_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     linux_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    os_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=TemplateOsType.LINUX.value
+    )
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -144,6 +163,10 @@ class ProvisioningRequest(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False)
     current_step: Mapped[str] = mapped_column(String(64), nullable=False)
     spec_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    initial_password_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    initial_password_nonce: Mapped[bytes | None] = mapped_column(LargeBinary(12))
+    initial_password_key_version: Mapped[str | None] = mapped_column(String(16))
+    initial_password_cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     celery_task_id: Mapped[str] = mapped_column(String(255), nullable=False)
     clone_submitted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     error_code: Mapped[str | None] = mapped_column(String(64))

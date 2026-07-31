@@ -76,7 +76,7 @@ services:
         "app.worker:celery_app",
         "worker",
         "--loglevel=INFO",
-        "--queues=operations,maintenance,celery",
+        "--queues=operations,celery",
       ]
     environment:
       APP_NAME: PVE Master Worker

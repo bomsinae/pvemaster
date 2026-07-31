@@ -469,6 +469,11 @@ async def test_provisioning_calls_use_full_clone_and_allowlisted_form_fields() -
             vmid=101,
             values={"cores": "2", "memory": "2048"},
         )
+        await client.configure_qemu(
+            node="pve-target",
+            vmid=101,
+            values={"ciuser": "Administrator", "cipassword": "A-secure_24%Pass"},
+        )
         await client.resize_qemu_disk(
             node="pve-target", vmid=101, disk="scsi0", size_bytes=21_474_836_480
         )
@@ -483,6 +488,10 @@ async def test_provisioning_calls_use_full_clone_and_allowlisted_form_fields() -
     }
     assert requests[1][2] == {"cores": ["2"], "memory": ["2048"]}
     assert requests[2][2] == {
+        "ciuser": ["Administrator"],
+        "cipassword": ["A-secure_24%Pass"],
+    }
+    assert requests[3][2] == {
         "disk": ["scsi0"],
         "size": ["21474836480"],
     }

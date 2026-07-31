@@ -264,6 +264,12 @@ export function AdminDashboard({
   const [editingProvisioningNode, setEditingProvisioningNode] = useState<ProvisioningNode | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
+  const [windowsCredential, setWindowsCredential] = useState<{
+    username: string;
+    password: string;
+    targetName: string;
+    jobId: string;
+  } | null>(null);
   const [passwordResetUser, setPasswordResetUser] = useState<CurrentUser | null>(null);
   const [managedUser, setManagedUser] = useState<CurrentUser | null>(null);
   const [selectedWorkload, setSelectedWorkload] = useState<string | null>(null);
@@ -281,10 +287,14 @@ export function AdminDashboard({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [form, setForm] = useState<"cluster" | "cluster-delete" | "user" | "user-password-reset" | "user-status" | "user-delete" | "organization-user" | "organization" | "organization-delete" | "pool" | "pool-delete" | "product" | "product-delete" | "template" | "template-delete" | "node" | "vm" | "vm-spec" | "vm-delete" | null>(null);
+  const [form, setForm] = useState<"cluster" | "cluster-delete" | "user" | "user-password-reset" | "user-status" | "user-delete" | "organization-user" | "organization" | "organization-delete" | "pool" | "pool-delete" | "product" | "product-delete" | "template" | "template-delete" | "node" | "vm" | "windows-credential" | "vm-spec" | "vm-delete" | null>(null);
   const drawerRef = useRef<HTMLElement>(null);
+  const closeForm = useCallback(() => {
+    setForm(null);
+    setWindowsCredential(null);
+  }, []);
 
-  useDialogFocus(Boolean(form), drawerRef, () => setForm(null));
+  useDialogFocus(Boolean(form), drawerRef, closeForm);
 
   const isSuperAdmin = user.role === "SUPER_ADMIN";
   const navigation = useMemo<Section[]>(
@@ -301,7 +311,7 @@ export function AdminDashboard({
   }, [selectedCluster]);
 
   function navigateToSection(next: Section) {
-    setForm(null);
+    closeForm();
     setNotice("");
     setMobileNavOpen(false);
     if (next === section) return;
@@ -316,7 +326,7 @@ export function AdminDashboard({
   useEffect(() => {
     const restoreSection = () => {
       const next = sectionFromSearch(window.location.search, navigation);
-      setForm(null);
+      closeForm();
       setNotice("");
       setSection(next);
     };
@@ -333,7 +343,7 @@ export function AdminDashboard({
       window.clearTimeout(initialRestore);
       window.removeEventListener("popstate", restoreSection);
     };
-  }, [navigation]);
+  }, [closeForm, navigation]);
 
   function openConsole(workload: Workload) {
     if (!openConsoleWindow(workload.id)) {
@@ -1145,6 +1155,7 @@ export function AdminDashboard({
         source_disk: String(data.get("source_disk")), default_storage: String(data.get("default_storage")),
         default_bridge: String(data.get("default_bridge")),
         default_vlan_tag: data.get("default_vlan_tag") ? Number(data.get("default_vlan_tag")) : null,
+        os_type: String(data.get("os_type")),
       };
       const sourceWorkloadId = String(data.get("source_workload_id"));
       if (editingTemplate) {
@@ -1202,8 +1213,11 @@ export function AdminDashboard({
     const data = new FormData(event.currentTarget);
     const selectedTemplate = templates.find((item) => item.id === String(data.get("template_id")));
     const source = workloads.find((item) => item.id === selectedTemplate?.source_workload_id);
-    const sshPublicKeys = validateSshPublicKeys(String(data.get("ssh_public_keys")));
-    if (sshPublicKeys.error) {
+    const isWindows = selectedTemplate?.os_type === "WINDOWS";
+    const sshPublicKeys = isWindows
+      ? { keys: [] as string[], error: "" }
+      : validateSshPublicKeys(String(data.get("ssh_public_keys")));
+    if (!isWindows && sshPublicKeys.error) {
       setError(sshPublicKeys.error);
       return;
     }
@@ -1221,7 +1235,23 @@ export function AdminDashboard({
         },
         start_after_create: data.get("start_after_create") === "on",
       }, crypto.randomUUID());
-      setForm(null); setNotice(`VM 생성 요청을 접수했습니다 · ${request.job_id.slice(0, 8)}`); await loadSection("vms");
+      if (isWindows) {
+        if (!request.initial_password) {
+          setError("Windows 초기 비밀번호가 응답에 포함되지 않았습니다. 요청 상태를 확인하세요.");
+          return;
+        }
+        setWindowsCredential({
+          username: String(data.get("username")),
+          password: request.initial_password,
+          targetName: String(data.get("target_name")),
+          jobId: request.job_id,
+        });
+        setForm("windows-credential");
+      } else {
+        setForm(null);
+        setNotice(`VM 생성 요청을 접수했습니다 · ${request.job_id.slice(0, 8)}`);
+      }
+      await loadSection("vms");
     } catch (caught) { setError(readableError(caught)); }
     finally { setSaving(false); }
   }
@@ -1331,9 +1361,9 @@ export function AdminDashboard({
       </section>
 
       {form && (
-        <div className="admin-drawer-backdrop" onMouseDown={() => setForm(null)}>
+        <div className="admin-drawer-backdrop" onMouseDown={closeForm}>
           <aside ref={drawerRef} tabIndex={-1} className="admin-drawer" role="dialog" aria-modal="true" aria-label="관리 작업" onMouseDown={(event) => event.stopPropagation()}>
-            <button className="drawer-close" onClick={() => setForm(null)} aria-label="관리 작업 닫기">×</button>
+            <button className="drawer-close" onClick={closeForm} aria-label="관리 작업 닫기">×</button>
             {error && <div className="drawer-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError("")} aria-label="오류 메시지 닫기">×</button></div>}
             {form === "cluster" && <ClusterForm onSubmit={submitCluster} saving={saving} />}
             {form === "cluster-delete" && currentCluster && <ClusterDeleteForm cluster={currentCluster} check={clusterRemovalCheck} checking={checkingClusterRemoval} onSubmit={submitClusterDelete} saving={saving} />}
@@ -1351,6 +1381,7 @@ export function AdminDashboard({
             {form === "template-delete" && editingTemplate && <CatalogDeleteForm kind="템플릿" name={editingTemplate.name} copy="플랫폼의 등록만 삭제하며 Proxmox 원본 템플릿은 삭제하지 않습니다. 프로비저닝 이력이 참조하면 삭제할 수 없습니다." onSubmit={submitCatalogDelete} saving={saving} />}
             {form === "node" && <ProvisioningNodeForm onSubmit={submitNode} saving={saving} clusters={clusters} existing={editingProvisioningNode} apiBaseUrl={apiBaseUrl} token={token} />}
             {form === "vm" && <VmCreateForm onSubmit={submitVm} saving={saving} products={products} templates={templates} organizations={organizations} pools={pools} nodes={provisioningNodes} workloads={workloads} />}
+            {form === "windows-credential" && windowsCredential && <WindowsCredentialResult credential={windowsCredential} onClose={closeForm} />}
             {form === "vm-spec" && selectedWorkload && <VmSpecForm workload={workloads.find((item) => item.id === selectedWorkload)!} onSubmit={submitVmSpec} saving={saving} />}
             {form === "vm-delete" && selectedWorkload && <VmDeleteForm workload={workloads.find((item) => item.id === selectedWorkload)!} onSubmit={submitVmDelete} saving={saving} />}
           </aside>
@@ -2122,15 +2153,15 @@ function ProvisioningView({ products, templates, workloads, nodes, clusters, req
       <div className="catalog-group-title"><h3>상품</h3><span>{products.length}</span></div>
       <div className="catalog-lines product-catalog-lines">{products.map((product) => <div key={product.id}><strong>{product.name}</strong><span>{product.cpu_cores} vCPU</span><span>{formatBytes(product.memory_bytes)} RAM</span><span>{formatBytes(product.disk_bytes)} Disk</span><StatusMark ok={product.is_enabled} label={product.is_enabled ? "사용" : "중지"} /><CatalogRowActions onEdit={() => onEditProduct(product)} onDelete={() => onDeleteProduct(product)} /></div>)}</div>
       {!products.length && <p className="empty-state">등록된 상품이 없습니다.</p>}
-      <div className="catalog-group-title template-group-title"><h3>Linux QEMU 템플릿</h3><span>{templates.length}</span></div>
-      <div className="catalog-lines template-catalog-lines">{templates.map((template) => { const source = sourceWorkloads.get(template.source_workload_id); return <div key={template.id}><strong>{template.name}</strong><span>{source ? `${source.cluster_name} / ${source.node} · VMID ${source.vmid}` : "원본 정보 없음"}</span><code>{template.source_disk}</code><span>{template.default_storage}</span><span>{template.default_bridge}{template.default_vlan_tag ? ` · VLAN ${template.default_vlan_tag}` : ""}</span><StatusMark ok={template.is_enabled} label={template.is_enabled ? "사용" : "중지"} /><CatalogRowActions onEdit={() => onEditTemplate(template)} onDelete={() => onDeleteTemplate(template)} /></div>; })}</div>
+      <div className="catalog-group-title template-group-title"><h3>QEMU OS 템플릿</h3><span>{templates.length}</span></div>
+      <div className="catalog-lines template-catalog-lines">{templates.map((template) => { const source = sourceWorkloads.get(template.source_workload_id); return <div key={template.id}><strong>{template.name}<small className={`os-badge ${template.os_type.toLowerCase()}`}>{template.os_type}</small></strong><span>{source ? `${source.cluster_name} / ${source.node} · VMID ${source.vmid}` : "원본 정보 없음"}</span><code>{template.source_disk}</code><span>{template.default_storage}</span><span>{template.default_bridge}{template.default_vlan_tag ? ` · VLAN ${template.default_vlan_tag}` : ""}</span><StatusMark ok={template.is_enabled} label={template.is_enabled ? "사용" : "중지"} /><CatalogRowActions onEdit={() => onEditTemplate(template)} onDelete={() => onDeleteTemplate(template)} /></div>; })}</div>
       {!templates.length && <p className="empty-state">등록된 템플릿이 없습니다. Proxmox 템플릿을 가져온 뒤 등록하세요.</p>}
     </section>
     <section className="admin-section provisioning-nodes"><div className="admin-section-title"><div><p className="eyebrow">Placement policy</p><h2>프로비저닝 노드</h2><p className="section-note">활성·유지보수·예약 가능 용량을 기준으로 VM 배치 대상을 결정합니다.</p></div><div className="setup-actions"><span>{eligible} / {nodes.length} eligible</span><button onClick={onCreateNode}>노드 추가</button></div></div>
       <div className="admin-table provisioning-node-table"><div className="table-head"><span>노드</span><span>클러스터</span><span>가용 RAM</span><span>가용 스토리지</span><span>배치 상태</span><span>최근 선택</span><span>관리</span></div>{nodes.map((node) => <div className="table-row" key={node.id}><span data-label="노드"><strong>{node.name}</strong><small>{node.id.slice(0, 8)}</small></span><strong data-label="클러스터">{clusterNames.get(node.cluster_id) ?? node.cluster_id.slice(0, 8)}</strong><code data-label="가용 RAM">{formatBytes(node.available_memory_bytes)}</code><code data-label="가용 스토리지">{formatBytes(node.available_storage_bytes)}</code><span className="responsive-table-field" data-label="배치 상태"><StatusMark ok={node.is_enabled && !node.is_maintenance} label={!node.is_enabled ? "중지" : node.is_maintenance ? "유지보수" : "자동 배치"} /></span><span data-label="최근 선택">{formatTime(node.last_selected_at)}</span><span className="responsive-table-field" data-label="관리"><button className="row-action" onClick={() => onEditNode(node)}>정책 수정</button></span></div>)}</div>
       {!nodes.length && <p className="empty-state">등록된 노드 정책이 없습니다. 클러스터 인벤토리에서 노드를 선택해 추가하세요.</p>}
     </section>
-    <section className="admin-section"><div className="admin-section-title"><div><p className="eyebrow">Execution</p><h2>최근 프로비저닝</h2></div><span>{requests.length} requests</span></div><div className="admin-table request-table"><div className="table-head"><span>대상</span><span>VMID / IP</span><span>현재 단계</span><span>상태</span><span>요청 시각</span></div>{requests.map((request) => <div className="table-row" key={request.id}><span className="request-target"><strong>{request.target_name}</strong>{request.error_code && <small>{request.error_code}</small>}</span><code>{request.target_vmid ?? "auto"} · {request.ip_address ?? "reserved"}</code><span>{request.current_step}</span><StatusMark ok={request.status === "SUCCEEDED"} label={request.status} /><span>{formatTime(request.requested_at)}</span></div>)}</div></section>
+    <section className="admin-section"><div className="admin-section-title"><div><p className="eyebrow">Execution</p><h2>최근 프로비저닝</h2></div><span>{requests.length} requests</span></div><div className="admin-table request-table"><div className="table-head"><span>대상</span><span>VMID / IP</span><span>현재 단계</span><span>상태</span><span>요청 시각</span></div>{requests.map((request) => <div className="table-row" key={request.id}><span className="request-target"><strong>{request.target_name}<small className={`os-badge ${request.os_type.toLowerCase()}`}>{request.os_type}</small></strong>{request.error_code && <small>{request.error_code}</small>}</span><code>{request.target_vmid ?? "auto"} · {request.ip_address ?? "reserved"}</code><span>{request.current_step}</span><StatusMark ok={request.status === "SUCCEEDED"} label={request.status} /><span>{formatTime(request.requested_at)}</span></div>)}</div></section>
   </div>;
 }
 
@@ -2223,7 +2254,7 @@ function VmDeleteForm({ workload, onSubmit, saving }: { workload: Workload; onSu
 function TemplateForm({ onSubmit, saving, workloads, existing }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean; workloads: Workload[]; existing: Template | null }) {
   const sources = workloads.filter((item) => item.kind === "QEMU" && item.is_template && item.is_present);
   const sourceAvailable = !existing || sources.some((item) => item.id === existing.source_workload_id);
-  return <form className="admin-form" onSubmit={onSubmit}><DrawerIntro eyebrow="Template catalog" title={existing ? `${existing.name} 수정` : "QEMU 템플릿 등록"} copy="플랫폼 등록 정보만 관리하며 Proxmox 원본 템플릿 자체는 변경하지 않습니다." />{!sources.length && <p className="form-security">사용 가능한 QEMU 템플릿이 없습니다. Proxmox에서 템플릿을 만든 뒤 클러스터 화면의 VM/CT 가져오기를 실행하세요.</p>}{existing && !sourceAvailable && <p className="form-security node-inventory-error">현재 원본이 인벤토리에 없습니다. 다른 QEMU 템플릿을 선택하거나 항목을 비활성화하세요.</p>}<label>표시 이름<input name="name" required defaultValue={existing?.name ?? ""} /></label><label>원본 템플릿<select name="source_workload_id" required defaultValue={existing?.source_workload_id ?? ""}><option value="" disabled>템플릿 선택</option>{existing && !sourceAvailable && <option value={existing.source_workload_id}>현재 원본 · 인벤토리 없음</option>}{sources.map((item) => <option key={item.id} value={item.id}>{item.cluster_name} · {item.node} · {item.vmid} {item.name}</option>)}</select></label><label>원본 디스크<input name="source_disk" defaultValue={existing?.source_disk ?? "scsi0"} pattern="(scsi|virtio|sata)[0-9]+" required /></label><label>대상 스토리지<input name="default_storage" defaultValue={existing?.default_storage ?? ""} placeholder="local-lvm" pattern="[A-Za-z0-9_.-]+" required /></label><label>네트워크 브리지<input name="default_bridge" defaultValue={existing?.default_bridge ?? "vmbr0"} pattern="[A-Za-z0-9_.-]+" required /></label><label>VLAN tag <small>선택</small><input name="default_vlan_tag" type="number" min="1" max="4094" defaultValue={existing?.default_vlan_tag ?? ""} /></label>{existing && <label className="form-checkbox"><input name="is_enabled" type="checkbox" defaultChecked={existing.is_enabled} /> 새 프로비저닝에서 사용</label>}<SubmitButton saving={saving} disabled={!sources.length && !existing} label={existing ? "템플릿 수정" : "템플릿 등록"} /></form>;
+  return <form className="admin-form" onSubmit={onSubmit}><DrawerIntro eyebrow="Template catalog" title={existing ? `${existing.name} 수정` : "QEMU 템플릿 등록"} copy="플랫폼 등록 정보만 관리하며 Proxmox 원본 템플릿 자체는 변경하지 않습니다." />{!sources.length && <p className="form-security">사용 가능한 QEMU 템플릿이 없습니다. Proxmox에서 템플릿을 만든 뒤 클러스터 화면의 VM/CT 가져오기를 실행하세요.</p>}{existing && !sourceAvailable && <p className="form-security node-inventory-error">현재 원본이 인벤토리에 없습니다. 다른 QEMU 템플릿을 선택하거나 항목을 비활성화하세요.</p>}<label>운영체제<select name="os_type" required defaultValue={existing?.os_type ?? "LINUX"}><option value="LINUX">Linux · Cloud-Init</option><option value="WINDOWS">Windows · Cloudbase-Init</option></select></label><p className="field-help">Windows 템플릿에는 Cloudbase-Init과 VirtIO 드라이버가 준비되어 있어야 초기 관리자 비밀번호와 IP가 첫 부팅에 적용됩니다.</p><label>표시 이름<input name="name" required defaultValue={existing?.name ?? ""} /></label><label>원본 템플릿<select name="source_workload_id" required defaultValue={existing?.source_workload_id ?? ""}><option value="" disabled>템플릿 선택</option>{existing && !sourceAvailable && <option value={existing.source_workload_id}>현재 원본 · 인벤토리 없음</option>}{sources.map((item) => <option key={item.id} value={item.id}>{item.cluster_name} · {item.node} · {item.vmid} {item.name}</option>)}</select></label><label>원본 디스크<input name="source_disk" defaultValue={existing?.source_disk ?? "scsi0"} pattern="(scsi|virtio|sata)[0-9]+" required /></label><label>대상 스토리지<input name="default_storage" defaultValue={existing?.default_storage ?? ""} placeholder="local-lvm" pattern="[A-Za-z0-9_.-]+" required /></label><label>네트워크 브리지<input name="default_bridge" defaultValue={existing?.default_bridge ?? "vmbr0"} pattern="[A-Za-z0-9_.-]+" required /></label><label>VLAN tag <small>선택</small><input name="default_vlan_tag" type="number" min="1" max="4094" defaultValue={existing?.default_vlan_tag ?? ""} /></label>{existing && <label className="form-checkbox"><input name="is_enabled" type="checkbox" defaultChecked={existing.is_enabled} /> 새 프로비저닝에서 사용</label>}<SubmitButton saving={saving} disabled={!sources.length && !existing} label={existing ? "템플릿 수정" : "템플릿 등록"} /></form>;
 }
 
 function ProvisioningNodeForm({ onSubmit, saving, clusters, existing, apiBaseUrl, token }: {
@@ -2286,7 +2317,10 @@ function VmCreateForm({ onSubmit, saving, products, templates, organizations, po
   onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean; products: Product[]; templates: Template[];
   organizations: Organization[]; pools: IpPool[]; nodes: ProvisioningNode[]; workloads: Workload[];
 }) {
-  const [templateId, setTemplateId] = useState(templates[0]?.id ?? "");
+  const initialOsType = templates.some((item) => item.is_enabled && item.os_type === "LINUX") ? "LINUX" : "WINDOWS";
+  const [osType, setOsType] = useState<"LINUX" | "WINDOWS">(initialOsType);
+  const availableTemplates = templates.filter((item) => item.is_enabled && item.os_type === osType);
+  const [templateId, setTemplateId] = useState(availableTemplates[0]?.id ?? "");
   const [keyMode, setKeyMode] = useState<"existing" | "generate">("existing");
   const [keyName, setKeyName] = useState("pvemaster-key");
   const [sshPublicKeys, setSshPublicKeys] = useState("");
@@ -2297,7 +2331,14 @@ function VmCreateForm({ onSubmit, saving, products, templates, organizations, po
   const source = workloads.find((item) => item.id === selectedTemplate?.source_workload_id);
   const eligibleNodes = nodes.filter((item) => item.cluster_id === source?.cluster_id && item.is_enabled && !item.is_maintenance);
   const eligiblePools = pools.filter((item) => item.is_active && (item.cluster_id === null || item.cluster_id === source?.cluster_id) && item.ip_family === 4 && item.availability_status !== "EXHAUSTED");
-  const ready = products.some((item) => item.is_enabled) && templates.some((item) => item.is_enabled) && organizations.some((item) => item.is_active) && eligibleNodes.length > 0 && eligiblePools.length > 0;
+  const ready = products.some((item) => item.is_enabled) && availableTemplates.length > 0 && organizations.some((item) => item.is_active) && eligibleNodes.length > 0 && eligiblePools.length > 0;
+
+  function selectOsType(next: "LINUX" | "WINDOWS") {
+    setOsType(next);
+    setTemplateId(templates.find((item) => item.is_enabled && item.os_type === next)?.id ?? "");
+    setGeneratedKey(null);
+    setSshPublicKeys("");
+  }
 
   async function generateKey() {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(keyName)) {
@@ -2327,17 +2368,24 @@ function VmCreateForm({ onSubmit, saving, products, templates, organizations, po
   }
 
   return <form className="admin-form" onSubmit={onSubmit}>
-    <DrawerIntro eyebrow="Full clone workflow" title="Linux VM 생성" copy="QEMU template full clone과 Cloud-Init으로 VM을 비동기 생성합니다. 각 단계와 실패 지점은 기록됩니다." />
+    <DrawerIntro eyebrow="Full clone workflow" title={`${osType === "WINDOWS" ? "Windows" : "Linux"} VM 생성`} copy={`QEMU template full clone과 ${osType === "WINDOWS" ? "Cloudbase-Init" : "Cloud-Init"}으로 VM을 비동기 생성합니다. 각 단계와 실패 지점은 기록됩니다.`} />
+    <fieldset className="os-type-fieldset">
+      <legend>운영체제</legend>
+      <div className="os-type-selector" role="radiogroup" aria-label="VM 운영체제 선택">
+        <button type="button" role="radio" aria-checked={osType === "LINUX"} className={osType === "LINUX" ? "active" : ""} onClick={() => selectOsType("LINUX")}><span>LINUX</span><strong>Cloud-Init</strong><small>{templates.filter((item) => item.is_enabled && item.os_type === "LINUX").length} templates</small></button>
+        <button type="button" role="radio" aria-checked={osType === "WINDOWS"} className={osType === "WINDOWS" ? "active windows" : ""} onClick={() => selectOsType("WINDOWS")}><span>WINDOWS</span><strong>Cloudbase-Init</strong><small>{templates.filter((item) => item.is_enabled && item.os_type === "WINDOWS").length} templates</small></button>
+      </div>
+    </fieldset>
     {!ready && <p className="form-security">생성 준비가 필요합니다. 활성 상품·템플릿·조직·IPv4 풀과 템플릿 클러스터의 프로비저닝 노드를 확인하세요.</p>}
     <label>상품<select name="product_id" required defaultValue=""><option value="" disabled>상품 선택</option>{products.filter((item) => item.is_enabled).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.cpu_cores} vCPU · {formatBytes(item.memory_bytes)}</option>)}</select></label>
-    <label>템플릿<select name="template_id" required value={templateId} onChange={(event) => setTemplateId(event.target.value)}><option value="" disabled>템플릿 선택</option>{templates.filter((item) => item.is_enabled).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+    <label>{osType === "WINDOWS" ? "Windows" : "Linux"} 템플릿<select name="template_id" required value={templateId} onChange={(event) => setTemplateId(event.target.value)}><option value="" disabled>템플릿 선택</option>{availableTemplates.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     <label>조직<select name="organization_id" required defaultValue=""><option value="" disabled>할당 조직 선택</option>{organizations.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     <label>대상 노드 <small>기본값은 자동 배치</small><select name="target_node_id" defaultValue=""><option value="">자동 선택 (권장)</option>{eligibleNodes.map((item) => <option key={item.id} value={item.id}>{item.name} · RAM {formatBytes(item.available_memory_bytes)} · Disk {formatBytes(item.available_storage_bytes)}</option>)}</select></label>
     <label>IPv4 풀<select name="ip_pool_id" required defaultValue=""><option value="" disabled>IP 풀 선택</option>{eligiblePools.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.cidr}</option>)}</select></label>
     <label>VM 이름<input name="target_name" required maxLength={63} pattern="[A-Za-z0-9][A-Za-z0-9.-]{0,62}" placeholder="web-01" /></label>
     <label>VMID <small>비우면 자동 예약</small><input name="target_vmid" type="number" min="100" max="999999999" /></label>
-    <label>Cloud-Init 사용자<input name="username" required pattern="[a-z_][a-z0-9_-]{0,31}" defaultValue="ubuntu" /></label>
-    <fieldset className="ssh-key-fieldset">
+    <label>{osType === "WINDOWS" ? "Cloudbase-Init" : "Cloud-Init"} 사용자<input key={osType} name="username" required pattern={osType === "WINDOWS" ? "[A-Za-z_][A-Za-z0-9_.-]{0,31}" : "[a-z_][a-z0-9_-]{0,31}"} defaultValue={osType === "WINDOWS" ? "Administrator" : "ubuntu"} /></label>
+    {osType === "LINUX" && <><fieldset className="ssh-key-fieldset">
       <legend>SSH 인증 키</legend>
       <div className="ssh-key-mode" role="radiogroup" aria-label="SSH 키 입력 방식">
         <button type="button" role="radio" aria-checked={keyMode === "existing"} className={keyMode === "existing" ? "active" : ""} onClick={() => setKeyMode("existing")}>기존 공개키</button>
@@ -2351,9 +2399,34 @@ function VmCreateForm({ onSubmit, saving, products, templates, organizations, po
       </div>}
     </fieldset>
     <label>SSH 공개키 <small>필수 · 한 줄에 하나</small><textarea name="ssh_public_keys" rows={5} required spellCheck={false} aria-describedby="ssh-public-key-help" placeholder="ssh-ed25519 AAAA... admin@example" value={sshPublicKeys} readOnly={keyMode === "generate" && Boolean(generatedKey)} onChange={(event) => { setSshPublicKeys(event.target.value); setGeneratedKey(null); }} /></label>
-    <p id="ssh-public-key-help" className="field-help">{keyMode === "generate" ? "개인키는 서버로 전송하거나 저장하지 않습니다. 공개키만 VM의 Cloud-Init 설정에 사용됩니다." : <>로컬의 <code>~/.ssh/id_ed25519.pub</code> 파일에서 공개키 한 줄 전체를 붙여 넣으세요.</>}</p>
+    <p id="ssh-public-key-help" className="field-help">{keyMode === "generate" ? "개인키는 서버로 전송하거나 저장하지 않습니다. 공개키만 VM의 Cloud-Init 설정에 사용됩니다." : <>로컬의 <code>~/.ssh/id_ed25519.pub</code> 파일에서 공개키 한 줄 전체를 붙여 넣으세요.</>}</p></>}
+    {osType === "WINDOWS" && <div className="windows-auth-note"><span>RDP / WINRM</span><strong>초기 관리자 비밀번호 자동 생성</strong><p>요청이 접수되면 강력한 일회성 비밀번호를 한 번만 표시합니다. 별도로 보관한 뒤 첫 로그인에서 변경하세요.</p></div>}
     <label className="form-checkbox"><input name="start_after_create" type="checkbox" defaultChecked /> 생성 완료 후 VM 시작</label>
     <p className="form-security">노드를 지정하지 않으면 활성·비유지보수·충분한 용량 조건을 만족하는 노드를 round-robin으로 선택합니다.</p>
     <SubmitButton saving={saving || keyGenerating} disabled={!ready || keyGenerating} label="VM 생성 요청" />
   </form>;
+}
+
+function WindowsCredentialResult({ credential, onClose }: {
+  credential: { username: string; password: string; targetName: string; jobId: string };
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyPassword() {
+    await navigator.clipboard.writeText(credential.password);
+    setCopied(true);
+  }
+
+  return <section className="windows-credential-result">
+    <DrawerIntro eyebrow="One-time credential" title="Windows VM 요청 접수" copy={`${credential.targetName}의 초기 관리자 자격 증명입니다. 이 화면을 닫으면 비밀번호를 다시 확인할 수 없습니다.`} />
+    <div className="credential-warning"><span>01</span><p>비밀번호를 지금 복사해 안전한 비밀 저장소에 보관하세요.</p></div>
+    <dl>
+      <div><dt>사용자</dt><dd>{credential.username}</dd></div>
+      <div className="password-row"><dt>초기 비밀번호</dt><dd><code>{credential.password}</code><button type="button" onClick={copyPassword}>{copied ? "복사됨" : "복사"}</button></dd></div>
+      <div><dt>작업 ID</dt><dd><code>{credential.jobId}</code></dd></div>
+    </dl>
+    <p className="form-security">Cloudbase-Init이 이 비밀번호를 Windows에 적용합니다. 첫 RDP 또는 WinRM 로그인 후 즉시 변경하세요.</p>
+    <button className="drawer-submit credential-confirm" type="button" onClick={onClose}>비밀번호를 저장했습니다 <span>완료 →</span></button>
+  </section>;
 }

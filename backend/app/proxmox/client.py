@@ -442,7 +442,16 @@ class ProxmoxClient:
         return self._require_upid(data)
 
     async def configure_qemu(self, *, node: str, vmid: int, values: dict[str, str]) -> None:
-        allowed = {"cores", "memory", "net0", "ipconfig0", "nameserver", "ciuser", "sshkeys"}
+        allowed = {
+            "cores",
+            "memory",
+            "net0",
+            "ipconfig0",
+            "nameserver",
+            "ciuser",
+            "cipassword",
+            "sshkeys",
+        }
         if not values or not set(values).issubset(allowed):
             raise ValueError("unsupported QEMU configuration parameter")
         payload = dict(values)

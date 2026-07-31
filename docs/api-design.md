@@ -364,7 +364,7 @@ worker는 UPID가 저장된 작업을 재시작할 때 제출을 반복하지 �
 | PATCH | `/admin/templates/{template_id}` | 설명, 사양 제한, 네트워크 기본값 변경 |
 | DELETE | `/admin/templates/{template_id}` | 플랫폼 등록 해제; PVE template은 삭제하지 않음 |
 
-등록 body는 `source_workload_id`, 이름, 기본/최소/최대 CPU·메모리·디스크, storage/bridge/VLAN 정책을 받는다. PVE에서 `QEMU` 및 `is_template=true`인지 확인한다.
+등록 body는 `source_workload_id`, 이름, `os_type=LINUX|WINDOWS`, 기본/최소/최대 CPU·메모리·디스크, storage/bridge/VLAN 정책을 받는다. PVE에서 `QEMU` 및 `is_template=true`인지 확인한다. Windows 템플릿은 Cloudbase-Init과 VirtIO 드라이버가 사전 구성되어 있어야 한다.
 
 ## 10. VM 프로비저닝 API
 
@@ -427,7 +427,7 @@ worker는 UPID가 저장된 작업을 재시작할 때 제출을 반복하지 �
 
 취소 응답도 `202`다. 이미 terminal이면 현재 상태를 반환하고, PVE 단계가 취소 불가능하면 `CANCEL_REQUESTED` 후 최종 실제 결과를 보고한다. 자동 정리가 안전하지 않은 실패는 `NEEDS_ATTENTION`이다.
 
-현재 구현은 Linux QEMU Cloud-Init template의 full clone만 허용한다. 요청 schema에는 평문 비밀번호와 임의 Cloud-Init script 필드가 없으며 알 수 없는 필드는 거부한다. VM 이름, Linux 사용자명, SSH 공개키, static IPv4는 형식 검증 후 저장된다. clone을 시도한 뒤의 실패는 생성 VM을 자동 삭제하지 않고 `MANUAL_REVIEW`로 전환한다. clone 전 실패는 예약 IP를 `QUARANTINED`로 전환하며 rollback 자체가 실패하면 역시 `MANUAL_REVIEW`가 된다.
+현재 구현은 Linux QEMU Cloud-Init 또는 Windows QEMU Cloudbase-Init template의 full clone을 허용한다. 선택한 템플릿의 `os_type`을 요청 snapshot에 고정하며 worker 실행 전에 변경 여부를 다시 검사한다. Linux는 SSH 공개키를 필수로 사용한다. Windows는 서버가 강력한 초기 관리자 비밀번호를 생성하여 최초 생성 응답에서 한 번만 반환하고, worker가 사용할 때까지 전용 키 파생 영역으로 암호화해 저장한다. Cloudbase-Init 적용 성공 또는 terminal 실패 시 암호문도 제거한다. 비밀번호는 요청 snapshot, 감사 로그, 작업 인자에 포함하지 않는다. clone을 시도한 뒤의 실패는 생성 VM을 자동 삭제하지 않고 `MANUAL_REVIEW`로 전환한다. clone 전 실패는 예약 IP를 `QUARANTINED`로 전환하며 rollback 자체가 실패하면 역시 `MANUAL_REVIEW`가 된다.
 
 ## 11. IPAM API
 

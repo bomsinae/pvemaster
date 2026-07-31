@@ -37,7 +37,7 @@ PVE Master는 여러 Proxmox VE(PVE) 클러스터의 인벤토리와 VM 수명�
 - 초기에는 PVE API 토큰 인증만 지원한다. 토큰에는 필요한 최소 권한만 부여하고 가능하면 권한 분리를 활성화한다.
 - 클러스터 등록 시 TLS 인증서 검증이 기본이며, 사설 CA 번들을 등록할 수 있다. `verify_tls=false`는 운영에서 허용하지 않는다.
 - PVE 클러스터 API 엔드포인트는 관리자가 입력한 허용 스킴 `https`와 포트에 한정하고, 저장 전 DNS/IP 및 SSRF 정책을 검증한다.
-- VM과 CT는 공통 `workloads` 모델로 조회하되 `kind=QEMU|LXC`로 구분한다. 자동 프로비저닝 1차 범위는 Cloud-Init을 지원하는 QEMU VM이다.
+- VM과 CT는 공통 `workloads` 모델로 조회하되 `kind=QEMU|LXC`로 구분한다. 자동 프로비저닝은 Linux Cloud-Init 또는 Windows Cloudbase-Init을 준비한 QEMU 템플릿을 지원한다.
 - 한 워크로드는 동시에 최대 한 고객에게 할당된다. 할당 이력은 별도 테이블로 보존한다.
 - 고객에게 허용되는 전원 작업은 `start`, `shutdown`, `stop`, `reboot`다. `stop`은 데이터 손상 위험 경고와 별도 정책/재확인을 적용한다. 고객은 현재 조직에 할당된 실행 중 VM의 콘솔만 열 수 있으며, 생성, 삭제, 마이그레이션, 스냅샷, 설정 변경은 관리자 전용이다.
 - 관리자 화면에서 LXC는 `start`, `shutdown`, `stop`, `reboot` 전원 작업과 xterm.js 터미널 콘솔을 지원한다. QEMU 전용 `reset`과 noVNC 화면 콘솔은 LXC에 노출하지 않는다.
@@ -49,7 +49,7 @@ PVE Master는 여러 Proxmox VE(PVE) 클러스터의 인벤토리와 VM 수명�
 - PostgreSQL이 업무 데이터의 기준이고 Redis는 브로커/결과 캐시/단기 락에만 쓴다. Redis 데이터 유실이 업무 데이터 유실로 이어지지 않아야 한다.
 - IP 풀은 IPv4와 IPv6 CIDR을 지원하되, 한 할당은 한 주소다. 정적 예약, 게이트웨이, DNS, VLAN/브리지 메타데이터를 지원한다. 주소 선택과 예약은 PostgreSQL 트랜잭션 잠금으로 직렬화한다.
 - IP는 VM 생성 전에 `RESERVED`, 성공 및 검증 후 `ASSIGNED`, 실패/삭제 후 명시적 정리 과정을 거쳐 `AVAILABLE`로 돌아간다. 즉시 재사용하지 않고 기본 격리 시간 10분을 둔다.
-- Cloud-Init 사용자 데이터의 비밀번호 평문은 저장하지 않는다. SSH 공개키 사용을 기본으로 하고, 일회성 비밀번호가 필요하면 생성 응답에서 한 번만 전달하거나 별도 비밀 저장소를 사용한다.
+- Cloud-Init 사용자 데이터의 비밀번호 평문은 저장하지 않는다. Linux는 SSH 공개키를 기본으로 하고, Windows 초기 비밀번호는 생성 응답에서 한 번만 전달하며 worker 적용 전까지 암호화해 저장한 뒤 즉시 제거한다.
 - 템플릿은 PVE에 이미 존재하는 QEMU 템플릿을 등록·동기화한다. 이미지 빌드 자체는 초기 범위 밖이다.
 - 감사 로그의 기본 온라인 보존 기간은 1년이며 삭제/변조 방지형 외부 보관 연동을 운영 권고사항으로 둔다.
 - 시간은 DB/API에서 UTC를 사용하고 UI에서 사용자 시간대로 변환한다.
@@ -268,7 +268,7 @@ PVE Master는 여러 Proxmox VE(PVE) 클러스터의 인벤토리와 VM 수명�
 목표:
 
 - PVE QEMU 템플릿을 등록/동기화한다.
-- 템플릿 복제, 하드웨어 설정, Cloud-Init 적용, 시작을 상태 머신으로 실행한다.
+- 템플릿 복제, 하드웨어 설정, Linux Cloud-Init 또는 Windows Cloudbase-Init 적용, 시작을 상태 머신으로 실행한다.
 - 실패 시 재시도 가능 여부와 정리 필요 상태를 명확히 표시한다.
 
 주요 모델/API:

@@ -2,7 +2,8 @@ import pytest
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-from app.schemas.provisioning import ProvisioningRequestCreate
+from app.models.provisioning import TemplateOsType
+from app.schemas.provisioning import CloudInitRequest, ProvisioningRequestCreate, TemplateCreate
 
 
 def test_provisioning_routes_are_registered(app: FastAPI) -> None:
@@ -43,3 +44,25 @@ def test_provisioning_schema_rejects_password_and_unvalidated_inputs() -> None:
     base["target_name"] = "unsafe name;shutdown"
     with pytest.raises(ValidationError):
         ProvisioningRequestCreate.model_validate(base)
+
+
+def test_windows_template_and_cloudbase_init_identity_are_accepted() -> None:
+    template = TemplateCreate.model_validate(
+        {
+            "name": "windows-server-2025",
+            "source_workload_id": "22222222-2222-2222-2222-222222222222",
+            "source_disk": "scsi0",
+            "default_storage": "local-lvm",
+            "default_bridge": "vmbr0",
+            "os_type": "WINDOWS",
+        }
+    )
+    identity = CloudInitRequest.model_validate(
+        {
+            "username": "Administrator",
+        }
+    )
+
+    assert template.os_type == TemplateOsType.WINDOWS
+    assert identity.username == "Administrator"
+    assert identity.ssh_public_keys == []

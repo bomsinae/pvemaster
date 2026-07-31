@@ -380,6 +380,7 @@ export type Template = {
   default_vlan_tag: number | null;
   cloud_init_enabled: boolean;
   linux_only: boolean;
+  os_type: "LINUX" | "WINDOWS";
   is_enabled: boolean;
 };
 
@@ -388,10 +389,12 @@ export type ProvisionRequest = {
   job_id: string;
   status: string;
   current_step: string;
+  os_type: "LINUX" | "WINDOWS";
   target_name: string;
   target_vmid: number | null;
   ip_address: string | null;
   error_code: string | null;
+  initial_password: string | null;
   requested_at: string;
   steps: Array<{ name: string; status: string; attempt_count: number }>;
 };
